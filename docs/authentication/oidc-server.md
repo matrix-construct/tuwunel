@@ -193,8 +193,22 @@ behavior, so an existing deployment is unaffected until you opt in.
 | `refresh_token_ttl` | `0` | Refresh-token lifetime in seconds. `0` disables refresh-token expiry entirely. A typical enabled value is `259200` (three days). |
 | `refresh_token_idle_only` | `true` | When `true`, each successful refresh slides the deadline forward, so a session in continuous use never expires. When `false`, the deadline is fixed at first issuance and the user must re-authenticate after `refresh_token_ttl` regardless of activity. |
 | `refresh_token_hard_logout` | `false` | When `false`, an expired refresh token is rejected with `soft_logout: true`, letting the client keep its E2EE keys and resume the same device after re-auth. When `true`, expiry deletes the device entirely and signals `soft_logout: false`, so the next session is a fresh device. |
-| `refresh_token_reuse_grace` | `15` | Grace window in seconds for a benign double-submit. If a just-rotated refresh token is replayed within this window while its successor is still current, Tuwunel treats it as a client that lost the rotated response and reissues, rather than revoking. Set to `0` to treat every replay strictly. |
+| `refresh_token_reuse_grace` | `15` | Time in seconds during which a client can retry a refresh after losing the response. Set to `0` to disable this grace window. See the retry behavior below. |
 | `refresh_token_reuse_revoke` | `true` | When `true`, a refresh token replayed outside the grace window removes the device. When `false`, the replay is rejected but the device is left intact, which an operator fronting another OAuth client may prefer. |
+
+When a client retries with a refresh token that has already been used, Tuwunel
+can issue a fresh access token and keep the replacement refresh token. This
+requires the retry to arrive within `refresh_token_reuse_grace` and the
+replacement token to still be current and unexpired.
+
+If the replacement token has expired, a retry within the grace window triggers
+the logout behavior selected by `refresh_token_hard_logout`. If Tuwunel can no
+longer look up the replacement token, it rejects the retry without changing
+anything.
+
+Two requests can also try to refresh the same token at the same time. The
+request that loses that race can be rejected without revoking the device,
+even when `refresh_token_reuse_grace` is `0`.
 
 ### Native authentication
 
