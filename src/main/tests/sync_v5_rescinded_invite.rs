@@ -27,6 +27,12 @@ mod client;
 mod fixture;
 mod sliding_sync;
 
+#[path = "client/event.rs"]
+mod event;
+
+#[path = "client/put.rs"]
+mod put;
+
 #[path = "client/member_event.rs"]
 mod member_event;
 
@@ -54,6 +60,11 @@ struct Accounts<'a> {
 	invitee: &'a UserId,
 	inviter_client: Client<'a>,
 	invitee_client: Client<'a>,
+}
+
+struct History {
+	joined: bool,
+	unreadable: bool,
 }
 
 /// A federated invite rescission reaches sync as the invitee's own leave.
@@ -104,6 +115,18 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.rescission_stands_alone(invited, "rescind-invited")
 		.await?;
 
+	accounts
+		.left_history(History { joined: true, unreadable: false })
+		.await?;
+
+	accounts
+		.left_history(History { joined: false, unreadable: false })
+		.await?;
+
+	accounts
+		.left_history(History { joined: true, unreadable: true })
+		.await?;
+
 	accounts.recorded_ban_stays_a_ban().await?;
 	accounts
 		.missing_snapshot_keeps_the_timeline()
@@ -114,6 +137,94 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	accounts.other_sender_is_ignored(&bystander).await
+}
+
+#[implement(Accounts, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn left_history(&self, History { joined, unreadable }: History) -> Result {
+	let &Self { services, inviter, invitee, .. } = self;
+	let owner = &self.inviter_client;
+	let client = &self.invitee_client;
+	let room_id = self.public_room().await?;
+
+	owner.act_on(&room_id, "invite", invitee).await?;
+	if joined {
+		client.act(&room_id, "join").await?;
+	}
+
+	let before = self.position().await?;
+
+	client.act(&room_id, "leave").await?;
+	let leave = self.member_event_id(&room_id, invitee).await?;
+	let past = self.position().await?;
+	let message = owner
+		.send_text(&room_id, "later", "after departure")
+		.await?;
+
+	let name = json!({ "name": "after departure" });
+	let path = format!("rooms/{room_id}/state/m.room.name");
+	let name = owner.put_event(&path, &name).await?;
+
+	self.abandon_with_invite(&room_id).await?;
+	self.push_kick(&room_id, inviter).await?;
+	if unreadable {
+		let pdu: Value = services.timeline.get(&leave).await?;
+		let bytes = serde_json::to_vec(&unreadable_reason(pdu))?;
+		let pdu_id = services.timeline.get_pdu_id(&leave).await?;
+
+		services.db["pduid_pdu"].insert(pdu_id.as_ref(), bytes);
+	}
+
+	let bounded = joined && !unreadable;
+
+	for position in [&before, &past] {
+		let reply = client.sync_v3(Some(position)).await?;
+		let room = &reply["rooms"]["leave"][room_id.as_str()];
+		let timeline = &room["timeline"]["events"];
+
+		assert!(room.is_object(), "left room missing: {reply}");
+		assert_eq!(has_event(timeline, &message), !bounded, "history bound: {reply}");
+		if bounded && position == &before {
+			assert_eq!(timeline.as_array().unwrap().last().unwrap()["event_id"], leave.as_str());
+		}
+
+		if bounded && position == &past {
+			let member = own_member(&room["state"]["events"], invitee);
+
+			assert_eq!(member["content"]["membership"], "leave", "late notification: {reply}");
+		}
+
+		let query = format!("{position}&org.matrix.msc4222.use_state_after=true");
+		let after = client.sync_v3(Some(&query)).await?;
+		let state = &after["rooms"]["leave"][room_id.as_str()]["org.matrix.msc4222.state_after"]
+			["events"];
+
+		assert_eq!(has_event(state, &name), !bounded, "state bound: {after}");
+
+		let resumed = client
+			.sync_v3(Some(field(&reply, "next_batch")?))
+			.await?;
+
+		let rooms = &resumed["rooms"]["leave"];
+
+		assert!(rooms.get(room_id.as_str()).is_none(), "repeated notification: {resumed}");
+	}
+
+	Ok(())
+}
+
+fn unreadable_reason(mut pdu: Value) -> Value {
+	pdu["content"]["reason"] = json!(false);
+
+	pdu
+}
+
+fn has_event(events: &Value, event_id: &OwnedEventId) -> bool {
+	events
+		.as_array()
+		.into_iter()
+		.flatten()
+		.any(|event| event["event_id"] == event_id.as_str())
 }
 
 /// Store an out-of-band invite the way a federated invite leaves it.

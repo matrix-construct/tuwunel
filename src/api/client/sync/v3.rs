@@ -863,12 +863,22 @@ async fn handle_left_room(
 		}));
 	}
 
+	let horizon = services
+		.state_accessor
+		.departure_count(sender_user, room_id)
+		.await
+		.inspect_err(|error| warn!(%room_id, %sender_user, %error, "Unreadable departure count"))
+		.ok()
+		.flatten()
+		.map(PduCount::into_unsigned)
+		.unwrap_or(left_count);
+
 	load_left_room(
 		services,
 		sender_user,
 		room_id,
 		since,
-		left_count,
+		horizon,
 		full_state,
 		state_after,
 		filter,
@@ -913,7 +923,7 @@ async fn load_left_room(
 	sender_user: &UserId,
 	room_id: &RoomId,
 	since: u64,
-	left_count: u64,
+	horizon: u64,
 	full_state: bool,
 	state_after: StateAfter,
 	filter: &FilterDefinition,
@@ -933,16 +943,21 @@ async fn load_left_room(
 		sender_user,
 		room_id,
 		PduCount::Normal(since),
-		Some(PduCount::Normal(left_count)),
+		Some(PduCount::Normal(horizon)),
 		timeline_limit.max(1),
 	)
 	.await
 	.unwrap_or_default();
 
-	let since_shortstatehash = services
-		.timeline
-		.next_shortstatehash(room_id, PduCount::Normal(since))
-		.ok();
+	let since_shortstatehash = since
+		.lt(&horizon)
+		.then_async(|| {
+			services
+				.timeline
+				.next_shortstatehash(room_id, PduCount::Normal(since))
+				.ok()
+		})
+		.map(Option::flatten);
 
 	let horizon_shortstatehash = timeline_pdus
 		.first()
@@ -959,13 +974,13 @@ async fn load_left_room(
 	let after_shortstatehash = state_after.requested().then_async(|| {
 		services
 			.timeline
-			.shortstatehash_after(room_id, PduCount::Normal(left_count))
+			.shortstatehash_after(room_id, PduCount::Normal(horizon))
 			.inspect_err(inspect_debug_log)
 	});
 
 	let left_shortstatehash = services
 		.timeline
-		.get_shortstatehash(room_id, PduCount::Normal(left_count))
+		.get_shortstatehash(room_id, PduCount::Normal(horizon))
 		.inspect_err(inspect_debug_log)
 		.or_else(|_| services.state.get_room_shortstatehash(room_id))
 		.map_err(|_| err!(Database(error!("Room {room_id} has no state"))));
@@ -999,6 +1014,10 @@ async fn load_left_room(
 		*event.kind() == RoomMember && event.state_key() == Some(sender_user.as_str())
 	};
 
+	let departure = late_departure(services, sender_user, room_id, since, horizon).await;
+
+	let has_departure = departure.is_some();
+
 	let timeline_sender_member = timeline_limit
 		.eq(&0)
 		.then(|| timeline_pdus.last().map(ref_at!(1)).cloned())
@@ -1016,8 +1035,10 @@ async fn load_left_room(
 
 	let state_events = state_events
 		.into_iter()
+		.filter(|pdu| !has_departure || !is_sender_membership(pdu))
+		.chain(departure)
 		.filter(|pdu| filter.room.state.matches(pdu))
-		.filter(|pdu| timeline_limit > 0 || !is_sender_membership(pdu))
+		.filter(|pdu| timeline_limit > 0 || has_departure || !is_sender_membership(pdu))
 		.chain(timeline_sender_member)
 		.stream()
 		.wide_then(|pdu| with_membership(services, pdu, sender_user, encrypted))
@@ -1027,10 +1048,10 @@ async fn load_left_room(
 
 	let left_prev_batch = timeline_limit
 		.eq(&0)
-		.then_some(left_count)
+		.then_some(horizon)
 		.map(PduCount::Normal);
 
-	let prev_batch = timeline_prev_batch(&timeline_pdus, PduCount::Normal(left_count))
+	let prev_batch = timeline_prev_batch(&timeline_pdus, PduCount::Normal(horizon))
 		.filter(|_| timeline_limit > 0)
 		.or(left_prev_batch)
 		.as_ref()
@@ -1077,6 +1098,33 @@ async fn load_left_room(
 				.collect(),
 		},
 	}))
+}
+
+async fn late_departure(
+	services: &Services,
+	sender_user: &UserId,
+	room_id: &RoomId,
+	since: u64,
+	horizon: u64,
+) -> Option<PduEvent> {
+	since
+		.ge(&horizon)
+		.then_async(|| {
+			services
+				.timeline
+				.get_pdu_at(room_id, PduCount::Normal(horizon))
+				.inspect_err(inspect_debug_log)
+				.ok()
+		})
+		.map(|event| {
+			event.flatten().filter(|event| {
+				matches!(
+					event.membership_for(sender_user),
+					Some(MembershipState::Leave | MembershipState::Ban)
+				)
+			})
+		})
+		.await
 }
 
 /// Records a failed horizon read, quietly when the row is simply absent.
