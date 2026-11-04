@@ -208,7 +208,7 @@ async fn send_state_event_for_key_helper(
 	allowed_to_send_state_event(services, sender, room_id, event_type, state_key, json).await?;
 
 	if *event_type == StateEventType::RoomMember {
-		check_member_content_size(services, json)?;
+		check_member_content_size(services, sender, room_id, state_key, json).await?;
 	}
 
 	let state_lock = services.state.mutex.lock(room_id).await;
@@ -257,24 +257,64 @@ async fn send_state_event_for_key_helper(
 	Ok(event_id)
 }
 
-/// Refuses a client's member event whose content exceeds the configured budget
-/// or carries a display name longer than the profile limit.
+/// Refuses a client's member event that is over the configured budget, or that
+/// newly stores a display name or avatar URL past its limit.
 ///
-/// Server-built member events are typed and bounded by the profile service, so
-/// only client-supplied content is checked here.
-fn check_member_content_size(services: &Services, json: &Raw<AnyStateEventContent>) -> Result {
+/// A stored name or avatar the write leaves unchanged is not bounded again, as long
+/// as the whole content fits the byte cap. A missing or unreadable stored event
+/// checks every value, as a first write does.
+#[tracing::instrument(level = "debug", skip_all)]
+pub(crate) async fn check_member_content_size(
+	services: &Services,
+	sender: &UserId,
+	room_id: &RoomId,
+	state_key: &str,
+	json: &Raw<AnyStateEventContent>,
+) -> Result {
 	let content = json.deserialize_as_unchecked::<CanonicalJsonObject>()?;
+	let max_bytes = services.config.profile.member_event_max_bytes;
+	let length = serialized_len(&content)?;
 
-	// A non-string displayname is not bounded here; the typed content rejects it.
-	let displayname = content
-		.get("displayname")
-		.and_then(CanonicalJsonValue::as_str);
+	// A non-string value is not bounded here; the typed content rejects it.
+	let string_field = |field: &str| {
+		content
+			.get(field)
+			.and_then(CanonicalJsonValue::as_str)
+	};
 
-	check_member_content(
-		services.config.profile.member_event_max_bytes,
-		serialized_len(&content)?,
-		displayname,
-	)
+	let check = |displayname, avatar_url| {
+		check_member_content(max_bytes, length, displayname, avatar_url)
+	};
+
+	if check(string_field("displayname"), string_field("avatar_url")).is_ok() {
+		return Ok(());
+	}
+
+	let stored = services
+		.state_accessor
+		.room_state_get_content::<CanonicalJsonObject>(
+			room_id,
+			&StateEventType::RoomMember,
+			state_key,
+		)
+		.map(Result::ok)
+		.await;
+
+	// The owner re-sending its own stored content stores nothing new.
+	if sender.as_str() == state_key && stored.as_ref() == Some(&content) {
+		return Ok(());
+	}
+
+	let is_new = |field: &str| {
+		stored
+			.as_ref()
+			.and_then(|stored| stored.get(field))
+			.ne(&content.get(field))
+	};
+
+	let changed = |field: &str| string_field(field).filter(|_| is_new(field));
+
+	check(changed("displayname"), changed("avatar_url"))
 }
 
 fn state_dedup_eligible(

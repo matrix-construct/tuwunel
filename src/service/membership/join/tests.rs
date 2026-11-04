@@ -175,6 +175,57 @@ fn without_extras_nothing_is_measured() -> Result {
 	Ok(())
 }
 
+#[test]
+fn a_client_avatar_past_its_budget_is_refused_without_a_profile_avatar() -> Result {
+	let over = avatar_of_len(1001);
+	let extra = extras(json!({ "avatar_url": over }));
+	let error = merge(member(Some("name"), None), Some(&extra)).unwrap_err();
+
+	assert!(bad_json(&error));
+
+	let fitting = avatar_of_len(1000);
+	let extra = extras(json!({ "avatar_url": fitting }));
+
+	merge(member(Some("name"), None), Some(&extra))?;
+
+	Ok(())
+}
+
+#[test]
+fn a_stored_avatar_wins_over_the_clients_avatar() -> Result {
+	let stored = oversized_avatar();
+	let extra = extras(json!({ "avatar_url": avatar_of_len(2016) }));
+
+	let merged = merge(member(Some("name"), Some(&stored)), Some(&extra))?;
+
+	assert_eq!(field(&merged, "avatar_url"), Some(stored.as_str()));
+
+	Ok(())
+}
+
+#[test]
+fn reserved_join_keys_are_dropped_from_the_extras() -> Result {
+	let extra = extras(json!({
+		"reason": "client reason",
+		"third_party_signed": { "sender": "@user:localhost" },
+		"join_authorised_via_users_server": "@user:localhost",
+		"com.example.key": "value",
+	}));
+
+	let merged = merge(member(Some("name"), None), Some(&extra))?;
+
+	assert!(matches!(
+		&merged,
+		CanonicalJsonValue::Object(object)
+			if !object.contains_key("reason")
+				&& !object.contains_key("third_party_signed")
+				&& !object.contains_key("join_authorised_via_users_server")
+				&& object.contains_key("com.example.key")
+	));
+
+	Ok(())
+}
+
 async fn ingest(services: &Services, room_id: &RoomId, events: &[Value]) -> Result {
 	let version = RoomVersionId::V11;
 	let auth_chain = events
@@ -208,8 +259,6 @@ fn put_accepted(services: &Services, event_id: &EventId, event: &Value) -> Resul
 	Ok(())
 }
 
-fn oversized_avatar() -> String { format!("mxc://localhost/{}", "a".repeat(1500)) }
-
 fn extras(value: Value) -> CanonicalJsonObject { from_value(value).expect("a canonical object") }
 
 fn refused(extra: &CanonicalJsonObject) -> bool {
@@ -242,3 +291,11 @@ fn field<'a>(merged: &'a CanonicalJsonValue, key: &str) -> Option<&'a str> {
 fn bad_json(error: &Error) -> bool { matches!(error.kind(), ErrorKind::BadJson) }
 
 fn oversized_name() -> String { "n".repeat(300) }
+
+fn oversized_avatar() -> String { avatar_of_len(1516) }
+
+fn avatar_of_len(len: usize) -> String {
+	const PREFIX: &str = "mxc://localhost/";
+
+	format!("{PREFIX}{}", "a".repeat(len.saturating_sub(PREFIX.len())))
+}

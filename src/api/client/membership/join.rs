@@ -7,7 +7,7 @@ use ruma::{
 	},
 };
 use tuwunel_core::{Error, Result, warn};
-use tuwunel_service::membership::Join;
+use tuwunel_service::membership::{Join, is_reserved_join_key};
 
 use super::banned_room_check;
 use crate::{ClientIp, Ruma};
@@ -139,9 +139,6 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 // A refused body fails the same way on every attempt, so the join is not retried.
 fn is_refused_body(e: &Error) -> bool { matches!(e.kind(), ErrorKind::BadJson) }
 
-const RESERVED_JOIN_KEYS: [&str; 3] =
-	["reason", "third_party_signed", "join_authorised_via_users_server"];
-
 // Drop recognized and server-owned keys the client must not set.
 fn extra_member_content(json_body: Option<&CanonicalJsonValue>) -> Option<CanonicalJsonObject> {
 	let CanonicalJsonValue::Object(object) = json_body? else {
@@ -150,7 +147,7 @@ fn extra_member_content(json_body: Option<&CanonicalJsonValue>) -> Option<Canoni
 
 	let extra: CanonicalJsonObject = object
 		.iter()
-		.filter(|(key, _)| !RESERVED_JOIN_KEYS.contains(&key.as_str()))
+		.filter(|(key, _)| !is_reserved_join_key(key))
 		.map(|(key, value)| (key.clone(), value.clone()))
 		.collect();
 

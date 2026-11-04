@@ -1076,7 +1076,11 @@ fn check_initial_member_content(services: &Services, initial_events: &[InitialEv
 				.get("displayname")
 				.and_then(CanonicalJsonValue::as_str);
 
-			check_member_content(max_bytes, serialized_len(&content)?, displayname)
+			let avatar_url = content
+				.get("avatar_url")
+				.and_then(CanonicalJsonValue::as_str);
+
+			check_member_content(max_bytes, serialized_len(&content)?, displayname, avatar_url)
 		})
 }
 

@@ -507,9 +507,9 @@ fn member_content_cap_counts_bytes() {
 	let at_cap = "é".repeat(2048);
 	let over_cap = format!("{at_cap}a");
 
-	check_member_content(4096, at_cap.len(), None).expect("at cap");
+	check_member_content(4096, at_cap.len(), None, None).expect("at cap");
 
-	let error = check_member_content(4096, over_cap.len(), None).expect_err("over cap");
+	let error = check_member_content(4096, over_cap.len(), None, None).expect_err("over cap");
 
 	assert!(bad_json(&error));
 }
@@ -519,9 +519,21 @@ fn member_displayname_cap_counts_characters() {
 	let longest = "é".repeat(MAX_DISPLAYNAME_LENGTH);
 	let too_long = "é".repeat(MAX_DISPLAYNAME_LENGTH + 1);
 
-	check_member_content(usize::MAX, 0, Some(&longest)).expect("longest name");
+	check_member_content(usize::MAX, 0, Some(&longest), None).expect("longest name");
 
-	let error = check_member_content(usize::MAX, 0, Some(&too_long)).expect_err("too long");
+	let error = check_member_content(usize::MAX, 0, Some(&too_long), None).expect_err("too long");
+
+	assert!(bad_json(&error));
+}
+
+#[test]
+fn member_avatar_cap_counts_bytes() {
+	let longest = format!("mxc://localhost/{}", "a".repeat(MAX_AVATAR_URL_LENGTH - 16));
+	let too_long = format!("{longest}a");
+
+	check_member_content(usize::MAX, 0, None, Some(&longest)).expect("longest avatar");
+
+	let error = check_member_content(usize::MAX, 0, None, Some(&too_long)).expect_err("too long");
 
 	assert!(bad_json(&error));
 }

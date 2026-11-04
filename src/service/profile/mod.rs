@@ -980,16 +980,25 @@ pub fn check_member_displayname(displayname: Option<&str>) -> Result {
 
 /// Bounds a client-supplied `m.room.member` content from any route that accepts one.
 ///
-/// `json_len` is the canonical length and `displayname` the name when it is a
-/// string. The content is refused over `max_bytes`, and the display name over
-/// `MAX_DISPLAYNAME_LENGTH` characters, with `M_BAD_JSON`.
+/// `json_len` is the canonical length. `displayname` and `avatar_url` are passed
+/// only when the write stores them, so a value the room already holds is not
+/// bounded again. The content is refused over `max_bytes`, the display name over
+/// `MAX_DISPLAYNAME_LENGTH` characters, and the avatar URL over
+/// `MAX_AVATAR_URL_LENGTH` bytes, all with `M_BAD_JSON`.
 pub fn check_member_content(
 	max_bytes: usize,
 	json_len: usize,
 	displayname: Option<&str>,
+	avatar_url: Option<&str>,
 ) -> Result {
 	check_member_size(max_bytes, json_len)?;
-	check_member_displayname(displayname)
+	check_member_displayname(displayname)?;
+	check_member_avatar_url(avatar_url)
+}
+
+/// Bounds a member event's avatar URL, in bytes.
+pub fn check_member_avatar_url(avatar_url: Option<&str>) -> Result {
+	avatar_url.map_or(Ok(()), check_avatar_url_length)
 }
 
 /// Validate a profile field name against the Common Namespaced Identifier
@@ -1187,5 +1196,9 @@ fn check_avatar_url(value: &Value) -> Result {
 		return Err!(Request(BadJson("Avatar URL must be a string.")));
 	};
 
+	check_avatar_url_length(url)
+}
+
+fn check_avatar_url_length(url: &str) -> Result {
 	check_field_length(url.len(), MAX_AVATAR_URL_LENGTH, "Avatar URL", "bytes")
 }

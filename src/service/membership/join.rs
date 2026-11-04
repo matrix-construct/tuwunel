@@ -1,6 +1,6 @@
 use std::{
 	borrow::Borrow,
-	collections::{BTreeSet, HashMap, HashSet},
+	collections::{BTreeMap, BTreeSet, HashMap, HashSet},
 	iter::once,
 	mem::take,
 	sync::Arc,
@@ -50,6 +50,17 @@ use crate::{
 		state_compressor::{CompressedState, HashSetCompressStateEvent},
 	},
 };
+
+/// Keys a client may not set on `/join`, because the server owns them.
+///
+/// The `/join` route and `merge_member_content` both drop them, so the merged
+/// member event never carries one from a client.
+const RESERVED_JOIN_KEYS: [&str; 3] =
+	["reason", "third_party_signed", "join_authorised_via_users_server"];
+
+/// Whether a client's `/join` key is one the server owns.
+#[must_use]
+pub fn is_reserved_join_key(key: &str) -> bool { RESERVED_JOIN_KEYS.contains(&key) }
 
 #[derive(Debug)]
 pub struct Join<'a> {
@@ -991,37 +1002,52 @@ async fn create_join_event(
 	Ok((event, event_id, join_authorized_via_users_server))
 }
 
-// Server-computed membership fields win; client custom keys only fill the gaps.
+// The server's fields win the merge, and client keys only fill the gaps.
 fn merge_member_content(
 	max_bytes: usize,
 	content: RoomMemberEventContent,
 	extra_content: Option<&CanonicalJsonObject>,
 ) -> Result<CanonicalJsonValue> {
-	// The server's own name wins the merge, so only a name the client supplied is bounded.
-	let client_name = content.displayname.is_none();
-	let mut content = to_canonical_value(content)?;
+	// The server's name and avatar win the merge, so only client values are bounded.
+	let bound_name = content.displayname.is_none();
+	let bound_avatar = content.avatar_url.is_none();
+	let server = to_canonical_value(content)?;
 
 	let Some(extra_content) = extra_content else {
-		return Ok(content);
+		return Ok(server);
 	};
 
-	// Only client keys are measured; stored profile fields may predate the limits.
-	let displayname = extra_content
+	let CanonicalJsonValue::Object(server) = server else {
+		return Ok(server);
+	};
+
+	// Server-owned keys are dropped here too, so no caller can set them.
+	let extra: BTreeMap<&str, &CanonicalJsonValue> = extra_content
+		.iter()
+		.filter(|(key, _)| !is_reserved_join_key(key))
+		.map(|(key, value)| (key.as_str(), value))
+		.collect();
+
+	let displayname = extra
 		.get("displayname")
-		.and_then(CanonicalJsonValue::as_str)
-		.filter(|_| client_name);
+		.and_then(|value| value.as_str())
+		.filter(|_| bound_name);
 
-	check_member_content(max_bytes, serialized_len(extra_content)?, displayname)?;
+	let avatar_url = extra
+		.get("avatar_url")
+		.and_then(|value| value.as_str())
+		.filter(|_| bound_avatar);
 
-	if let CanonicalJsonValue::Object(merged) = &mut content {
-		for (key, value) in extra_content {
-			merged
-				.entry(key.clone())
-				.or_insert_with(|| value.clone());
-		}
-	}
+	check_member_content(max_bytes, serialized_len(&extra)?, displayname, avatar_url)?;
 
-	Ok(content)
+	// Only the vacant keys are cloned; the server's fields move in as they are.
+	let vacant: CanonicalJsonObject = extra
+		.iter()
+		.filter(|(key, _)| !server.contains_key(**key))
+		.map(|(key, value)| ((*key).into(), (*value).clone()))
+		.collect();
+
+	Ok(CanonicalJsonValue::Object(vacant.into_iter().chain(server).collect()))
 }
 
 #[implement(Service)]
