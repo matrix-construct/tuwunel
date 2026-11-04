@@ -1305,10 +1305,16 @@ pub async fn get_device_keys<'a>(
 		.deserialized()
 }
 
+/// Reads the cross-signing key stored at one row of the key table.
+///
+/// `row_key` is the serialized user ID and public key naming the row, the form
+/// the user's pointer rows store, never a key ID. The sender sees every
+/// signature on their own key; anyone else sees only the owner's and those
+/// `allowed_signatures` accepts.
 #[implement(super::Service)]
 pub async fn get_key<F>(
 	&self,
-	key_id: &[u8],
+	row_key: &[u8],
 	sender_user: Option<&UserId>,
 	user_id: &UserId,
 	allowed_signatures: &F,
@@ -1319,7 +1325,7 @@ where
 	let key: serde_json::Value = self
 		.db
 		.keyid_key
-		.get(key_id)
+		.get(row_key)
 		.await
 		.deserialized()?;
 
@@ -1329,6 +1335,9 @@ where
 	Ok(Raw::from_json(raw_value))
 }
 
+/// Reads a user's master key through its pointer row.
+///
+/// An absent pointer errs as not found. Signatures narrow as in `get_key`.
 #[implement(super::Service)]
 pub async fn get_master_key<F>(
 	&self,
@@ -1339,12 +1348,15 @@ pub async fn get_master_key<F>(
 where
 	F: Fn(&UserId) -> bool + Send + Sync,
 {
-	let key_id = self.db.userid_masterkeyid.get(user_id).await?;
+	let row_key = self.db.userid_masterkeyid.get(user_id).await?;
 
-	self.get_key(&key_id, sender_user, user_id, allowed_signatures)
+	self.get_key(&row_key, sender_user, user_id, allowed_signatures)
 		.await
 }
 
+/// Reads a user's self-signing key through its pointer row.
+///
+/// An absent pointer errs as not found. Signatures narrow as in `get_key`.
 #[implement(super::Service)]
 pub async fn get_self_signing_key<F>(
 	&self,
@@ -1355,22 +1367,26 @@ pub async fn get_self_signing_key<F>(
 where
 	F: Fn(&UserId) -> bool + Send + Sync,
 {
-	let key_id = self
+	let row_key = self
 		.db
 		.userid_selfsigningkeyid
 		.get(user_id)
 		.await?;
 
-	self.get_key(&key_id, sender_user, user_id, allowed_signatures)
+	self.get_key(&row_key, sender_user, user_id, allowed_signatures)
 		.await
 }
 
+/// Reads a user's user-signing key through its pointer row.
+///
+/// An absent pointer errs as not found. The stored signatures come back whole,
+/// unlike the master and self-signing readers.
 #[implement(super::Service)]
 pub async fn get_user_signing_key(&self, user_id: &UserId) -> Result<Raw<CrossSigningKey>> {
 	self.db
 		.userid_usersigningkeyid
 		.get(user_id)
-		.and_then(|key_id| self.db.keyid_key.get(&*key_id))
+		.and_then(|row_key| self.db.keyid_key.get(&*row_key))
 		.await
 		.deserialized()
 }

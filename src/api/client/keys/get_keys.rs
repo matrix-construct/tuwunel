@@ -389,18 +389,13 @@ async fn merge_remote_master_key<F>(
 where
 	F: Fn(&UserId) -> bool + Send + Sync,
 {
-	let (master_key_id, mut master_key) = parse_master_key(user, &master_key_raw)?;
+	let (row_key, master_key) = parse_master_key(user, &master_key_raw)?;
 	let our_raw = services
 		.users
-		.get_key(&master_key_id, sender_user, user, allowed_signatures)
+		.get_key(&row_key, sender_user, user, allowed_signatures)
 		.await;
 
-	if let Ok(our_raw) = our_raw
-		&& let Ok((_, mut ours)) = parse_master_key(user, &our_raw)
-	{
-		master_key.signatures.append(&mut ours.signatures);
-	}
-
+	let master_key = merge_signatures(user, master_key, our_raw);
 	let raw = json::to_raw(&master_key)?;
 
 	services
@@ -411,6 +406,20 @@ where
 		.ok();
 
 	Ok(raw)
+}
+
+fn merge_signatures(
+	user: &UserId,
+	mut master_key: CrossSigningKey,
+	our_raw: Result<Raw<CrossSigningKey>>,
+) -> CrossSigningKey {
+	if let Ok(our_raw) = our_raw
+		&& let Ok((_, mut ours)) = parse_master_key(user, &our_raw)
+	{
+		master_key.signatures.append(&mut ours.signatures);
+	}
+
+	master_key
 }
 
 fn add_unsigned_device_display_name(
