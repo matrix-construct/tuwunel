@@ -216,7 +216,16 @@ async fn netburst_keeps_active_generations_and_arms_only_queued_federation() -> 
 
 #[tokio::test]
 async fn zero_keep_leaves_badges_queued_and_arms_queued_federation() -> Result {
-	let config = config(true, 0).merge(("sending.startup_netburst_keep", 0));
+	zero_keep(true).await
+}
+
+#[tokio::test]
+async fn netburst_off_zero_keep_drops_active_and_arms_queued_federation() -> Result {
+	zero_keep(false).await
+}
+
+async fn zero_keep(netburst: bool) -> Result {
+	let config = config(netburst, 0).merge(("sending.startup_netburst_keep", 0));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};
