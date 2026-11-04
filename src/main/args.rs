@@ -174,9 +174,18 @@ pub struct Args {
 		long,
 		hide(true),
 		env = "TOKIO_MAX_IO_EVENTS_PER_TICK",
-		default_value = "512"
+		default_value = "256"
 	)]
 	pub kernel_events_per_tick: usize,
+
+	/// Override the tokio max_io_events_per_busy_tick.
+	#[arg(
+		long,
+		hide(true),
+		env = "TOKIO_MAX_IO_EVENTS_PER_BUSY_TICK",
+		default_value = "64"
+	)]
+	pub kernel_events_per_busy_tick: usize,
 
 	/// Set the poll histogram bucket size, in microseconds (tokio_unstable).
 	///
@@ -492,11 +501,12 @@ pub fn update(mut config: Figment, args: &Args) -> Result<Figment> {
 mod tests {
 	use std::{
 		env::{current_exe, var_os},
-		ffi::OsString,
+		ffi::{OsStr, OsString},
 		iter::empty,
 		process::Command,
 	};
 
+	use clap::CommandFactory;
 	use tuwunel_core::utils::sys::command_without_env_prefixes;
 
 	use super::{Args, Config, Figment, Parser, RESTORE_KEY, Result, update};
@@ -859,6 +869,25 @@ mod tests {
 
 			Args::try_parse_from(["tuwunel".into(), long(option), "1".into()])
 				.expect("one histogram bucket accepted");
+		}
+	}
+
+	#[test]
+	fn io_batch_options_keep_their_contract() {
+		let command = Args::command();
+
+		for (id, env, default) in [
+			("kernel_events_per_tick", "TOKIO_MAX_IO_EVENTS_PER_TICK", "256"),
+			("kernel_events_per_busy_tick", "TOKIO_MAX_IO_EVENTS_PER_BUSY_TICK", "64"),
+		] {
+			let option = command
+				.get_arguments()
+				.find(|option| option.get_id().eq(id))
+				.expect("option declared");
+
+			assert!(option.is_hide_set(), "{id} is hidden from help");
+			assert_eq!(option.get_env().and_then(OsStr::to_str), Some(env));
+			assert_eq!(option.get_default_values(), [default]);
 		}
 	}
 }

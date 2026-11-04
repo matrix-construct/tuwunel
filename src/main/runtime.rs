@@ -2,6 +2,7 @@
 
 use std::{
 	cell::OnceCell,
+	io,
 	iter::once,
 	path::PathBuf,
 	sync::{
@@ -74,6 +75,20 @@ pub fn new(args: Option<&crate::Args>) -> Result<Self> {
 		..Default::default()
 	});
 
+	let runtime = build_tokio(args, max_blocking_threads, &state)?;
+
+	Ok(Self {
+		metrics: Metrics::new(runtime.handle().into()),
+		runtime: runtime.into(),
+		state,
+	})
+}
+
+fn build_tokio(
+	args: &crate::Args,
+	max_blocking_threads: usize,
+	state: &Arc<State>,
+) -> io::Result<Tokio> {
 	let mut builder = Builder::new_multi_thread();
 	builder
 		.enable_io()
@@ -83,7 +98,8 @@ pub fn new(args: Option<&crate::Args>) -> Result<Self> {
 		.thread_keep_alive(Duration::from_secs(BLOCKING_THREAD_KEEPALIVE))
 		.global_queue_interval(args.global_event_interval)
 		.event_interval(args.kernel_event_interval)
-		.max_io_events_per_tick(args.kernel_events_per_tick);
+		.max_io_events_per_tick(args.kernel_events_per_tick)
+		.max_io_events_per_busy_tick(args.kernel_events_per_busy_tick);
 
 	state.enable_hooks(&mut builder);
 
@@ -93,13 +109,7 @@ pub fn new(args: Option<&crate::Args>) -> Result<Self> {
 	#[cfg(tokio_unstable)]
 	enable_sched_histogram(&mut builder, args);
 
-	let runtime = builder.build()?;
-
-	Ok(Self {
-		metrics: Metrics::new(runtime.handle().into()),
-		runtime: runtime.into(),
-		state,
-	})
+	builder.build()
 }
 
 impl Drop for Runtime {
@@ -438,3 +448,23 @@ fn task_enter(&self, meta: &tokio::runtime::TaskMeta<'_>) {}
 )]
 #[expect(clippy::unused_self)]
 fn task_leave(&self, meta: &tokio::runtime::TaskMeta<'_>) {}
+
+#[cfg(test)]
+mod tests {
+	use clap::Parser;
+
+	use super::Runtime;
+	use crate::Args;
+
+	// The builder has no getter, so its refusal is the only proof the field arrived.
+	#[test]
+	#[should_panic(expected = "max_io_events_per_busy_tick must be non-zero")]
+	fn busy_tick_reaches_the_builder() {
+		let args = Args {
+			kernel_events_per_busy_tick: 0,
+			..Args::parse_from(["tuwunel"])
+		};
+
+		Runtime::new(Some(&args)).ok();
+	}
+}
