@@ -10,12 +10,15 @@ use ruma::{
 };
 use serde_json::json;
 use tuwunel_core::{
-	Err, Error, Result, async_noinline, at, debug_warn, implement, trace,
+	Err, Error, Result, async_noinline, at, debug_warn, implement,
+	smallstr::SmallString,
+	smallvec::SmallVec,
+	trace,
 	utils::{
 		BoolExt, MutexMapGuard, OptionExt, ReadyExt,
 		future::OptionFutureExt,
 		random_string,
-		stream::{IterStream, TryIgnore, automatic_width},
+		stream::{BroadbandExt, IterStream, TryIgnore, automatic_width},
 		string::to_small_string,
 		time::{
 			deadline_has_passed, duration_since_epoch, timepoint_from_epoch, timepoint_from_now,
@@ -29,6 +32,8 @@ use tuwunel_database::{Cbor, Deserialized, Ignore, Interfix, Json, Txn};
 use super::DeviceListChange;
 
 pub(super) type DeviceLock = MutexMapGuard<(OwnedUserId, OwnedDeviceId), ()>;
+type AccessToken = SmallString<[u8; TOKEN_LENGTH]>;
+type ExpiredTokens = SmallVec<[(SystemTime, AccessToken); 2]>;
 
 /// generated device ID length
 const DEVICE_ID_LENGTH: usize = 10;
@@ -247,8 +252,9 @@ pub fn all_device_ids<'a>(
 
 /// Find out which user a token belongs to, unless the token has expired.
 ///
-/// An expired token stays recorded so its client keeps reading a soft logout,
-/// so a route granting access needs this rather than the plain lookup.
+/// An expired token stays recorded until its device moves on from it, so its
+/// client keeps reading a soft logout and a route granting access needs this
+/// rather than the plain lookup.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, token))]
 pub async fn find_from_unexpired_token(
@@ -532,13 +538,50 @@ async fn issue_tokens(
 		.deserialized::<String>()
 		.ok();
 
+	let superseded = self
+		.superseded_access_tokens(user_id, device_id)
+		.await;
+
+	self.write_access_token(
+		user_id,
+		device_id,
+		(access_token, expires_at),
+		previous.as_deref(),
+		superseded,
+	);
+
+	Ok(())
+}
+
+/// Stores an access token in one write, with the index rows of the token it
+/// replaces and the removal of the superseded tokens.
+///
+/// The token being replaced stays whatever its expiry, since requests may still
+/// carry it.
+#[implement(super::Service)]
+fn write_access_token(
+	&self,
+	user_id: &UserId,
+	device_id: &DeviceId,
+	(access_token, expires_at): (&str, Option<u64>),
+	previous: Option<&str>,
+	superseded: impl Iterator<Item = AccessToken>,
+) {
+	let userdeviceid = (user_id, device_id);
 	let mut txn = self.services.db.txn();
 
-	if let Some(previous) = previous.as_deref() {
+	if let Some(previous) = previous {
 		let key = (user_id, device_id, previous);
 
 		txn.put_raw(&self.db.userdeviceidtoken_index, key, []);
 	}
+
+	superseded
+		.filter(|token| Some(token.as_str()) != previous)
+		.for_each(|token| {
+			txn.del_raw(&self.db.token_userdeviceid, &token);
+			txn.del(&self.db.userdeviceidtoken_index, (user_id, device_id, token.as_str()));
+		});
 
 	let key = (user_id, device_id, access_token);
 	let value = (user_id, device_id, expires_at);
@@ -548,8 +591,46 @@ async fn issue_tokens(
 	txn.put_raw(&self.db.userdeviceid_token, userdeviceid, access_token);
 
 	txn.execute();
+}
 
-	Ok(())
+/// Finds the expired access tokens of one device, except those with the latest
+/// expiry.
+///
+/// Issuing a token forgets these, which keeps the device's rows from growing.
+/// A later token having expired shows the client moved on, so forgetting the
+/// older one should not turn a request still in flight into a hard logout. A
+/// token with no expiry, or whose row cannot be read, is never included.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip(self))]
+async fn superseded_access_tokens(
+	&self,
+	user_id: &UserId,
+	device_id: &DeviceId,
+) -> impl Iterator<Item = AccessToken> {
+	let prefix = (user_id, device_id, Interfix);
+	let expired: ExpiredTokens = self
+		.db
+		.userdeviceidtoken_index
+		.keys_prefix(&prefix)
+		.ignore_err()
+		.map(|(_, _, token): (Ignore, Ignore, &str)| AccessToken::from(token))
+		.broad_filter_map(async |token| {
+			self.find_from_token(&token)
+				.await
+				.ok()
+				.and_then(at!(2))
+				.filter(|&expires_at| timepoint_has_passed(expires_at))
+				.map(|expires_at| (expires_at, token))
+		})
+		.collect()
+		.await;
+
+	let newest = expired.iter().map(at!(0)).max();
+
+	expired
+		.into_iter()
+		.filter(move |(expires_at, _)| Some(*expires_at) < newest)
+		.map(at!(1))
 }
 
 /// Revoke every access token of one device, without deleting the device. Take

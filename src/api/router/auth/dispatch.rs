@@ -237,7 +237,7 @@ fn unknown_token() -> Result<Auth> {
 	Err(Error::unknown_token(soft_logout, "Unknown access token."))
 }
 
-// The token stays recorded, so a retry or concurrent request reads as expired too.
+// Kept until a later device token expires, so a retry or concurrent request reads as expired.
 fn expired_token() -> Result<Auth> {
 	let soft_logout = true;
 

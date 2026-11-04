@@ -10,6 +10,7 @@ use tokio::time::{sleep, timeout};
 use tuwunel_core::{
 	Err, Result, err,
 	ruma::{DeviceId, OwnedUserId, UserId, api::error::ErrorKind, device_id},
+	utils::time::now_secs,
 };
 use tuwunel_service::{
 	Services,
@@ -65,7 +66,8 @@ async fn with_grace(services: &Services, _base: &str) -> Result {
 	grace_without_successor_is_refused(services).await?;
 	refused_gate_spends_nothing(services).await?;
 	contenders_wait_for_the_device_lock(services).await?;
-	metadata_updates_keep_removal(services).await
+	metadata_updates_keep_removal(services).await?;
+	issuing_forgets_older_expired_tokens(services).await
 }
 
 /// A refresh or login still in flight when its device is removed must not
@@ -342,6 +344,63 @@ async fn metadata_updates_keep_removal(services: &Services) -> Result {
 	}
 
 	Ok(())
+}
+
+/// Issuing a token forgets the device's expired tokens except those that
+/// expired last and the one it replaces, which its client may still be
+/// presenting.
+///
+/// Tokens not yet expired, or without an expiry, stay.
+async fn issuing_forgets_older_expired_tokens(services: &Services) -> Result {
+	let device = device_id!("EXPIRINGDEVICE");
+	let (user, _) = session(services, "expiring", device).await?;
+	let now = now_secs();
+	let issue = async |expires_at| issue_expiring_at(services, &user, device, expires_at).await;
+
+	let lasting = issue(None).await?;
+	let unexpired = issue(Some(now.saturating_add(3600))).await?;
+	let last = issue(Some(now.saturating_sub(60))).await?;
+	let twin = issue(Some(now.saturating_sub(60))).await?;
+	let older = issue(Some(now.saturating_sub(120))).await?;
+	let replaced = issue(Some(now.saturating_sub(180))).await?;
+	let issued = issue(None).await?;
+
+	if resolves(services, &older).await || indexed(services, &user, device, &older).await {
+		return Err!("an expired token outlived a later token expiring");
+	}
+
+	for token in [&lasting, &unexpired, &last, &twin, &replaced, &issued] {
+		if !resolves(services, token).await || !indexed(services, &user, device, token).await {
+			return Err!("issuing a token forgot a token it should have kept");
+		}
+	}
+
+	Ok(())
+}
+
+async fn issue_expiring_at(
+	services: &Services,
+	user: &UserId,
+	device: &DeviceId,
+	expires_at: Option<u64>,
+) -> Result<String> {
+	let (token, _) = services.users.generate_access_token(false);
+
+	services
+		.users
+		.set_access_token(user, device, &token, None, None)
+		.await?;
+
+	services.db["token_userdeviceid"].raw_put(&token, (user, device, expires_at));
+
+	Ok(token)
+}
+
+async fn indexed(services: &Services, user: &UserId, device: &DeviceId, token: &str) -> bool {
+	services.db["userdeviceidtoken_index"]
+		.qry(&(user, device, token))
+		.await
+		.is_ok()
 }
 
 /// Without a grace window, a token already spent when its request arrived is
