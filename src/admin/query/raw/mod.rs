@@ -14,10 +14,10 @@ mod sequence;
 mod vals_sizes;
 mod vals_total;
 
-use std::{fmt::Write, sync::Arc};
+use std::sync::Arc;
 
 use clap::Subcommand;
-use tuwunel_core::{Result, err, expected, itertools::Itertools, utils::math::Expected};
+use tuwunel_core::{Result, err, expected, itertools::Itertools, utils::bytes::escape_bytes};
 use tuwunel_database::Map;
 use tuwunel_service::Services;
 
@@ -255,17 +255,4 @@ fn decode(data: &str) -> Vec<u8> {
 	res
 }
 
-#[expect(clippy::as_conversions)]
-fn encode(data: &[u8]) -> String {
-	let mut res = String::with_capacity(data.len().expected_mul(4));
-
-	for byte in data {
-		if *byte < 0x20 || *byte > 0x7E {
-			_ = write!(res, "\\x{byte:02x}");
-		} else {
-			res.push(*byte as char);
-		}
-	}
-
-	res
-}
+fn encode(data: &[u8]) -> String { escape_bytes(data).to_string() }

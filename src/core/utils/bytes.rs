@@ -6,10 +6,14 @@
 #[cfg(test)]
 mod tests;
 
+use std::fmt::{self, Display, Formatter, Write};
+
 use bytesize::ByteSize;
 use serde::{Deserialize, Deserializer, de};
 
 use crate::{Result, at, err};
+
+struct EscapedBytes<'a>(&'a [u8]);
 
 /// Accepts an integer byte count or a string with SI/IEC suffix (e.g. "24 MiB")
 /// and returns a `usize`.
@@ -56,6 +60,22 @@ pub fn pretty(bytes: usize) -> String {
 		.expect("failed to convert usize to u64");
 
 	ByteSize::b(bytes).display().iec().to_string()
+}
+
+/// Renders bytes as text, writing each non-printable byte as `\xHH`.
+///
+/// Printable ASCII passes through, so a database key reads as itself around its
+/// binary separators. The raw database admin commands read and write this form.
+#[must_use]
+pub fn escape_bytes(data: &[u8]) -> impl Display + '_ { EscapedBytes(data) }
+
+impl Display for EscapedBytes<'_> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		self.0.iter().try_for_each(|byte| match byte {
+			| 0x20..=0x7E => f.write_char(char::from(*byte)),
+			| _ => write!(f, "\\x{byte:02x}"),
+		})
+	}
 }
 
 /// Increments an optional big-endian counter with wrapping arithmetic.

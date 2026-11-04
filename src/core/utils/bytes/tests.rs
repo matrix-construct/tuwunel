@@ -1,4 +1,12 @@
-use super::prefix_successor;
+use super::{escape_bytes, prefix_successor};
+
+// The raw admin commands decode `\xHH` alone, so no other escape may appear.
+#[test]
+fn escape_bytes_writes_only_hex_escapes() {
+	let key = b"@a:b\xff\t\n\r'\"\\\x00\x7f~ ";
+
+	assert_eq!(escape_bytes(key).to_string(), r#"@a:b\xff\x09\x0a\x0d'"\\x00\x7f~ "#);
+}
 
 #[test]
 fn successor_skips_a_complete_prefix() {
