@@ -25,6 +25,8 @@ use super::{
 };
 use crate::test_utils::{create_devices, fixture};
 
+mod typing_lag;
+
 type Filters<'a> = (Option<&'a UserId>, Option<&'a DeviceId>, Option<&'a str>);
 
 const LIST_ID: &str = "main";

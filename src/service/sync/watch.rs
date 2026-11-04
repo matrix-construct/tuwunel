@@ -30,6 +30,7 @@ where
 	let userid_prefix =
 		serialize_key((user_id, Interfix)).expect("failed to serialize watch prefix");
 
+	// Boxed for a heterogeneous fan of watchers.
 	let mut futures: FuturesUnordered<BoxFuture<'a, ()>> = [
 		self.db
 			.userroomid_joined
@@ -94,6 +95,9 @@ where
 		);
 	}
 
+	// Every count up to this point is covered by the pass after this call.
+	let typing_since = self.services.globals.current_count();
+
 	// Drive the rooms stream during phase 1 so per-room watchers register
 	// before this fn returns. Stream items are not retained across cursor
 	// advances; the rocksdb slice contract forbids stashing them.
@@ -144,24 +148,12 @@ where
 				.watch_prefix((room_id, Interfix))
 				.boxed(),
 		);
-		// Typing: subscribe synchronously so the receiver is registered before
-		// this fn returns; `wait_for_update` would defer until poll.
-		let mut typing_rx = self
-			.services
-			.typing
-			.typing_update_sender
-			.subscribe();
 
-		let typing_room_id = room_id.to_owned();
 		futures.push(
-			async move {
-				while let Ok(next) = typing_rx.recv().await {
-					if next == typing_room_id {
-						break;
-					}
-				}
-			}
-			.boxed(),
+			self.services
+				.typing
+				.wait_for_update(room_id.to_owned(), typing_since)
+				.boxed(),
 		);
 	}
 

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use futures::{FutureExt, TryStreamExt, future::try_join};
+use futures::{FutureExt, StreamExt, TryStreamExt, future::try_join, stream::unfold};
 use ruma::{
 	OwnedRoomId, OwnedUserId, RoomId, UserId,
 	api::{
@@ -12,7 +12,10 @@ use ruma::{
 		typing::TypingEventContent,
 	},
 };
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{
+	RwLock,
+	broadcast::{self, error::RecvError},
+};
 use tuwunel_core::{
 	Result, Server,
 	debug::INFO_SPAN_LEVEL,
@@ -152,24 +155,59 @@ impl Service {
 			.map(|_| ())
 	}
 
-	pub async fn wait_for_update(&self, room_id: &RoomId) {
-		let mut receiver = self.typing_update_sender.subscribe();
-		while let Ok(next) = receiver.recv().await {
-			if next == room_id {
-				break;
-			}
+	/// Returns a future that resolves on the next typing update in this room.
+	///
+	/// The receiver subscribes before this returns, so the update is seen however
+	/// late the future is first polled. A lagged receiver has lost the messages it
+	/// would have matched, so it asks the room instead. Callers pass a retired
+	/// count as `since` and run `wait_pending` after registering, so an update at
+	/// or below it needs no wake.
+	pub fn wait_for_update(
+		&self,
+		room_id: OwnedRoomId,
+		since: u64,
+	) -> impl Future<Output = ()> + Send + '_ {
+		let receiver = self.typing_update_sender.subscribe();
+
+		// Not an `async fn`, which would defer the subscribe to the first poll.
+		// The block owns `room_id`: `any` rejects an async closure owning it.
+		async move {
+			unfold(receiver, async |mut receiver| Some((receiver.recv().await, receiver)))
+				.any(async |update| match update {
+					| Ok(next) => next == room_id,
+					| Err(RecvError::Lagged(_)) => self.lag_wakes(&room_id, since).await,
+					| Err(RecvError::Closed) => true,
+				})
+				.await;
 		}
+	}
+
+	/// Returns whether a receiver that lagged should wake for this room.
+	///
+	/// It should for an update past `since`, and for a typist past their timeout,
+	/// whom only a pass removes. This reads and leaves the removal to that pass: a
+	/// sibling's wake can drop the watcher at any await, and expiry removes typists
+	/// before it tells federation, so a drop there would lose the stop for good.
+	async fn lag_wakes(&self, room_id: &RoomId, since: u64) -> bool {
+		let now = millis_since_unix_epoch();
+
+		self.typing
+			.read()
+			.map(|typing| {
+				typing
+					.get(room_id)
+					.is_some_and(|room| room.update > since || room.has_expired(now))
+			})
+			.await
 	}
 
 	/// Makes sure that typing events with old timestamps get removed.
 	async fn typings_maintain(&self, room_id: &RoomId) -> Result {
 		let current_timestamp = millis_since_unix_epoch();
 		let typing = self.typing.read().await;
-		let has_expired = typing.get(room_id).is_some_and(|room| {
-			room.users
-				.values()
-				.any(|timeout| *timeout < current_timestamp)
-		});
+		let has_expired = typing
+			.get(room_id)
+			.is_some_and(|room| room.has_expired(current_timestamp));
 
 		drop(typing);
 
@@ -384,4 +422,8 @@ impl Service {
 
 		Ok(())
 	}
+}
+
+impl RoomTyping {
+	fn has_expired(&self, now: u64) -> bool { self.users.values().any(|timeout| *timeout < now) }
 }
