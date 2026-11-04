@@ -6,7 +6,7 @@ use std::{
 
 use futures::future::join;
 use ruma::{
-	EventId, RoomId, UInt, UserId,
+	RoomId, UInt, UserId,
 	api::federation::space::SpaceHierarchyParentSummary,
 	event_id,
 	events::{StateEventType, room::member::MembershipState},
@@ -14,7 +14,7 @@ use ruma::{
 	room::{JoinRuleSummary, RestrictedSummary, RoomSummary},
 	room_id, server_name, user_id,
 };
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::{sync::Notify, task_local, time::timeout};
 use tuwunel_core::{Err, Result, config::Figment, err, utils::time::now};
 use tuwunel_database::Json;
@@ -26,7 +26,9 @@ use crate::{
 		cache::{Cached, Provenance},
 		federation::summary_matches_room,
 	},
-	test_utils::{fixture, membership_update, set_room_state},
+	test_utils::{
+		fixture, membership_update, pdu_json, set_room_state, store_outlier, with_state_key,
+	},
 };
 
 struct AccessControl {
@@ -199,20 +201,9 @@ async fn seed_local_summary(services: &Services, room: &RoomId, sender: &UserId)
 	let mut compressed = Vec::with_capacity(events.len());
 
 	for (event_type, event_id, content) in events {
-		services.db["eventid_outlierpdu"]
-			.raw_put(event_id, Json(state_event(event_id, room, sender, &event_type, &content)));
+		let event = with_state_key(pdu_json(event_id, room, sender, &event_type, &content), "");
 
-		let key = services
-			.short
-			.get_or_create_shortstatekey(&event_type, "")
-			.await;
-
-		compressed.push(
-			services
-				.state_compressor
-				.compress_state_event(key, event_id)
-				.await,
-		);
+		compressed.push(store_outlier(services, &event_type, "", event_id, event).await?);
 	}
 
 	let state = Arc::new(compressed.into_iter().collect());
@@ -224,33 +215,6 @@ async fn seed_local_summary(services: &Services, room: &RoomId, sender: &UserId)
 	set_room_state(services, room, hash).await;
 
 	Ok(())
-}
-
-fn state_event(
-	event_id: &EventId,
-	room_id: &RoomId,
-	sender: &UserId,
-	event_type: &StateEventType,
-	content: &Value,
-) -> Value {
-	state_event_with_key(event_id, room_id, sender, event_type, "", content)
-}
-
-fn state_event_with_key(
-	event_id: &EventId,
-	room_id: &RoomId,
-	sender: &UserId,
-	event_type: &StateEventType,
-	state_key: &str,
-	content: &Value,
-) -> Value {
-	json!({
-		"event_id": event_id, "room_id": room_id, "sender": sender,
-		"type": event_type, "state_key": state_key, "content": content,
-		"origin": "localhost", "origin_server_ts": 1, "depth": 1,
-		"prev_events": [], "auth_events": [], "signatures": {},
-		"hashes": {"sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
-	})
 }
 
 #[tokio::test]
@@ -405,21 +369,9 @@ async fn install_changed_summary(services: &Services, room: &RoomId, sender: &Us
 
 	for (event_type, event_id, state_key, content) in events {
 		let event =
-			state_event_with_key(event_id, room, sender, &event_type, state_key, &content);
+			with_state_key(pdu_json(event_id, room, sender, &event_type, &content), state_key);
 
-		services.db["eventid_outlierpdu"].raw_put(event_id, Json(event));
-
-		let key = services
-			.short
-			.get_or_create_shortstatekey(&event_type, state_key)
-			.await;
-
-		compressed.push(
-			services
-				.state_compressor
-				.compress_state_event(key, event_id)
-				.await,
-		);
+		compressed.push(store_outlier(services, &event_type, state_key, event_id, event).await?);
 	}
 
 	let state = Arc::new(compressed.into_iter().collect());
