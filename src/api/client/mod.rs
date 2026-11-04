@@ -116,7 +116,7 @@ pub(crate) use self::{
 		joined_rooms_route, kick_user_route, knock_room_route, leave_room_route,
 		unban_user_route,
 	},
-	message::{annotate_membership, get_message_events_route, ignored_filter, is_ignored_pdu},
+	message::{get_message_events_route, ignored_filter, is_ignored_pdu},
 	openid::create_openid_token_route,
 	presence::{get_presence_route, set_presence_route},
 	profile::{

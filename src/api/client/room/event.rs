@@ -8,7 +8,7 @@ use tuwunel_core::{
 };
 use tuwunel_matrix::{Event, Pdu};
 
-use crate::{Ruma, annotate_membership, is_ignored_pdu};
+use crate::{Ruma, is_ignored_pdu, with_membership};
 
 /// # `GET /_matrix/client/r0/rooms/{roomId}/event/{eventId}`
 ///
@@ -63,7 +63,7 @@ pub(crate) async fn get_room_event_route(
 		.filter(|_| event.as_ref().is_err_or(Event::is_redacted))
 		.unwrap_or(event);
 
-	let mut event = event?;
+	let event = event?;
 
 	if event.room_id() != room_id
 		|| !services
@@ -84,15 +84,13 @@ pub(crate) async fn get_room_event_route(
 
 	debug_assert!(event.event_id() == event_id, "Fetched PDU must match requested");
 
-	event.add_age().ok();
-
+	let event = event.served_to(Some(sender_user))?;
 	let encrypted = services
 		.state_accessor
 		.is_encrypted_room(room_id)
 		.await;
 
-	annotate_membership(&services, &mut event, sender_user, encrypted).await;
-
+	let event = with_membership(&services, event, sender_user, encrypted).await;
 	let event = services
 		.pdu_metadata
 		.bundle_aggregations(sender_user, event)

@@ -1,7 +1,7 @@
 #![cfg(test)]
 
-use serde_json::json;
-use tuwunel_core::Result;
+use serde_json::{Value, json};
+use tuwunel_core::{Result, ruma::EventId};
 use tuwunel_service::Services;
 
 use self::{
@@ -18,6 +18,10 @@ mod event;
 #[path = "client/get.rs"]
 mod get;
 
+#[expect(dead_code)] // Only the self-membership action is used from the add-on.
+#[path = "client/membership.rs"]
+mod membership;
+
 #[path = "client/put.rs"]
 mod put;
 
@@ -28,6 +32,7 @@ mod redact;
 mod room_event;
 
 const TOKEN: &str = "redact-transaction-ids-author-token-0";
+const MEMBER_TOKEN: &str = "redact-transaction-ids-member-token-0";
 
 // The redaction and the later send share this transaction ID on purpose.
 const TXN_ID: &str = "redact";
@@ -35,6 +40,11 @@ const TXN_ID: &str = "redact";
 #[test]
 fn redaction_retries_return_the_first_redaction() -> Result {
 	boot("redact-transaction-ids", ["logging.enable=false"], exercise)
+}
+
+#[test]
+fn transaction_ids_reach_only_their_sender() -> Result {
+	boot("transaction-ids-sender", ["logging.enable=false"], readers)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {
@@ -90,4 +100,59 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert_eq!(event["unsigned"]["transaction_id"], TXN_ID, "{event}");
 
 	Ok(())
+}
+
+async fn readers(services: &Services, base: &str) -> Result {
+	register(services, "author", TOKEN).await?;
+	register(services, "member", MEMBER_TOKEN).await?;
+
+	let author = Client { services, base, token: TOKEN };
+	let member = Client { services, base, token: MEMBER_TOKEN };
+	let room = author
+		.create_room(&json!({"preset": "public_chat"}))
+		.await?;
+
+	member.act(&room, "join").await?;
+
+	let message = author
+		.send_text(&room, "message-txn", "message")
+		.await?;
+
+	let target = author
+		.send_text(&room, "target-txn", "target")
+		.await?;
+
+	let redaction = author
+		.redact(&room, &target, "redaction-txn")
+		.await?;
+
+	for (event_id, txn) in [(&message, "message-txn"), (&redaction, "redaction-txn")] {
+		let context = format!("rooms/{room}/context/{event_id}");
+
+		let event = author.event(&room, event_id).await?;
+
+		assert_eq!(event["unsigned"]["transaction_id"], txn, "{event}");
+
+		let reply = author.get(&context).await?;
+
+		assert_eq!(reply["event"]["unsigned"]["transaction_id"], txn, "{reply}");
+
+		let event = member.event(&room, event_id).await?;
+
+		assert_stripped(&event, &event, event_id);
+
+		let reply = member.get(&context).await?;
+
+		assert_stripped(&reply, &reply["event"], event_id);
+	}
+
+	Ok(())
+}
+
+/// Asserts the reply serves this event and no transaction ID.
+///
+/// The whole reply is scanned, so the events served around this one count too.
+fn assert_stripped(reply: &Value, served: &Value, event_id: &EventId) {
+	assert_eq!(served["event_id"], event_id.as_str(), "{reply}");
+	assert!(!reply.to_string().contains("transaction_id"), "{reply}");
 }

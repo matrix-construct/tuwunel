@@ -8,10 +8,7 @@ use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{MilliSecondsSinceUnixEpoch, RoomId, UInt, UserId, api::Direction};
 use tuwunel_core::{
 	Result, at, err, implement, trace,
-	utils::{
-		result::LogErr,
-		stream::{TryIgnore, TryReadyExt, TryWidebandExt},
-	},
+	utils::stream::{TryIgnore, TryReadyExt, TryWidebandExt},
 	warn,
 };
 use tuwunel_database::{KeyVal, keyval::Val};
@@ -243,11 +240,9 @@ fn each_slice((pdu_id, pdu): KeyVal<'_>, user_id: Option<&UserId>) -> Result<Pdu
 
 #[implement(super::Service)]
 fn each_pdu(
-	(pdu_id, mut pdu): (RawPduId, PduEvent),
+	(pdu_id, pdu): (RawPduId, PduEvent),
 	user_id: Option<&UserId>,
 ) -> Result<PdusIterItem> {
-	pdu.remove_transaction_id_unless_sender(user_id)?;
-	pdu.add_age().log_err().ok();
-
-	Ok((pdu_id.pdu_count(), pdu))
+	pdu.served_to(user_id)
+		.map(|pdu| (pdu_id.pdu_count(), pdu))
 }

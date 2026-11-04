@@ -320,7 +320,9 @@ async fn resolve_base_event(
 		}));
 	}
 
-	Ok((base_id, base_pdu))
+	base_pdu
+		.without_transaction_id_unless_sender(Some(sender_user))
+		.map(|base_pdu| (base_id, base_pdu))
 }
 
 /// Shared inputs for the two [`collect_timeline_half`] calls assembling the

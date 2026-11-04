@@ -836,3 +836,42 @@ fn reject_duplicate_thread_bundle_sibling() {
 		"failed rewrite mutated the bundle",
 	);
 }
+
+#[test]
+fn transaction_id_removal_keeps_other_unsigned_fields() {
+	let pdu = member_pdu(&json!({ "age": 1, "transaction_id": "secret" }))
+		.without_transaction_id_unless_sender(Some(user_id!("@bob:example.com")))
+		.expect("parsable unsigned");
+
+	let unsigned = pdu.unsigned.expect("unsigned kept");
+
+	assert_eq!(unsigned.json().get(), r#"{"age":1}"#, "removal changed the other fields");
+}
+
+#[test]
+fn transaction_id_removal_drops_unparsable_unsigned() {
+	let requester = Some(user_id!("@bob:example.com"));
+	let unparsable = [
+		r#""transaction_id""#,
+		r#"["transaction_id", "secret"]"#,
+		r#"{ "\u0061ge": 1, "transaction_id": "secret" }"#,
+	];
+
+	for unsigned in unparsable {
+		let stripped = member_pdu_with_raw_unsigned(unsigned)
+			.without_transaction_id_unless_sender(requester)
+			.expect("unparsable unsigned failed the event");
+
+		assert!(stripped.unsigned.is_none(), "kept unparsable unsigned: {unsigned}");
+
+		let served = member_pdu_with_raw_unsigned(unsigned)
+			.served_to(requester)
+			.expect("unparsable unsigned failed the event");
+
+		let served = served.unsigned.expect("age added");
+		let served: serde_json::Map<String, serde_json::Value> =
+			serde_json::from_str(served.json().get()).expect("valid unsigned");
+
+		assert_eq!(served.keys().collect::<Vec<_>>(), ["age"], "served part of: {unsigned}");
+	}
+}
