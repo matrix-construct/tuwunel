@@ -27,8 +27,8 @@ pub(crate) async fn get_event_by_timestamp_route(
 		.get_event_id_near_ts_with_fallback(room_id, body.ts, body.dir)
 		.await?;
 
-	// An event this server does not hold has no recorded state, which the
-	// visibility check would allow as well.
+	// The lookup returns only events this server holds, so one missing here was
+	// removed since, which leaves the room check above as its only gate.
 	if let Some(pdu) = services
 		.timeline
 		.get_pdu(&event_id)
