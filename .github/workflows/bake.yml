@@ -44,11 +44,7 @@ on:
         description: Matrix inclusions
       rust_nightly:
         type: string
-        # nightly-2026-11-01 reports a query cycle computing async drop for any
-        # type recursive through a Box that an async fn holds, which ruma-events
-        # has and matrix-rust-sdk hits (rust-lang/rust#165263). Restore the
-        # floating 'nightly' once a nightly carrying the fix ships.
-        default: ${{vars.RUST_NIGHTLY || 'nightly-2026-10-31'}}
+        default: ${{vars.RUST_NIGHTLY || 'nightly'}}
         description: Override nightly toolchain with more specific nightly.
       checkout:
         type: string
