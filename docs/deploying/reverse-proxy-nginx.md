@@ -48,10 +48,10 @@ server {
   location / {
     proxy_pass http://tuwunel;
 
-    # Preserve host and scheme - critical for proper Matrix operation
-    proxy_set_header Host $host;
+    # Client address for `ip_source`; replaces any value the client sent
     proxy_set_header X-Forwarded-For $remote_addr;
-    proxy_set_header X-Forwarded-Proto https;
+    # Passes the public hostname. Tuwunel does not currently need this.
+    proxy_set_header Host $host;
   }
 
   # TLS configuration (Let's Encrypt example using certbot)
@@ -64,11 +64,22 @@ server {
 
 - **Replace `matrix.example.com`** with your actual server name
 - **`client_max_body_size`**: Must match or exceed `max_request_size` in your `tuwunel.toml`
-- **`ip_source`**: If Nginx is the only way clients can reach Tuwunel, set
-  `ip_source = "rightmost_x_forwarded_for"` so Tuwunel uses the trusted
-  `X-Forwarded-For` value
 - **Do NOT use `$request_uri`** in `proxy_pass` - while some guides suggest this, it's not necessary for Tuwunel and can cause issues
 - **IPv6**: The `listen [::]:443` and `listen [::]:8448` lines enable IPv6 support. Remove them if you don't need IPv6
+
+If Nginx is the only way clients can reach Tuwunel, set
+`ip_source = "rightmost_x_forwarded_for"` under `[global.http]` in your
+`tuwunel.toml`. This tells Tuwunel to use the trusted `X-Forwarded-For`
+value as the client's IP address.
+
+> [!IMPORTANT]
+> Restart Tuwunel after changing `ip_source`. A configuration reload that
+> changes this setting is rejected.
+
+The `client` setting under `[global.well_known]` in your `tuwunel.toml`
+holds your public HTTPS URL. Tuwunel uses this `well_known.client` setting
+to build public URLs for clients. The `Host` header and the request scheme
+do not supply those URLs.
 
 ### TLS Certificates
 
@@ -93,9 +104,8 @@ However, if you experience federation retries or dropped long-poll connections, 
 ```nginx
 location / {
   proxy_pass http://tuwunel;
-  proxy_set_header Host $host;
   proxy_set_header X-Forwarded-For $remote_addr;
-  proxy_set_header X-Forwarded-Proto https;
+  proxy_set_header Host $host;
 
   # Optional: Extend timeouts if experiencing issues
   proxy_read_timeout 300s;
