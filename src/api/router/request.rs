@@ -1,6 +1,10 @@
 use std::str;
 
-use axum::{RequestExt, RequestPartsExt, extract::Path};
+use axum::{
+	RequestExt, RequestPartsExt,
+	body::{Body, to_bytes},
+	extract::Path,
+};
 use axum_extra::extract::cookie::CookieJar;
 use bytes::Bytes;
 use http::request::Parts;
@@ -49,10 +53,7 @@ pub(super) type PathParam = SmallString<[u8; 32]>;
 	skip_all,
 	err(level = "debug")
 )]
-pub(super) async fn from(
-	services: &Services,
-	request: http::Request<axum::body::Body>,
-) -> Result<Request> {
+pub(super) async fn from(services: &Services, request: http::Request<Body>) -> Result<Request> {
 	let limited = request.with_limited_body();
 	let (mut parts, body) = limited.into_parts();
 
@@ -63,10 +64,17 @@ pub(super) async fn from(
 	let query = serde_html_form::from_str(query)
 		.map_err(|e| err!(Request(Unknown("Failed to read query parameters: {e}"))))?;
 
-	let max_body_size = services.server.config.http.max_request_size;
-	let body = axum::body::to_bytes(body, max_body_size)
-		.await
-		.map_err(|e| err!(Request(TooLarge("Request body too large: {e}"))))?;
+	let body = read_body(services, body).await?;
 
 	Ok(Request { cookie, path, query, body, parts })
+}
+
+/// Reads a request body up to the configured request size.
+///
+/// A longer body is refused as too large.
+#[tracing::instrument(level = "trace", skip_all, err(level = "debug"))]
+pub async fn read_body(services: &Services, body: Body) -> Result<Bytes> {
+	to_bytes(body, services.server.config.http.max_request_size)
+		.await
+		.map_err(|e| err!(Request(TooLarge("Request body too large: {e}"))))
 }

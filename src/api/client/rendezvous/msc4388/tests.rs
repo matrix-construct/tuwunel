@@ -5,7 +5,7 @@ use ruma::api::error::ErrorKind;
 
 use super::{
 	Error, SEC_FETCH_DEST, SEC_FETCH_MODE, SEC_FETCH_SITE, SEC_FETCH_USER, data_to_string,
-	ensure_safe_get, max_data_bytes,
+	ensure_safe_get, ensure_txn_id, max_data_bytes,
 };
 
 #[test]
@@ -42,6 +42,22 @@ fn safe_get_rejects_navigation_fetches() {
 
 		assert_eq!(error.kind(), ErrorKind::forbidden());
 		assert_eq!(error.status_code(), StatusCode::FORBIDDEN);
+	}
+}
+
+#[test]
+fn transaction_id_must_be_an_opaque_identifier() {
+	let longest = "a".repeat(255);
+	let overlong = "a".repeat(256);
+
+	ensure_txn_id("0aZ._~-".into()).expect("unreserved characters should be accepted");
+	ensure_txn_id(longest.as_str().into()).expect("255 characters should be accepted");
+
+	for rejected in [overlong.as_str(), "a b", "a/b"] {
+		let error = ensure_txn_id(rejected.into()).expect_err("grammar should reject it");
+
+		assert_eq!(error.kind(), ErrorKind::InvalidParam);
+		assert_eq!(error.status_code(), StatusCode::BAD_REQUEST);
 	}
 }
 

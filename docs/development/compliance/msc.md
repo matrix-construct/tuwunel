@@ -389,7 +389,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4401 | ❌ ◐ | 0/0 | Publishing client capabilities via profiles | generic profile keys exist; logout cleanup of client_capability missing. |
 | MSC4397 | ✅ ● | 100/100 | Tags as Spaces | global account-data passthrough (2026-06-22 ruling); m.tag_space round-trips |
 | MSC4396 | ❌ ● | 0/0 | Inline linked media | no multipart/mixed event-with-media; no m.media mixin or M_GONE wired. |
-| MSC4388 | ✅ ● | 90/100 | Secure out-of-band channel for sign in with QR | router.rs:471 five MSC4388 routes; TTL default 600s exceeds SHOULD 300s |
+| MSC4388 | ✅ ● | 90/100 | Secure out-of-band channel for sign in with QR | txnId PUT replays before body parse; TTL 600s over SHOULD 300s |
 | MSC4387 | ❌ ● | 0/0 | `M_SAFETY` error code | M_SAFETY errcode not used anywhere in src/; no harms field handling. |
 | MSC4383 | ✅ ● | 100/100 | Client-Server Discovery of Server Version | versions.rs:30 server object; :149 advertises net.zemos.msc4383 |
 | MSC4382 | ❌ ● | 0/0 | Peppered hash verification for E2EE content moderation | No verification_hash check on report endpoint |

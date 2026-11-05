@@ -1,7 +1,7 @@
 use axum::{
 	Router,
 	response::IntoResponse,
-	routing::{any, get, post},
+	routing::{any, get, post, put},
 };
 use const_str::{concat, join, replace};
 use http::{HeaderValue, header};
@@ -9,7 +9,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tuwunel_api::router::RouterExt;
 use tuwunel_core::{Server, err};
 
-use crate::{self as client, State, sso_callback_route};
+use crate::{self as client, State, put_msc4388_route, sso_callback_route};
 
 /// Builds the client endpoint routes.
 ///
@@ -277,8 +277,11 @@ fn register_rendezvous_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::discover_msc4388_route)
 		.ruma_route(&client::create_msc4388_route)
 		.ruma_route(&client::get_msc4388_route)
-		.ruma_route(&client::put_msc4388_route)
-		.ruma_route(&client::delete_msc4388_route);
+		.ruma_route(&client::delete_msc4388_route)
+		.route(
+			"/_matrix/client/unstable/io.element.msc4388/rendezvous/{id}/{txn_id}",
+			put(put_msc4388_route),
+		);
 
 	let session_routes = get(client::get_rendezvous_route)
 		.put(client::put_rendezvous_route)

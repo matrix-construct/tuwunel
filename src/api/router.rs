@@ -15,6 +15,7 @@ pub use self::{
 	client_ip::{ClientIp, RateLimitIp},
 	handler::{RouterExt, RumaHandler},
 	html::ACCOUNT_HEAD,
+	request::read_body,
 	response::RumaResponse,
 	state::State,
 };

@@ -14,10 +14,11 @@ use axum::{
 };
 use bytes::Bytes;
 use http::{HeaderMap, StatusCode};
+use ruma::TransactionId;
 use serde::Serialize;
 use tuwunel_core::{
 	Error as CoreError, Result as CoreResult, err,
-	utils::BoolExt,
+	utils::{BoolExt, string::is_opaque_id},
 };
 use tuwunel_service::Services;
 
@@ -87,6 +88,12 @@ pub(super) fn create_permitted<T>(services: &Services, body: &Ruma<T>) -> CoreRe
 	let authenticated = body.sender_user.is_some() || body.appservice_info.is_some();
 
 	Ok(!services.config.rendezvous.authenticated_only || authenticated)
+}
+
+pub(super) fn ensure_txn_id(txn_id: &TransactionId) -> CoreResult {
+	BoolExt::ok_or_else(is_opaque_id(txn_id.as_str()), || {
+		err!(Request(InvalidParam("Transaction ID is not an opaque identifier")))
+	})
 }
 
 pub(super) fn ensure_data_size(services: &Services, data: &str) -> CoreResult {
