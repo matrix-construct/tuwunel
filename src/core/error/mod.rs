@@ -584,7 +584,7 @@ impl Error {
 	pub fn kind(&self) -> ruma::api::error::ErrorKind {
 		use ruma::api::error::{
 			ErrorKind,
-			ErrorKind::{FeatureDisabled, NotJson, Unknown},
+			ErrorKind::{FeatureDisabled, InvalidParam, NotJson, Unknown},
 		};
 
 		match self {
@@ -596,6 +596,7 @@ impl Error {
 			| Self::RequestStatus(kind, ..) => kind.clone(),
 			| Self::Federation(_, error) | Self::Ruma(error) =>
 				response::ruma_error_kind(error).clone(),
+			| Self::Path(rejection) if rejection.status().is_client_error() => InvalidParam,
 			| _ => Unknown,
 		}
 	}
@@ -621,6 +622,7 @@ impl Error {
 			| Self::Request(kind, _, code) => response::status_code(kind, *code),
 			| Self::Io(error) => response::io_error_code(error.kind()),
 			| Self::HttpJson(code, ..) | Self::RequestStatus(.., code) => *code,
+			| Self::Path(rejection) => rejection.status(),
 			| Self::Reqwest(error) => error
 				.status()
 				.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
