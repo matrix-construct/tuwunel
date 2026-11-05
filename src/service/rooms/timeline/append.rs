@@ -519,6 +519,7 @@ async fn append_member_effects(
 			sender: pdu.sender(),
 			last_state: stripped_state,
 			invite_via: None,
+			invite_event: is_invite.then_some(pdu.event_id()),
 			update_joined_count: true,
 			replaced_join,
 			count,

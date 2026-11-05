@@ -293,8 +293,9 @@ pub async fn handle_incoming_pdu<'a>(
 /// out-of-band membership handling: only a kick from the original inviter is
 /// honored, since without the room state we cannot judge any other sender's
 /// authority. An event already accepted is a replay of history, which leaves a
-/// newer invite from that inviter alone. Returns `true` when a rescission was
-/// applied.
+/// newer invite from that inviter alone. When the current invite has a recorded
+/// event ID, the kick must name it in `auth_events`. Returns `true` when a
+/// rescission was applied.
 #[implement(super::Service)]
 // cold arm: rescission, whose layout overflows the route's depth limit
 #[async_noinline]
@@ -392,6 +393,16 @@ async fn handle_rescinded_invite<'a>(
 		return Ok(false);
 	}
 
+	let invite_event = self
+		.services
+		.state_cache
+		.get_invite_event(room_id, &target)
+		.await?;
+
+	if invite_event.is_some_and(|invite_event| !authenticates_invite(pdu, &invite_event)) {
+		return Ok(false);
+	}
+
 	let Some(room_version_id) = room_version_of(&invite_state) else {
 		return Ok(false);
 	};
@@ -415,6 +426,7 @@ async fn handle_rescinded_invite<'a>(
 			sender: &sender,
 			last_state: None,
 			invite_via: None,
+			invite_event: None,
 			update_joined_count: false,
 			replaced_join: None,
 			count: PduCount::Normal(*count),
@@ -424,6 +436,20 @@ async fn handle_rescinded_invite<'a>(
 	debug!(%room_id, %target, %sender, "Applied a federated invite rescission.");
 
 	Ok(true)
+}
+
+fn authenticates_invite(pdu: &CanonicalJsonObject, invite_event: &EventId) -> bool {
+	pdu.get("auth_events")
+		.and_then(CanonicalJsonValue::as_array)
+		.into_iter()
+		.flatten()
+		.filter_map(|event| match event {
+			| CanonicalJsonValue::String(event_id) => Some(event_id.as_str()),
+			| CanonicalJsonValue::Array(pair) =>
+				pair.first().and_then(CanonicalJsonValue::as_str),
+			| _ => None,
+		})
+		.any(|event_id| event_id == invite_event.as_str())
 }
 
 /// Upgrade an incoming PDU's previous events, walking interior events after

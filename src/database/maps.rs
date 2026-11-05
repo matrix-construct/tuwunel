@@ -408,7 +408,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "roomuserid_invitecount",
-		val_size_hint: Some(8),
+		val_size_hint: Some(53),
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {

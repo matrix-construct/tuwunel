@@ -540,6 +540,29 @@ fn serde_tuple_additive_evolution_u64_option() {
 }
 
 #[test]
+fn invite_count_event_tail_bytes() -> Result {
+	let id: &EventId = "$i".try_into()?;
+	let present = b"\x00\x00\x00\x00\x00\x00\x00\xff\xff$i";
+	let absent = b"\x00\x00\x00\x00\x00\x00\x00\xff\xff";
+	let legacy = b"\x00\x00\x00\x00\x00\x00\x00\xff";
+
+	assert_eq!(serialize_to_vec(&(255_u64, Some(id)))?.as_slice(), present);
+	assert_eq!(serialize_to_vec(&(255_u64, None::<&EventId>))?.as_slice(), absent);
+
+	for (bytes, expected) in [
+		(present.as_slice(), Some(id)),
+		(absent.as_slice(), None),
+		(legacy.as_slice(), None),
+	] {
+		let decoded: (u64, Option<&EventId>) = from_slice(bytes)?;
+
+		assert_eq!(decoded, (255, expected), "invite count tail did not decode");
+	}
+
+	Ok(())
+}
+
+#[test]
 fn ser_de_eventid_backoff_record() {
 	let event_id: &EventId = "$evt:example.com".try_into().unwrap();
 	let ctx: u8 = 2;

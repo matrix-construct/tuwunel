@@ -4,8 +4,8 @@ use axum::extract::State;
 use base64::{Engine as _, engine::general_purpose};
 use futures::StreamExt;
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, OwnedRoomId, OwnedUserId, RoomId, RoomVersionId,
-	ServerName, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedRoomId, OwnedUserId,
+	RoomId, RoomVersionId, ServerName, UserId,
 	api::{
 		appservice::event::push_events::{self, v1::DeviceLists},
 		error::{ErrorKind, IncompatibleRoomVersionErrorData},
@@ -41,6 +41,14 @@ struct ExtractIsDirect {
 	is_direct: bool,
 }
 
+struct LocalInvite<'a> {
+	invited_user: &'a UserId,
+	sender: &'a UserId,
+	invite_state: Vec<Raw<AnyStrippedStateEvent>>,
+	pdu: &'a PduEvent,
+	invite_event: &'a EventId,
+}
+
 /// # `PUT /_matrix/federation/v2/invite/{roomId}/{eventId}`
 ///
 /// Invites a remote user to a room.
@@ -64,7 +72,7 @@ pub(crate) async fn create_invite_route(
 
 	let (mut signed_event, invited_user) = parse_and_validate_event(&services, &body).await?;
 
-	sign_event(&services, &mut signed_event, &body.room_version)?;
+	let invite_event = sign_event(&services, &mut signed_event, &body.room_version)?;
 
 	let sender = validate_origins(&signed_event, body.origin())?;
 
@@ -86,7 +94,15 @@ pub(crate) async fn create_invite_route(
 		.lock(&body.room_id)
 		.await;
 
-	record_local_invite(&services, &body, &invited_user, sender, invite_state, &pdu).await?;
+	let invite = LocalInvite {
+		invited_user: &invited_user,
+		sender,
+		invite_state,
+		pdu: &pdu,
+		invite_event: &invite_event,
+	};
+
+	record_local_invite(&services, &body, invite).await?;
 
 	Ok(create_invite::v2::Response {
 		event: services
@@ -227,7 +243,7 @@ fn sign_event(
 	services: &Services,
 	signed_event: &mut CanonicalJsonObject,
 	room_version: &RoomVersionId,
-) -> Result<()> {
+) -> Result<OwnedEventId> {
 	services
 		.server_keys
 		.hash_and_sign_event(signed_event, room_version)
@@ -236,7 +252,7 @@ fn sign_event(
 	let event_id = gen_event_id(signed_event, room_version)?;
 	signed_event.insert("event_id".into(), CanonicalJsonValue::String(event_id.to_string()));
 
-	Ok(())
+	Ok(event_id)
 }
 
 fn validate_origins<'a>(
@@ -316,10 +332,13 @@ fn build_pdu(body: &Ruma<create_invite::v2::Request>) -> Result<PduEvent> {
 async fn record_local_invite(
 	services: &Services,
 	body: &Ruma<create_invite::v2::Request>,
-	invited_user: &UserId,
-	sender: &UserId,
-	invite_state: Vec<Raw<AnyStrippedStateEvent>>,
-	pdu: &PduEvent,
+	LocalInvite {
+		invited_user,
+		sender,
+		invite_state,
+		pdu,
+		invite_event,
+	}: LocalInvite<'_>,
 ) -> Result {
 	let state_lock = services.state.mutex.lock(&body.room_id).await;
 
@@ -358,6 +377,7 @@ async fn record_local_invite(
 			sender,
 			last_state: Some(invite_state),
 			invite_via: body.via.clone(),
+			invite_event: Some(invite_event),
 			update_joined_count: true,
 			replaced_join: None,
 			count: PduCount::Normal(*count),

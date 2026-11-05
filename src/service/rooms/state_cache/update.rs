@@ -12,7 +12,7 @@ use futures::{
 	future::{join, join3},
 };
 use ruma::{
-	OwnedServerName, RoomId, UserId,
+	EventId, OwnedServerName, RoomId, UserId,
 	events::{
 		AnyStrippedStateEvent, AnySyncStateEvent, GlobalAccountDataEventType,
 		RoomAccountDataEventType, StateEventType,
@@ -42,6 +42,12 @@ use tuwunel_matrix::PduCount;
 /// event vector. Invite and knock handling preserve an existing nonempty row
 /// when no new state is supplied.
 pub type StrippedRoomState = Option<Vec<Raw<AnyStrippedStateEvent>>>;
+
+struct Invite<'a> {
+	last_state: StrippedRoomState,
+	invite_via: Option<Vec<OwnedServerName>>,
+	invite_event: Option<&'a EventId>,
+}
 
 /// Parameters for one membership cache transition.
 ///
@@ -80,6 +86,11 @@ pub struct MembershipUpdate<'a> {
 	/// Invite handling stores only non-empty lists. The routing hints commit
 	/// with the membership indexes.
 	pub invite_via: Option<Vec<OwnedServerName>>,
+
+	/// Event ID of the current invitation.
+	///
+	/// An absent ID clears any previously recorded ID on an invite transition.
+	pub invite_event: Option<&'a EventId>,
 
 	/// Whether to rebuild the room's aggregate membership counts.
 	///
@@ -131,6 +142,7 @@ pub async fn update_membership(
 		sender,
 		last_state,
 		invite_via,
+		invite_event,
 		update_joined_count,
 		replaced_join,
 		count,
@@ -148,7 +160,9 @@ pub async fn update_membership(
 		| MembershipState::Invite => {
 			// An ignored sender's invite is stored anyway; the recipient's list
 			// is applied when it is served, by InviteFilter::permission.
-			self.mark_as_invited(user_id, room_id, count, last_state, invite_via)
+			let invite = Invite { last_state, invite_via, invite_event };
+
+			self.mark_as_invited(user_id, room_id, count, invite)
 				.await?;
 		},
 		| MembershipState::Leave | MembershipState::Ban => {
@@ -198,6 +212,7 @@ impl<'a> MembershipUpdate<'a> {
 			sender: user_id,
 			last_state: None,
 			invite_via: None,
+			invite_event: None,
 			update_joined_count: true,
 			replaced_join: None,
 			count,
@@ -453,13 +468,12 @@ pub(super) const EMPTY_INVITE_STATE: &[u8] = b"[]";
 /// membership rows are removed in the same transaction.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, last_state, invite_via))]
-pub(crate) async fn mark_as_invited(
+async fn mark_as_invited(
 	&self,
 	user_id: &UserId,
 	room_id: &RoomId,
 	count: PduCount,
-	last_state: StrippedRoomState,
-	invite_via: Option<Vec<OwnedServerName>>,
+	Invite { last_state, invite_via, invite_event }: Invite<'_>,
 ) -> Result {
 	let userroom_id = (user_id, room_id);
 	let userroom_id = serialize_key(userroom_id).expect("failed to serialize userroom_id");
@@ -472,11 +486,15 @@ pub(crate) async fn mark_as_invited(
 		.stripped_state_row(&self.db.userroomid_invitestate, &userroom_id, last_state)
 		.await?;
 
-	let count = count.into_unsigned().to_be_bytes();
 	let mut txn = self.services.db.txn();
 
 	txn.insert_raw(&self.db.userroomid_invitestate, &userroom_id, invite_state);
-	txn.insert_raw(&self.db.roomuserid_invitecount, &roomuser_id, count);
+	txn.put(
+		&self.db.roomuserid_invitecount,
+		(room_id, user_id),
+		(count.into_unsigned(), invite_event),
+	);
+
 	txn.del_raw(&self.db.userroomid_joinedcount, &userroom_id);
 	txn.del_raw(&self.db.roomuserid_joinedcount, &roomuser_id);
 	txn.del_raw(&self.db.userroomid_leftstate, &userroom_id);

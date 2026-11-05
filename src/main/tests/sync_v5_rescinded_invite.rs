@@ -12,6 +12,7 @@ use tuwunel_core::{
 		},
 		serde::Raw,
 	},
+	utils::result::NotFound,
 };
 use tuwunel_matrix::pdu::{PduBuilder, into_outgoing_federation};
 use tuwunel_service::{
@@ -379,7 +380,16 @@ async fn state_hash(&self, room_id: &RoomId) -> Option<ShortStateHash> {
 #[implement(Accounts, params = "<'_>")]
 async fn push_kick(&self, room_id: &RoomId, sender: &UserId) -> Result<(OwnedEventId, bool)> {
 	let &Self { services, invitee, .. } = self;
-	let (event_id, kick) = sign_kick(services, room_id, sender, invitee)?;
+	let invite_event = services
+		.state_cache
+		.get_invite_event(room_id, invitee)
+		.await
+		.optional()?
+		.flatten();
+
+	let (event_id, kick) =
+		sign_kick(services, room_id, sender, invitee, invite_event.as_deref())?;
+
 	let handled = self.deliver(room_id, &event_id, kick).await?;
 
 	Ok((event_id, handled))
@@ -822,6 +832,7 @@ fn sign_kick(
 	room_id: &RoomId,
 	sender: &UserId,
 	invitee: &UserId,
+	invite_event: Option<&EventId>,
 ) -> Result<(OwnedEventId, CanonicalJsonObject)> {
 	let kick = json!({
 		"type": "m.room.member",
@@ -832,7 +843,7 @@ fn sign_kick(
 		"origin_server_ts": MilliSecondsSinceUnixEpoch::now(),
 		"depth": 2,
 		"prev_events": [],
-		"auth_events": [],
+		"auth_events": invite_event.as_slice(),
 	});
 
 	let mut kick: CanonicalJsonObject = serde_json::from_value(kick)?; // signer takes &mut

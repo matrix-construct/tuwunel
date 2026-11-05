@@ -8,8 +8,8 @@ use tokio::time::sleep;
 use tuwunel_core::{
 	Err, Result, implement,
 	ruma::{
-		EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, OwnedServerName, RoomId,
-		TransactionId, UserId,
+		CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId,
+		OwnedServerName, RoomId, RoomVersionId, TransactionId, UserId,
 		api::{
 			error::ErrorKind,
 			federation::{
@@ -38,6 +38,12 @@ use self::{
 
 mod client;
 mod fixture;
+
+#[path = "client/event.rs"]
+mod event;
+
+#[path = "client/put.rs"]
+mod put;
 
 #[expect(dead_code)] // Membership routes are not driven here.
 mod federation;
@@ -98,7 +104,10 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	backfill_reaches_a_left_room(&accounts).await?;
 	push_waits_out_a_join(&accounts).await?;
 	frozen_ban_defers_to_the_room(&accounts).await?;
-	stored_kick_spares_a_newer_invitation(&accounts).await
+	stored_kick_spares_a_newer_invitation(&accounts).await?;
+	rescissions_follow_the_invite(&accounts, true).await?;
+	rescissions_follow_the_invite(&accounts, false).await?;
+	malformed_and_legacy_invite_tails(&accounts).await
 }
 
 /// An old join replayed into a left room writes nothing.
@@ -274,6 +283,187 @@ async fn stored_kick_spares_a_newer_invitation(accounts: &Accounts<'_>) -> Resul
 	assert_eq!(replayed_count.ok(), Some(invite_count), "the replay moved the invitation");
 
 	Ok(())
+}
+
+/// Replayed and unseen kicks name the old invite, never its replacement.
+///
+/// The first case applies the kick before re-inviting; the second holds it.
+/// Both then deliver a genuine rescission naming the current invite.
+async fn rescissions_follow_the_invite(accounts: &Accounts<'_>, applied: bool) -> Result {
+	let &Accounts { services, member_id, .. } = accounts;
+	let cache = &services.state_cache;
+	let room = accounts.room().await?;
+
+	accounts.member.act(&room, "leave").await?;
+
+	let first = accounts.signed_invite(&room).await?;
+	let reason = if applied { "replayed" } else { "unseen" };
+	let old_kick = accounts
+		.signed_rescission(&room, &first.0, reason)
+		.await?;
+
+	accounts
+		.owner
+		.send_text(&room, reason, "between invitations")
+		.await?;
+
+	let second = accounts.signed_invite(&room).await?;
+	let second_id = second.0.clone();
+
+	assert_ne!(first.0, second_id, "the fixture needs distinct invitations");
+
+	accounts.abandon(&room).await?;
+	accounts.deliver_invite(&room, first).await?;
+
+	if applied {
+		assert_handled(&accounts.push(old_kick.1.clone()).await?, &old_kick.0);
+		assert_eq!(
+			cache.user_membership(member_id, &room).await,
+			Some(MembershipState::Leave),
+			"the first rescission was not applied"
+		);
+	}
+
+	assert!(
+		services
+			.timeline
+			.get_pdu(&old_kick.0)
+			.await
+			.is_err(),
+		"the old kick was stored"
+	);
+
+	accounts.deliver_invite(&room, second).await?;
+
+	assert_eq!(
+		cache.get_invite_event(&room, member_id).await?,
+		Some(second_id.clone()),
+		"the federation invite did not record its real ID"
+	);
+
+	assert_handled(&accounts.push(old_kick.1).await?, &old_kick.0);
+	assert_eq!(
+		cache.user_membership(member_id, &room).await,
+		Some(MembershipState::Invite),
+		"{reason} kick rescinded the newer invitation"
+	);
+
+	let current = accounts
+		.signed_rescission(&room, &second_id, "current")
+		.await?;
+
+	assert_handled(&accounts.push(current.1).await?, &current.0);
+	assert_eq!(
+		cache.user_membership(member_id, &room).await,
+		Some(MembershipState::Leave),
+		"the current invitation could not be rescinded"
+	);
+
+	Ok(())
+}
+
+/// A damaged ID fails closed without hiding the invite from sync.
+///
+/// Replacing the value with its legacy eight-byte count restores the old
+/// permissive rescission, even when the kick names another invitation.
+async fn malformed_and_legacy_invite_tails(accounts: &Accounts<'_>) -> Result {
+	let &Accounts { services, member_id, .. } = accounts;
+	let cache = &services.state_cache;
+	let room = accounts.room().await?;
+
+	accounts.member.act(&room, "leave").await?;
+
+	let invite = accounts.signed_invite(&room).await?;
+	let kick = accounts
+		.signed_rescission(&room, &invite.0, "malformed")
+		.await?;
+
+	accounts.abandon(&room).await?;
+	accounts.deliver_invite(&room, invite).await?;
+
+	let count = cache.get_invite_count(&room, member_id).await?;
+	let map = &services.db["roomuserid_invitecount"];
+
+	map.put((&room, member_id), (count, "invalid"));
+
+	let sync: Value = services
+		.client
+		.clients
+		.default
+		.get(accounts.member.url("sync?timeout=0"))
+		.bearer_auth(MEMBER_TOKEN)
+		.send()
+		.await?
+		.error_for_status()?
+		.json()
+		.await?;
+
+	assert!(
+		sync["rooms"]["invite"][room.as_str()].is_object(),
+		"malformed tail hid the invite"
+	);
+
+	let response = accounts.push(kick.1).await?;
+
+	assert!(response[kick.0.as_str()]["error"].is_string(), "malformed tail did not error");
+	assert_eq!(cache.user_membership(member_id, &room).await, Some(MembershipState::Invite));
+
+	map.put_raw((&room, member_id), count.to_be_bytes());
+
+	assert_eq!(cache.get_invite_count(&room, member_id).await?, count);
+	assert_eq!(cache.get_invite_event(&room, member_id).await?, None);
+
+	let unrelated = EventId::parse("$earlier")?;
+	let legacy = accounts
+		.signed_rescission(&room, &unrelated, "legacy")
+		.await?;
+
+	assert_handled(&accounts.push(legacy.1).await?, &legacy.0);
+	assert_eq!(
+		cache.user_membership(member_id, &room).await,
+		Some(MembershipState::Leave),
+		"the legacy invitation lost its permissive rescission"
+	);
+
+	Ok(())
+}
+
+#[implement(Accounts, params = "<'_>")]
+async fn signed_rescission(
+	&self,
+	room: &RoomId,
+	invite: &EventId,
+	reason: &str,
+) -> Result<Signed> {
+	let version = self.services.state.get_room_version(room).await?;
+	let event = json!({
+		"type": "m.room.member", "state_key": self.member_id, "sender": self.owner_id,
+		"room_id": room, "content": { "membership": "leave", "reason": reason },
+		"origin_server_ts": MilliSecondsSinceUnixEpoch::now(),
+		"depth": 2, "prev_events": [], "auth_events": [invite],
+	});
+
+	let (id, event) = sign_rescission(self.services, event, &version)?;
+	let event = self
+		.services
+		.federation
+		.format_pdu_into(event, Some(&version))
+		.await;
+
+	Ok((id, event))
+}
+
+fn sign_rescission(
+	services: &Services,
+	event: Value,
+	version: &RoomVersionId,
+) -> Result<(OwnedEventId, CanonicalJsonObject)> {
+	let mut event = serde_json::from_value(event)?;
+	let id = services
+		.server_keys
+		.gen_id_hash_and_sign_event(&mut event, version)?;
+
+	Ok((id, event))
 }
 
 #[implement(Accounts, params = "<'_>")]

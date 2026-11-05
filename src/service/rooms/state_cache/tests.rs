@@ -1,5 +1,7 @@
 use futures::StreamExt;
-use ruma::{OwnedRoomId, events::room::member::MembershipState, room_id, serde::Raw, user_id};
+use ruma::{
+	OwnedRoomId, event_id, events::room::member::MembershipState, room_id, serde::Raw, user_id,
+};
 use serde_json::{Value as JsonValue, json};
 use tuwunel_core::{Result, config::Figment};
 use tuwunel_database::Json;
@@ -91,6 +93,65 @@ async fn a_replayed_knock_keeps_its_stored_summary() -> Result {
 	let stored_event: JsonValue = stored[0].deserialize_as_unchecked()?;
 
 	assert_eq!(stored_event, name_event);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn invite_event_follows_the_count_row() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let cache = &services.state_cache;
+	let room = room_id!("!invite-tail:example.test");
+	let user = user_id!("@alice:localhost");
+	let first = event_id!("$first");
+	let second = event_id!("$second");
+
+	for (count, invite_event) in [(1, Some(first)), (2, Some(second)), (3, None)] {
+		cache
+			.update_membership(MembershipUpdate {
+				invite_event,
+				last_state: Some(Vec::new()),
+				update_joined_count: false,
+				..membership_update(room, user, MembershipState::Invite, count)
+			})
+			.await?;
+
+		assert_eq!(cache.get_invite_count(room, user).await?, count);
+		let stored = cache.get_invite_event(room, user).await?;
+
+		assert_eq!(
+			stored.as_deref(),
+			invite_event,
+			"re-invite did not replace or clear its event ID"
+		);
+	}
+
+	for tail in [
+		b"\x00\x00\x00\x00\x00\x00\x00\x03\xff\xffjunk".as_slice(),
+		b"\x00\x00\x00\x00\x00\x00\x00\x03$i",
+		b"\x00\x00\x00\x00\x00\x00\x00\x03\xff$i\xffjunk",
+	] {
+		services.db["roomuserid_invitecount"].put_raw((room, user), tail);
+		assert!(cache.get_invite_event(room, user).await.is_err(), "bad framing accepted");
+	}
+
+	cache
+		.update_membership(MembershipUpdate {
+			invite_event: Some(first),
+			update_joined_count: false,
+			..membership_update(room, user, MembershipState::Invite, 4)
+		})
+		.await?;
+
+	cache
+		.update_membership(membership_update(room, user, MembershipState::Leave, 5))
+		.await?;
+
+	assert!(cache.get_invite_event(room, user).await.is_err(), "leave kept the invite ID");
 
 	Ok(())
 }

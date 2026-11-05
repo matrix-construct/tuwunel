@@ -23,13 +23,13 @@ use futures::{
 	stream::{empty, select},
 };
 use ruma::{
-	OwnedRoomId, OwnedServerName, RoomId, ServerName, UserId,
+	OwnedEventId, OwnedRoomId, OwnedServerName, RoomId, ServerName, UserId,
 	events::{AnyStrippedStateEvent, AnySyncStateEvent, room::member::MembershipState},
 	serde::Raw,
 };
 use serde::de::DeserializeOwned;
 use tuwunel_core::{
-	Result, at, debug_warn, implement, trace,
+	Err, Result, at, debug_warn, err, implement, trace,
 	utils::{
 		self, BoolExt,
 		result::NotFound,
@@ -37,7 +37,7 @@ use tuwunel_core::{
 	},
 	warn,
 };
-use tuwunel_database::{Deserialized, Ignore, Interfix, Map};
+use tuwunel_database::{Deserialized, Ignore, IgnoreAll, Interfix, Map, SEP};
 use tuwunel_matrix::{Event, Pdu, event::Owned};
 use update::EMPTY_INVITE_STATE;
 /// Input types for applying membership-cache transitions.
@@ -542,9 +542,8 @@ pub fn room_members_knocked<'a>(
 
 /// Returns the stream position last recorded for a user's current invite.
 ///
-/// Each invite event for the user rewrites it, as does a forced state replay,
-/// so it neither counts invites nor marks the first. Missing or malformed
-/// index rows return an error.
+/// Each invite event or forced replay rewrites it. Missing rows and malformed
+/// counts return an error; the optional event ID tail is ignored.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn get_invite_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {
@@ -554,6 +553,35 @@ pub async fn get_invite_count(&self, room_id: &RoomId, user_id: &UserId) -> Resu
 		.qry(&key)
 		.await
 		.deserialized()
+		.map(|(count, _): (u64, IgnoreAll)| count)
+}
+
+/// Returns the event ID recorded for a user's current invite.
+///
+/// Legacy rows have no ID. Missing rows and malformed values return an error.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub async fn get_invite_event(
+	&self,
+	room_id: &RoomId,
+	user_id: &UserId,
+) -> Result<Option<OwnedEventId>> {
+	let key = (room_id, user_id);
+	let value = self.db.roomuserid_invitecount.qry(&key).await?;
+	let tail = value
+		.get(size_of::<u64>()..)
+		.ok_or_else(|| err!(Database("Invalid invite count prefix")))?;
+
+	// The generic codec checks framing and full consumption only in debug.
+	if let Some((&separator, event_id)) = tail.split_first()
+		&& (separator != SEP || event_id.contains(&SEP))
+	{
+		return Err!(Database("Invalid invite event tail framing"));
+	}
+
+	value
+		.deserialized()
+		.map(|(_, event_id): (u64, Option<OwnedEventId>)| event_id)
 }
 
 /// Returns the stream position last recorded for a user's current knock.

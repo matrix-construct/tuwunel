@@ -266,6 +266,11 @@ async fn force_member_effects(&self, room_id: &RoomId, pdu: &PduEvent) -> Result
 		.map_ok(Option::flatten)
 		.await?;
 
+	let invite_event = membership_event
+		.membership
+		.eq(&MembershipState::Invite)
+		.then_some(pdu.event_id());
+
 	let count = self.services.globals.next_count();
 
 	self.services
@@ -273,6 +278,7 @@ async fn force_member_effects(&self, room_id: &RoomId, pdu: &PduEvent) -> Result
 		.update_membership(MembershipUpdate {
 			room_id,
 			user_id: &user_id,
+			invite_event,
 			membership_event,
 			sender: &pdu.sender,
 			last_state,
