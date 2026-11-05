@@ -5,6 +5,7 @@ mod delete_all_from_user;
 mod delete_by_event;
 mod delete_list;
 mod delete_range;
+mod find_events;
 mod get_file_info;
 mod get_remote_file;
 mod get_remote_thumbnail;
@@ -33,6 +34,14 @@ pub(super) enum MediaCommand {
 		/// - The event ID which contains the media and thumbnail MXC URLs
 		#[arg(long)]
 		event_id: OwnedEventId,
+	},
+
+	/// - Finds event IDs that reference a media file, given its filename in
+	///   the media directory
+	FindEvents {
+		/// - Filename or path of the file in the media directory
+		#[arg(allow_hyphen_values = true)]
+		file: String,
 	},
 
 	/// - Deletes a codeblock list of MXC URLs from our database and on the

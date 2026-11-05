@@ -16,6 +16,17 @@ Returns the stored metadata for a media file: content type, file size,
 creation time, and which user uploaded it. Useful for investigating a
 reported file before deciding whether to delete it.
 
+### find-events
+
+```
+!admin media find-events <filename>
+```
+
+Finds the event IDs that reference a media file by the filename
+stored in the `media/` directory. This command resolves the filename
+to its MXC URI and then scans the timeline, outlier events, and
+retained originals for references to it.
+
 ### get-remote-file
 
 ```
