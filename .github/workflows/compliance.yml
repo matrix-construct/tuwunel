@@ -11,7 +11,7 @@ on:
         description: Client or Server tested with
       runner:
         type: string
-        default: 'het'
+        default: 'compliance-tester'
         description: Runner mask
       max_parallel:
         type: number

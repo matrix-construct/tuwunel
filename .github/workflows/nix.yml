@@ -27,7 +27,7 @@ on:
       runner:
         type: string
         description: "Runner mask"
-        default: 'het'
+        default: 'nix-builder'
       max-parallel:
         type: number
         description: "Limit number of concurrent builds"
@@ -54,7 +54,7 @@ jobs:
   discover:
     name: Discover
     if: github.repository == 'matrix-construct/tuwunel'
-    runs-on: ["${{inputs.machine || 'X64'}}", "${{inputs.runner || 'het'}}"]
+    runs-on: ["${{inputs.machine || 'X64'}}", "${{inputs.runner || 'nix-builder'}}"]
 
     outputs:
       attrs: ${{steps.attrs.outputs.attrs}}
@@ -127,9 +127,9 @@ jobs:
       !failure() && !cancelled()
       && fromJSON(needs.discover.outputs.attrs)[0] != null
 
-    runs-on: ["${{inputs.machine || 'X64'}}", "${{inputs.runner || 'het'}}"]
+    runs-on: ["${{inputs.machine || 'X64'}}", "${{inputs.runner || 'nix-builder'}}"]
 
-    # Deliberately low. This workflow shares het with the
+    # Deliberately low. This workflow shares its runners with the
     # release build, which takes priority; publishing the cache is background
     # work and is allowed to take as long as it needs.
     strategy:
@@ -179,7 +179,7 @@ jobs:
       && (inputs.devshells == null || fromJSON(inputs.devshells))
       && fromJSON(needs.discover.outputs.shells)[0] != null
 
-    runs-on: ["${{inputs.machine || 'X64'}}", "${{inputs.runner || 'het'}}"]
+    runs-on: ["${{inputs.machine || 'X64'}}", "${{inputs.runner || 'nix-builder'}}"]
 
     strategy:
       fail-fast: false

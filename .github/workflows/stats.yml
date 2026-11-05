@@ -16,7 +16,7 @@ jobs:
       !cancelled()
 
     name: Stats
-    runs-on: ["${{fromJSON(inputs.machines)[0]}}", "het"]
+    runs-on: ["${{fromJSON(inputs.machines)[0]}}", "stats-reporter"]
 
     permissions:
       actions: read

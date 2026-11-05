@@ -125,7 +125,7 @@ jobs:
       sys_versions: ${{inputs.sys_versions}}
       sys_targets: '["x86_64-v1-linux-gnu"]'
       machines: '["X64"]'
-      runner: 'het'
+      runner: 'docs-builder'
       #excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
       release_url: ${{inputs.release_url}}
@@ -162,7 +162,7 @@ jobs:
       sys_versions: ${{inputs.sys_versions}}
       sys_targets: '["x86_64-v1-linux-gnu"]'
       machines: ${{inputs.machines}}
-      runner: 'het'
+      runner: 'book-builder'
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
       release_url: ${{inputs.release_url}}

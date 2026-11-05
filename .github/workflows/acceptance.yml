@@ -12,7 +12,7 @@ on:
         description: Client software name
       runner:
         type: string
-        default: 'het'
+        default: 'acceptance-tester'
         description: Runner mask
       workers:
         type: string
