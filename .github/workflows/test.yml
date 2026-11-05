@@ -73,7 +73,7 @@ on:
         default: 'true'
       complement_runner:
         type: string
-        default: 'het'
+        default: 'compliance-tester'
       complement_verbose:
         type: string
         default: 'false'
@@ -109,7 +109,7 @@ on:
         default: 'false'
       playwright_runner:
         type: string
-        default: 'het'
+        default: 'acceptance-tester'
       playwright_retries:
         type: string
         default: '3'
@@ -119,6 +119,9 @@ on:
       playwright_shards:
         type: string
         default: '1'
+      bench_runner:
+        type: string
+        default: 'bench-tester'
 
     secrets:
       cachix_auth_token:
@@ -203,6 +206,7 @@ jobs:
       rust_targets: ${{inputs.rust_targets}}
       sys_targets: '["x86_64-v3-linux-gnu"]'
       machines: ${{inputs.machines}}
+      runner: ${{inputs.bench_runner}}
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
       checkout: ${{inputs.checkout}}
@@ -229,6 +233,7 @@ jobs:
       rust_targets: ${{inputs.rust_targets}}
       sys_targets: '["x86_64-v3-linux-gnu"]'
       machines: ${{inputs.machines}}
+      runner: ${{inputs.bench_runner}}
       includes: ${{inputs.includes}}
       excludes: ${{inputs.excludes}}
       checkout: ${{inputs.checkout}}

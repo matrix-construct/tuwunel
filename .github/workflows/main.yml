@@ -156,7 +156,6 @@ jobs:
       enable_test_complement: ${{fromJSON(inputs.enable_test_complement || 'true')}}
       enable_test_complement_debug: ${{fromJSON(inputs.enable_test_complement_debug || 'true')}}
       complement_verbose: ${{fromJSON(inputs.complement_verbose || 'false')}}
-      complement_runner: 'het'
       enable_test_complement_crypto: ${{fromJSON(inputs.enable_test_complement_crypto || 'true')}}
       complement_crypto_verbose: ${{fromJSON(inputs.complement_crypto_verbose || 'false')}}
       enable_test_complement_interop: ${{fromJSON(inputs.enable_test_complement_interop || 'true')}}
@@ -165,7 +164,6 @@ jobs:
       enable_test_mas: ${{fromJSON(inputs.enable_test_mas || 'true')}}
       mas_verbose: ${{fromJSON(inputs.mas_verbose || 'false')}}
       enable_test_playwright: ${{fromJSON(inputs.enable_test_playwright || env.is_branch || 'false')}}
-      playwright_runner: 'het'
       playwright_shards: ${{inputs.playwright_shards || vars.PLAYWRIGHT_SHARDS || env.default_playwright_shards}}
       playwright_workers: ${{inputs.playwright_workers || vars.PLAYWRIGHT_WORKERS || env.default_playwright_workers}}
       enable_package: ${{fromJSON(inputs.enable_package || 'true')}}
@@ -318,7 +316,6 @@ jobs:
       enable_rustsdk: ${{needs.init.outputs.enable_test_rustsdk}}
       enable_complement: ${{needs.init.outputs.enable_test_complement}}
       enable_complement_debug: ${{needs.init.outputs.enable_test_complement_debug}}
-      complement_runner: ${{needs.init.outputs.complement_runner}}
       complement_verbose: ${{needs.init.outputs.complement_verbose}}
       enable_complement_crypto: ${{needs.init.outputs.enable_test_complement_crypto}}
       complement_crypto_verbose: ${{needs.init.outputs.complement_crypto_verbose}}
@@ -328,7 +325,6 @@ jobs:
       enable_mas: ${{needs.init.outputs.enable_test_mas}}
       mas_verbose: ${{needs.init.outputs.mas_verbose}}
       enable_playwright: ${{needs.init.outputs.enable_test_playwright}}
-      playwright_runner: ${{needs.init.outputs.playwright_runner}}
       playwright_shards: ${{needs.init.outputs.playwright_shards}}
       playwright_workers: ${{needs.init.outputs.playwright_workers}}
       cargo_profiles: ${{needs.init.outputs.cargo_profiles}}

@@ -194,6 +194,8 @@ jobs:
       rust_targets: ${{inputs.rust_targets}}
       sys_targets: ${{inputs.sys_targets}}
       machines: ${{inputs.machines}}
+      # Publish pushes these stages from the builder that made them.
+      runner: 'publisher'
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
       release_url: ${{inputs.release_url}}
@@ -228,6 +230,8 @@ jobs:
       rust_targets: ${{inputs.rust_targets}}
       sys_targets: ${{inputs.sys_targets}}
       machines: ${{inputs.machines}}
+      # Publish pushes these stages from the builder that made them.
+      runner: 'publisher'
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
       release_url: ${{inputs.release_url}}

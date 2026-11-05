@@ -118,7 +118,7 @@ jobs:
       && (github.ref == 'refs/heads/main' || contains(github.ref, 'refs/tags/v'))
 
     name: Containers
-    runs-on: ${{matrix.machine}}
+    runs-on: ["${{matrix.machine}}", "publisher"]
     strategy:
       fail-fast: true
       matrix:
