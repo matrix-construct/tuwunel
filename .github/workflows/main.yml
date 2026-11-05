@@ -51,8 +51,8 @@ on:
         description: "Matrix Selector: Machine architectures"
       runners:
         type: string
-        default: '["het", "aws"]'
-        description: "Matrix Selector: Runner labels"
+        default: ''
+        description: "Matrix Selector: Runner labels (default vars.RUNNERS)"
       package_containers:
         type: string
         default: '["docker", "oci"]'
@@ -108,7 +108,7 @@ permissions:
 jobs:
   init:
     name: Init
-    runs-on: ${{matrix.runner}}
+    runs-on: ["${{matrix.machine}}", "${{matrix.runner}}"]
     permissions:
       contents: write # Create Release on tags
     env:
@@ -208,15 +208,15 @@ jobs:
         runner: ${{matrix.runner}}
         pipeline: ${{inputs.pipeline || github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
         seed_builder: ${{vars.SEED_BUILDER || 'jevolk'}}
-        reserved_space:    '{"het": "60GB",  "aws": "12GB", "ec2": "120GB"}'
-        max_used_space:    '{"het": "250GB", "aws": "32GB", "ec2": "1000GB"}'
-        cachemount_max:    '{"het": "80GB",  "aws": "12GB", "ec2": "160GB"}'
-        min_free_space:    '{"het": "200GB", "aws": "16GB", "ec2": "400GB"}'
-        safety_free_space: '{"het": "64GB",  "aws": "8GB",  "ec2": "128GB"}'
-        reap_idle_hours:   '{"het": "24",    "aws": "24",   "ec2": "24"}'
-        reap_min_free:     '{"het": "500GB", "aws": "40GB", "ec2": "1000GB"}'
-        seed_budget:       '{"het": "300GB", "aws": "0GB",  "ec2": "600GB"}'
-        builder_memory:    '{"het": "76GB",  "aws": "",     "ec2": "224GB"}'
+        reserved_space:    '{"het": "60GB",  "aws": "12GB", "ec2": "120GB", "gcp": "20GB"}'
+        max_used_space:    '{"het": "250GB", "aws": "32GB", "ec2": "1000GB", "gcp": "100GB"}'
+        cachemount_max:    '{"het": "80GB",  "aws": "12GB", "ec2": "160GB", "gcp": "30GB"}'
+        min_free_space:    '{"het": "200GB", "aws": "16GB", "ec2": "400GB", "gcp": "40GB"}'
+        safety_free_space: '{"het": "64GB",  "aws": "8GB",  "ec2": "128GB", "gcp": "16GB"}'
+        reap_idle_hours:   '{"het": "24",    "aws": "24",   "ec2": "24", "gcp": "24"}'
+        reap_min_free:     '{"het": "500GB", "aws": "40GB", "ec2": "1000GB", "gcp": "60GB"}'
+        seed_budget:       '{"het": "300GB", "aws": "0GB",  "ec2": "600GB", "gcp": "140GB"}'
+        builder_memory:    '{"het": "76GB",  "aws": "",     "ec2": "224GB", "gcp": "13GB"}'
       run: |
         .github/workflows/init.sh
 
