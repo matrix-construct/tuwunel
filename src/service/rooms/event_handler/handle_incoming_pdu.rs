@@ -15,6 +15,7 @@ use tuwunel_core::{
 	utils::{
 		BoolExt,
 		future::ReadyEqExt,
+		result::NotFound,
 		stream::{IterStream, TryBroadbandExt, TryReadyExt},
 	},
 	warn,
@@ -70,7 +71,7 @@ pub async fn handle_pushed_pdu<'a>(
 	}
 
 	if self
-		.handle_rescinded_invite(room_id, &pdu)
+		.handle_rescinded_invite(room_id, event_id, &pdu)
 		.await?
 		.is_false()
 	{
@@ -291,7 +292,9 @@ pub async fn handle_incoming_pdu<'a>(
 /// so the invited user's `/sync` reflects the rescission. Mirrors Synapse's
 /// out-of-band membership handling: only a kick from the original inviter is
 /// honored, since without the room state we cannot judge any other sender's
-/// authority. Returns `true` when a rescission was applied.
+/// authority. An event already accepted is a replay of history, which leaves a
+/// newer invite from that inviter alone. Returns `true` when a rescission was
+/// applied.
 #[implement(super::Service)]
 // cold arm: rescission, whose layout overflows the route's depth limit
 #[async_noinline]
@@ -304,6 +307,7 @@ pub async fn handle_incoming_pdu<'a>(
 async fn handle_rescinded_invite<'a>(
 	&'a self,
 	room_id: &'a RoomId,
+	event_id: &'a EventId,
 	pdu: &'a CanonicalJsonObject,
 ) -> Result<bool> {
 	if pdu
@@ -374,6 +378,17 @@ async fn handle_rescinded_invite<'a>(
 
 	// Honor the rescission only from the original inviter.
 	if inviter.as_ref() != Some(&sender) {
+		return Ok(false);
+	}
+
+	if self
+		.services
+		.timeline
+		.get_pdu_id(event_id)
+		.await
+		.optional()?
+		.is_some()
+	{
 		return Ok(false);
 	}
 

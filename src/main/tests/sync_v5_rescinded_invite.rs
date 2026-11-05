@@ -4,13 +4,16 @@ use serde_json::{Value, json};
 use tuwunel_core::{
 	Result, implement,
 	ruma::{
-		CanonicalJsonObject, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, RoomId,
-		RoomVersionId, UserId,
-		events::{AnyStrippedStateEvent, StateEventType, room::member::MembershipState},
+		CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId,
+		RoomId, RoomVersionId, UserId,
+		events::{
+			AnyStrippedStateEvent, StateEventType,
+			room::member::{MembershipState, RoomMemberEventContent},
+		},
 		serde::Raw,
 	},
 };
-use tuwunel_matrix::pdu::into_outgoing_federation;
+use tuwunel_matrix::pdu::{PduBuilder, into_outgoing_federation};
 use tuwunel_service::{
 	Services,
 	rooms::{short::ShortStateHash, state_cache::MembershipUpdate},
@@ -20,6 +23,7 @@ use self::{
 	client::{Client, field, register},
 	fixture::boot,
 	member_event::find_member_event,
+	sign::sign,
 	state_cache::membership_update,
 };
 
@@ -42,6 +46,9 @@ mod membership;
 
 #[path = "sliding_sync/resume.rs"]
 mod resume;
+
+#[path = "fixture/sign.rs"]
+mod sign;
 
 #[path = "fixture/state_cache.rs"]
 mod state_cache;
@@ -137,7 +144,11 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.unreadable_last_event_keeps_the_timeline()
 		.await?;
 
-	accounts.other_sender_is_ignored(&bystander).await
+	accounts
+		.other_sender_is_ignored(&bystander)
+		.await?;
+
+	accounts.held_kick_still_rescinds().await
 }
 
 #[implement(Accounts, params = "<'_>")]
@@ -369,12 +380,25 @@ async fn state_hash(&self, room_id: &RoomId) -> Option<ShortStateHash> {
 async fn push_kick(&self, room_id: &RoomId, sender: &UserId) -> Result<(OwnedEventId, bool)> {
 	let &Self { services, invitee, .. } = self;
 	let (event_id, kick) = sign_kick(services, room_id, sender, invitee)?;
+	let handled = self.deliver(room_id, &event_id, kick).await?;
+
+	Ok((event_id, handled))
+}
+
+#[implement(Accounts, params = "<'_>")]
+async fn deliver(
+	&self,
+	room_id: &RoomId,
+	event_id: &EventId,
+	event: CanonicalJsonObject,
+) -> Result<bool> {
+	let &Self { services, .. } = self;
 	let handled = services
 		.event_handler
-		.handle_pushed_pdu(services.globals.server_name(), room_id, &event_id, kick)
+		.handle_pushed_pdu(services.globals.server_name(), room_id, event_id, event)
 		.await?;
 
-	Ok((event_id, handled.is_some()))
+	Ok(handled.is_some())
 }
 
 #[implement(Accounts, params = "<'_>")]
@@ -705,6 +729,48 @@ async fn other_sender_is_ignored(&self, bystander: &UserId) -> Result {
 	assert!(!handled, "a dropped kick reported a timeline position");
 	assert_eq!(membership, Some(MembershipState::Invite), "another sender cleared the invite");
 	assert!(stored.is_err(), "a dropped kick was stored");
+
+	Ok(())
+}
+
+/// A kick held only as an outlier was never applied, so it can still rescind.
+///
+/// Ingestion stores an outlier ahead of timeline processing, which can fail
+/// and leave the invite for a retry to clear after the server has left.
+#[implement(Accounts, params = "<'_>")]
+async fn held_kick_still_rescinds(&self) -> Result {
+	let &Self { services, inviter, invitee, .. } = self;
+	let room_id = self.public_room().await?;
+	let content = RoomMemberEventContent::new(MembershipState::Leave);
+	let builder = PduBuilder::state(invitee.to_string(), &content);
+	let (event, kick) = sign(services, inviter, &room_id, builder).await?;
+	let kick = into_outgoing_federation(kick, &ROOM_VERSION);
+	let event_id = event.event_id;
+
+	self.abandon_with_invite(&room_id).await?;
+
+	services
+		.event_handler
+		.handle_incoming_pdu(
+			services.globals.server_name(),
+			&room_id,
+			&event_id,
+			kick.clone(),
+			false,
+		)
+		.await?;
+
+	let held = services
+		.timeline
+		.outlier_pdu_exists(&event_id)
+		.await;
+
+	self.deliver(&room_id, &event_id, kick).await?;
+
+	let membership = self.membership(&room_id).await;
+
+	assert!(held.is_ok(), "ingestion did not hold the kick as an outlier");
+	assert_eq!(membership, Some(MembershipState::Leave), "an outlier kept the invite");
 
 	Ok(())
 }

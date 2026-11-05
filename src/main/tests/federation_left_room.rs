@@ -12,9 +12,18 @@ use tuwunel_core::{
 		TransactionId, UserId,
 		api::{
 			error::ErrorKind,
-			federation::transactions::send_transaction_message::v1::Request as TransactionRequest,
+			federation::{
+				membership::{RawStrippedState, create_invite::v2::Request as InviteRequest},
+				transactions::send_transaction_message::v1::Request as TransactionRequest,
+			},
 		},
-		events::room::{member::MembershipState, message::RoomMessageEventContent},
+		events::{
+			StateEventType,
+			room::{
+				member::{MembershipState, RoomMemberEventContent},
+				message::RoomMessageEventContent,
+			},
+		},
 	},
 };
 use tuwunel_matrix::pdu::PduBuilder;
@@ -88,7 +97,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	resident_room_takes_a_push(&accounts).await?;
 	backfill_reaches_a_left_room(&accounts).await?;
 	push_waits_out_a_join(&accounts).await?;
-	frozen_ban_defers_to_the_room(&accounts).await
+	frozen_ban_defers_to_the_room(&accounts).await?;
+	stored_kick_spares_a_newer_invitation(&accounts).await
 }
 
 /// An old join replayed into a left room writes nothing.
@@ -211,6 +221,61 @@ async fn frozen_ban_defers_to_the_room(accounts: &Accounts<'_>) -> Result {
 	Ok(())
 }
 
+/// A kick the room accepted cannot rescind an invitation that came after it.
+///
+/// The kick's sender is the new invitation's inviter and its signature holds,
+/// which is all a rescission asks of an event the server has not seen. The
+/// timeline holds this one, so delivering it again is only a duplicate.
+async fn stored_kick_spares_a_newer_invitation(accounts: &Accounts<'_>) -> Result {
+	let &Accounts { services, member_id, .. } = accounts;
+	let room_id = accounts.room().await?;
+
+	accounts
+		.owner
+		.act_on(&room_id, "kick", member_id)
+		.await?;
+
+	let member_key = member_id.as_str();
+	let (kick_id, kick) = accounts
+		.stored_state(&room_id, &StateEventType::RoomMember, member_key)
+		.await?;
+
+	let invite = accounts.signed_invite(&room_id).await?;
+
+	assert!(accounts.is_timeline(&kick_id).await, "the kick was not stored");
+
+	accounts.abandon(&room_id).await?;
+	accounts.deliver_invite(&room_id, invite).await?;
+
+	let invite_count = services
+		.state_cache
+		.get_invite_count(&room_id, member_id)
+		.await?;
+
+	let results = accounts.push(kick).await?;
+	let membership = services
+		.state_cache
+		.user_membership(member_id, &room_id)
+		.await;
+
+	let left = services
+		.state_cache
+		.get_left_count(&room_id, member_id)
+		.await;
+
+	let replayed_count = services
+		.state_cache
+		.get_invite_count(&room_id, member_id)
+		.await;
+
+	assert_handled(&results, &kick_id);
+	assert_eq!(membership, Some(MembershipState::Invite), "the replay rescinded the invitation");
+	assert!(left.is_err(), "the replay wrote a leave");
+	assert_eq!(replayed_count.ok(), Some(invite_count), "the replay moved the invitation");
+
+	Ok(())
+}
+
 #[implement(Accounts, params = "<'_>")]
 async fn room(&self) -> Result<OwnedRoomId> {
 	let room_id = self
@@ -226,6 +291,11 @@ async fn room(&self) -> Result<OwnedRoomId> {
 #[implement(Accounts, params = "<'_>")]
 async fn leave(&self, room_id: &RoomId) -> Result {
 	self.member.act(room_id, "leave").await?;
+	self.abandon(room_id).await
+}
+
+#[implement(Accounts, params = "<'_>")]
+async fn abandon(&self, room_id: &RoomId) -> Result {
 	self.owner.act(room_id, "leave").await?;
 
 	let resident = self
@@ -252,9 +322,54 @@ async fn push(&self, pdu: Box<RawJsonValue>) -> Result<Value> {
 }
 
 #[implement(Accounts, params = "<'_>")]
+async fn stored_state(
+	&self,
+	room_id: &RoomId,
+	kind: &StateEventType,
+	state_key: &str,
+) -> Result<Signed> {
+	let &Self { services, .. } = self;
+	let event = services
+		.state_accessor
+		.room_state_get(room_id, kind, state_key)
+		.await?;
+
+	let json = services
+		.timeline
+		.get_pdu_json(&event.event_id)
+		.await?;
+
+	let pdu = services
+		.federation
+		.format_pdu_into(json, None)
+		.await;
+
+	Ok((event.event_id, pdu))
+}
+
+#[implement(Accounts, params = "<'_>")]
+async fn signed_invite(&self, room_id: &RoomId) -> Result<Signed> {
+	let content = RoomMemberEventContent::new(MembershipState::Invite);
+	let builder = PduBuilder::state(self.member_id.to_string(), &content);
+
+	self.signed(self.owner_id, room_id, builder).await
+}
+
+#[implement(Accounts, params = "<'_>")]
 async fn signed_message(&self, user_id: &UserId, room_id: &RoomId) -> Result<Signed> {
 	let content = RoomMessageEventContent::text_plain("held back");
 	let builder = PduBuilder::timeline(&content);
+
+	self.signed(user_id, room_id, builder).await
+}
+
+#[implement(Accounts, params = "<'_>")]
+async fn signed(
+	&self,
+	user_id: &UserId,
+	room_id: &RoomId,
+	builder: PduBuilder,
+) -> Result<Signed> {
 	let (event, json) = sign(self.services, user_id, room_id, builder).await?;
 	let pdu = self
 		.services
@@ -263,6 +378,35 @@ async fn signed_message(&self, user_id: &UserId, room_id: &RoomId) -> Result<Sig
 		.await;
 
 	Ok((event.event_id, pdu))
+}
+
+/// Invite the member over the federation route, as a remote inviter's server
+/// does once this one has left.
+///
+/// The stripped state carries the create event, which is where a rescission
+/// reads the room version.
+#[implement(Accounts, params = "<'_>")]
+async fn deliver_invite(&self, room_id: &RoomId, (event_id, event): Signed) -> Result {
+	let &Self { services, base, .. } = self;
+	let room_version = services.state.get_room_version(room_id).await?;
+	let (_, create) = self
+		.stored_state(room_id, &StateEventType::RoomCreate, "")
+		.await?;
+
+	let request = InviteRequest {
+		room_id: room_id.to_owned(),
+		event_id,
+		room_version,
+		event,
+		invite_room_state: vec![RawStrippedState::Pdu(create)],
+		via: None,
+	};
+
+	let (status, body) = send(services, base, request).await?;
+
+	assert_eq!(status, 200, "the invitation was refused: {body}");
+
+	Ok(())
 }
 
 /// Whether an event was accepted into the room rather than held as an outlier.
