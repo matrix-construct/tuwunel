@@ -101,7 +101,11 @@ on:
 concurrency:
   queue: max
   cancel-in-progress: false
-  group: ${{github.workflow}}-${{github.ref}}
+  group: >-
+    ${{ contains(github.ref, 'tags/v') && 'release-priority'
+     || github.ref == 'refs/heads/main' && 'release-priority'
+     || format('{0}-{1}', github.workflow, github.ref)
+     }}
 
 permissions:
   contents: read
@@ -112,6 +116,15 @@ jobs:
     runs-on: ["${{matrix.machine}}", "${{matrix.runner}}"]
     permissions:
       contents: write # Create Release on tags
+    concurrency:
+      queue: max
+      cancel-in-progress: false
+      group: >-
+        ${{ contains(github.ref, 'tags/v') && format('release-{0}', github.run_id)
+         || github.ref == 'refs/heads/main' && format('release-{0}', github.run_id)
+         || 'release-priority'
+         }}
+
     env:
       default_cargo_profiles: '["test", "bench", "release"]'
       default_feat_sets: '["none", "default", "all"]'
