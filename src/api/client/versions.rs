@@ -82,7 +82,7 @@ static VERSIONS: [&str; 27] = [
 	"v1.19",  /* mutual rooms (MSC2666) */
 ];
 
-static UNSTABLE_FEATURES: [&str; 42] = [
+static UNSTABLE_FEATURES: [&str; 43] = [
 	"org.matrix.e2e_cross_signing",
 	// private read receipts (https://github.com/matrix-org/matrix-spec-proposals/pull/2285)
 	"org.matrix.msc2285.stable",
@@ -110,6 +110,8 @@ static UNSTABLE_FEATURES: [&str; 42] = [
 	"org.matrix.msc3916.stable",
 	// intentional mentions (https://github.com/matrix-org/matrix-spec-proposals/pull/3952)
 	"org.matrix.msc3952_intentional_mentions",
+	// delayed call memberships only (https://github.com/matrix-org/matrix-spec-proposals/pull/4140)
+	"org.matrix.msc4140",
 	// MatrixRTC transport discovery (https://github.com/matrix-org/matrix-spec-proposals/pull/4143)
 	"org.matrix.msc4143",
 	// MSC4133 (custom profile fields) and MSC4175 (m.tz) stabilized in
