@@ -665,8 +665,9 @@ jobs:
     name: Compliance (mautrix-go)
     needs: [complement]
     concurrency:
-      group: complemau
+      queue: max
       cancel-in-progress: false
+      group: complemau
 
     uses: ./.github/workflows/compliance.yml
     with:

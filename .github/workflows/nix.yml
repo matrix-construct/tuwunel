@@ -36,10 +36,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: nix-${{github.ref}}
-  cancel-in-progress: false
-
 env:
   # Applies whether Nix came from install-nix-action or was already present on
   # a self-hosted runner, so the substituter does not depend on the runner's

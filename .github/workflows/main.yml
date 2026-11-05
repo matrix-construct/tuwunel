@@ -99,8 +99,9 @@ on:
         description: "Playwright: workers per shard"
 
 concurrency:
-  group: ${{github.workflow}}-${{github.ref}}
+  queue: max
   cancel-in-progress: false
+  group: ${{github.workflow}}-${{github.ref}}
 
 permissions:
   contents: read

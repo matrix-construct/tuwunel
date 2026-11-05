@@ -72,8 +72,9 @@ jobs:
 
     runs-on: ["${{matrix.machine}}", "${{inputs.runner}}"]
     concurrency:
-      group: playwright-cant-walk-and-chew-bubblegum-${{matrix.shard}}
+      queue: max
       cancel-in-progress: false
+      group: playwright-cant-walk-and-chew-bubblegum-${{matrix.shard}}
 
     strategy:
       fail-fast: false
