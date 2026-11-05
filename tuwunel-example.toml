@@ -4422,10 +4422,10 @@
 
 # Requires an access token for
 # [MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388)
-# discovery and session creation.
+# session creation.
 #
-# When disabled, clients can discover and create these sessions without a
-# token. The
+# When enabled, discovery tells a client without a token that it cannot
+# create a session. The
 # [MSC4108](https://github.com/matrix-org/matrix-spec-proposals/pull/4108)
 # endpoint stays open in either mode.
 #

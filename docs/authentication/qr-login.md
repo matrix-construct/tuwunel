@@ -29,11 +29,15 @@ session pool. These settings are reloadable:
 - `rendezvous_max_sessions` defaults to `100`. It limits concurrent sessions
   before the oldest is evicted.
 - `rendezvous_authenticated_only` defaults to `true`. It requires an access
-  token for MSC4388 discovery and creation. MSC4108 remains open.
-- `rendezvous_rc_per_second` defaults to `10`. It sets the per-client-IP
-  MSC4388 request refill rate. A zero value is treated as one.
-- `rendezvous_rc_burst_count` defaults to `20`. It sets the MSC4388 request
-  burst depth. A zero value is treated as one.
+  token to create an MSC4388 session. With this setting enabled, the discovery
+  response tells a client without a token that it cannot create a session.
+  MSC4108 remains open.
+- `rendezvous_rc_per_second` defaults to `10`. It sets how many MSC4388
+  requests each client IP address regains permission to send per second.
+  A zero value is treated as one.
+- `rendezvous_rc_burst_count` defaults to `20`. It sets how many MSC4388
+  requests each client IP address can send in a burst before waiting for its
+  allowance to refill. A zero value is treated as one.
 
 Both transports share the configured session count, expiry, eviction, and
 restart behavior. Sessions are held in memory, cleared on restart, and removed
