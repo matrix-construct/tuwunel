@@ -38,6 +38,7 @@ const UNKNOWN_TOKEN: &str = "M_UNKNOWN_TOKEN";
 const LOGIN_TOKEN: &str = "jwt-login-deactivated-login-token";
 const BRIDGE_TOKEN: &str = "jwt-login-deactivated-bridge-token";
 const DEVICE: &str = "JWTLOGINDEVICE";
+const UNSEEN_DEVICE: &str = "JWTUNSEENDEVICE";
 
 const BRIDGE: Bridge<'static> = Bridge {
 	id: "jwt-login-deactivated",
@@ -375,9 +376,10 @@ async fn correct_password_inside_the_burst(
 /// lifetime and leaves a password login alone.
 ///
 /// The JWT login gets no refresh token whether or not the client asks for one,
-/// expires into a soft logout, and resumes its device with another login. A
-/// refresh token the device already held keeps working, and an expired token
-/// can still log out.
+/// expires into a soft logout, and resumes its device with another login. It
+/// retires the refresh tokens its device held, current and spent, which a
+/// lasting or refreshing login leaves working, and an expired token can still
+/// log out.
 async fn exercise_expiry(services: &Services, base: &str) -> Result {
 	let server_name = services.globals.server_name();
 	let user_id = UserId::parse_with_server_name("expiring", server_name)?;
@@ -392,15 +394,39 @@ async fn exercise_expiry(services: &Services, base: &str) -> Result {
 
 	let password_auth = password_body(&user_id, PASSWORD);
 	let password_session = expect_login(services, base, &password_auth, LASTING).await?;
-	let refreshing_auth = on_device(refreshing(password_auth));
-	let refreshing_session = expect_login(services, base, &refreshing_auth, refreshable).await?;
+	let device_auth = on_device(password_auth, DEVICE);
+	let refreshing_auth = refreshing(device_auth.clone());
+	let first_session = expect_login(services, base, &refreshing_auth, refreshable).await?;
+
+	expect_login(services, base, &device_auth, LASTING).await?;
+
+	let spent_session = expect_refresh(services, base, &first_session).await?;
+	let current_session = expect_login(services, base, &refreshing_auth, refreshable).await?;
+
+	// Inside the reuse grace window a spent token still exchanges until retired.
+	expect_refresh(services, base, &spent_session).await?;
 
 	let plain_login = jwt_auth(&user_id)?;
 	let leaving = expect_login(services, base, &plain_login, expiring).await?;
 	let leaving_all = expect_login(services, base, &plain_login, expiring).await?;
 
-	let device_login = on_device(refreshing(jwt_auth(&user_id)?));
+	let device_login = on_device(refreshing(jwt_auth(&user_id)?), DEVICE);
 	let session = expect_login(services, base, &device_login, expiring).await?;
+
+	expect_retired(services, base, &spent_session).await?;
+	expect_retired(services, base, &current_session).await?;
+
+	let unseen_auth = on_device(password_body(&user_id, PASSWORD), UNSEEN_DEVICE);
+	let unseen_session =
+		expect_login(services, base, &refreshing(unseen_auth), refreshable).await?;
+
+	// A login that read no device row meets a refresh token another login just gave it.
+	services.db["userdeviceid_metadata"].del((&user_id, UNSEEN_DEVICE));
+
+	let unseen_login = on_device(jwt_auth(&user_id)?, UNSEEN_DEVICE);
+
+	expect_login(services, base, &unseen_login, expiring).await?;
+	expect_retired(services, base, &unseen_session).await?;
 
 	outlast_access_token(services).await;
 
@@ -423,11 +449,6 @@ async fn exercise_expiry(services: &Services, base: &str) -> Result {
 		return Err!("another JWT login did not resume {DEVICE}: {status} {body}");
 	}
 
-	let refresh = json!({"refresh_token": refreshing_session["refresh_token"]});
-	let (status, body) = send(post(services, base, "refresh", &refresh)).await?;
-
-	expect_signed_in("the device's earlier refresh token", status, &body)?;
-
 	expect_logout(services, base, "logout", &leaving).await?;
 	expect_logout(services, base, "logout/all", &leaving_all).await?;
 
@@ -435,6 +456,30 @@ async fn exercise_expiry(services: &Services, base: &str) -> Result {
 		.await?;
 
 	Ok(())
+}
+
+async fn expect_refresh(services: &Services, base: &str, session: &Value) -> Result<Value> {
+	let (status, body) = refresh(services, base, session).await?;
+
+	expect_signed_in("a refresh token before the JWT login", status, &body)?;
+
+	Ok(body)
+}
+
+async fn expect_retired(services: &Services, base: &str, session: &Value) -> Result {
+	let (status, body) = refresh(services, base, session).await?;
+
+	expect_error("a retired refresh token", status, &body, StatusCode::FORBIDDEN, "M_FORBIDDEN")
+}
+
+async fn refresh(
+	services: &Services,
+	base: &str,
+	session: &Value,
+) -> Result<(StatusCode, Value)> {
+	let body = json!({"refresh_token": session["refresh_token"]});
+
+	send(post(services, base, "refresh", &body)).await
 }
 
 async fn expect_logout(services: &Services, base: &str, path: &str, session: &Value) -> Result {
@@ -517,7 +562,7 @@ fn lifetime_ms(services: &Services) -> u64 {
 
 fn refreshing(body: Value) -> Value { with_field(body, "refresh_token", true) }
 
-fn on_device(body: Value) -> Value { with_field(body, "device_id", DEVICE) }
+fn on_device(body: Value, device: &str) -> Value { with_field(body, "device_id", device) }
 
 fn with_field<T>(mut body: Value, key: &str, value: T) -> Value
 where

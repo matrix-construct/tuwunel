@@ -3,7 +3,7 @@
 use std::{future::ready, pin::pin, time::Duration};
 
 use futures::{
-	channel::oneshot::channel,
+	channel::oneshot::{Receiver, Sender, channel},
 	future::{Either, join, select},
 };
 use tokio::time::{sleep, timeout};
@@ -66,6 +66,8 @@ async fn with_grace(services: &Services, _base: &str) -> Result {
 	grace_without_successor_is_refused(services).await?;
 	refused_gate_spends_nothing(services).await?;
 	contenders_wait_for_the_device_lock(services).await?;
+	expiring_login_refuses_a_refresh_in_flight(services).await?;
+	expiring_login_retires_the_refresh_it_waited_for(services).await?;
 	metadata_updates_keep_removal(services).await?;
 	issuing_forgets_older_expired_tokens(services).await
 }
@@ -77,8 +79,7 @@ async fn with_grace(services: &Services, _base: &str) -> Result {
 /// to the device ID it was given.
 async fn removed_device_is_issued_no_tokens(services: &Services) -> Result {
 	let device = device_id!("REMOVEDDEVICE");
-	let (user, original) = session(services, "removed", device).await?;
-	let seen = classify(services, &original).await;
+	let (user, original, seen) = classified_session(services, "removed", device).await?;
 
 	services.users.remove_device(&user, device).await;
 
@@ -109,8 +110,7 @@ async fn removed_device_is_issued_no_tokens(services: &Services) -> Result {
 /// either took the device lock.
 async fn concurrent_refreshes_keep_one_successor(services: &Services) -> Result {
 	let device = device_id!("CONCURRENTDEVICE");
-	let (_, original) = session(services, "concurrent", device).await?;
-	let seen = classify(services, &original).await;
+	let (_, original, seen) = classified_session(services, "concurrent", device).await?;
 	let (_, first) = exchange(services, &seen, &original).await?;
 	let (access, second) = exchange(services, &seen, &original).await?;
 
@@ -222,20 +222,8 @@ async fn locked_out(services: &Services, presented: &str, current: &str) -> Resu
 /// only after both have been watched for `CONTENTION`.
 async fn contenders_wait_for_the_device_lock(services: &Services) -> Result {
 	let device = device_id!("HELDDEVICE");
-	let (user, original) = session(services, "held", device).await?;
-	let seen = classify(services, &original).await;
-	let (at_gate, reached_gate) = channel();
-	let (release, released) = channel();
-	let gate = async move {
-		at_gate
-			.send(())
-			.expect("the contenders stopped watching the account check");
-
-		released
-			.await
-			.map_err(|_| err!("the account check was never released"))
-	};
-
+	let (user, original, seen) = classified_session(services, "held", device).await?;
+	let (gate, reached_gate, release) = parked_gate();
 	let refresh = exchange_gated(services, &seen, &original, gate);
 	let contenders = async {
 		let reached = reached_gate.await.is_ok();
@@ -272,6 +260,26 @@ async fn contenders_wait_for_the_device_lock(services: &Services) -> Result {
 	Ok(())
 }
 
+/// An account check that holds its exchange under the device lock until
+/// released.
+///
+/// Returns the check, a signal that the exchange reached it, and its release.
+fn parked_gate() -> (impl Future<Output = Result> + Send, Receiver<()>, Sender<()>) {
+	let (at_gate, reached_gate) = channel();
+	let (release, released) = channel();
+	let gate = async move {
+		at_gate
+			.send(())
+			.expect("the contenders stopped watching the account check");
+
+		released
+			.await
+			.map_err(|_| err!("the account check was never released"))
+	};
+
+	(gate, reached_gate, release)
+}
+
 /// Watches a request contending for a lock for `window`.
 ///
 /// Returns whether it was still waiting by then, and a future finishing it
@@ -288,6 +296,79 @@ where
 		| Either::Left((output, _)) => (false, Either::Left(ready(output))),
 		| Either::Right(((), contender)) => (true, Either::Right(contender)),
 	}
+}
+
+/// A refresh still in flight when an expiring login retires its token is
+/// refused, and the login's access token stands.
+///
+/// The refresh classified the token before the login, which issues no refresh
+/// token of its own.
+async fn expiring_login_refuses_a_refresh_in_flight(services: &Services) -> Result {
+	let device = device_id!("INFLIGHTDEVICE");
+	let (user, original, seen) = classified_session(services, "inflight", device).await?;
+	let (access, expires_in) = services.users.generate_access_token(true);
+
+	services
+		.users
+		.set_access_token(&user, device, &access, expires_in, None)
+		.await?;
+
+	let (offered, refreshed) = exchange(services, &seen, &original).await?;
+
+	if !seen.exchangeable()
+		|| !refused_with(&refreshed, &ErrorKind::forbidden())
+		|| resolves(services, &offered).await
+		|| resolves(services, &original).await
+	{
+		return Err!("a refresh outlived the expiring login that retired its token");
+	}
+
+	if !resolves(services, &access).await {
+		return Err!("the expiring login was issued no access token");
+	}
+
+	Ok(())
+}
+
+/// An expiring login arriving while a refresh holds the device lock waits for
+/// it, then retires the token that refresh issued.
+///
+/// The refresh holds the lock through its account check, which is released
+/// only after the login has been watched for `CONTENTION`.
+async fn expiring_login_retires_the_refresh_it_waited_for(services: &Services) -> Result {
+	let device = device_id!("WAITINGDEVICE");
+	let (user, original, seen) = classified_session(services, "waiting", device).await?;
+	let (gate, reached_gate, release) = parked_gate();
+	let (access, expires_in) = services.users.generate_access_token(true);
+	let refresh = exchange_gated(services, &seen, &original, gate);
+	let login = async {
+		let reached = reached_gate.await.is_ok();
+		let login = services
+			.users
+			.set_access_token(&user, device, &access, expires_in, None);
+
+		let login = pin!(login);
+		let (waited, login) = contend(login, CONTENTION).await;
+
+		release.send(()).ok();
+
+		(reached && waited, login.await)
+	};
+
+	let (exchanged, (waited, login)) = join(refresh, login).await;
+	let (_, refreshed) = exchanged?;
+
+	login?;
+
+	if !waited {
+		return Err!("the expiring login did not wait for the refresh holding the device lock");
+	}
+
+	if resolves(services, &refreshed?).await {
+		return Err!("the token of a refresh ahead of an expiring login outlived it");
+	}
+
+	Ok(())
 }
 
 /// A rename is announced to the device list only when the name changes, and no
@@ -411,8 +492,7 @@ async fn indexed(services: &Services, user: &UserId, device: &DeviceId, token: &
 /// the rotation took the device lock.
 async fn reuse_without_grace(services: &Services, _base: &str) -> Result {
 	let device = device_id!("REUSEDEVICE");
-	let (user, original) = session(services, "reuse", device).await?;
-	let seen = classify(services, &original).await;
+	let (user, original, seen) = classified_session(services, "reuse", device).await?;
 	let (_, successor) = exchange(services, &seen, &original).await?;
 	let successor = successor?;
 	let (access, waited) = exchange(services, &seen, &original).await?;
@@ -453,8 +533,7 @@ async fn hard_expiry(services: &Services, _base: &str) -> Result {
 /// Soft logout retires only the refresh token and hard logout the device.
 async fn expiry_while_waiting(services: &Services, hard: bool) -> Result {
 	let device = device_id!("EXPIRYDEVICE");
-	let (_, original) = session(services, "expiry", device).await?;
-	let seen = classify(services, &original).await;
+	let (_, original, seen) = classified_session(services, "expiry", device).await?;
 	let exchangeable = seen.exchangeable();
 
 	outlast_ttl(services).await;
@@ -557,6 +636,19 @@ async fn session(
 		.await?;
 
 	Ok((user, refresh))
+}
+
+/// Opens a session and classifies its refresh token, for a request that arrived
+/// before whatever the scenario does next.
+async fn classified_session(
+	services: &Services,
+	localpart: &str,
+	device: &DeviceId,
+) -> Result<(OwnedUserId, String, RefreshToken)> {
+	let (user, original) = session(services, localpart, device).await?;
+	let seen = classify(services, &original).await;
+
+	Ok((user, original, seen))
 }
 
 /// Classifies a refresh token as the token endpoints do when a request

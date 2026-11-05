@@ -2490,9 +2490,10 @@
 # whatever the client asks for, so staying signed in takes a fresh JWT and
 # the token issuer decides how long a login lasts. Off by default because
 # a client that cannot obtain a fresh JWT would be signed out for good.
-# A device already holding a refresh token keeps it, even across a later
-# JWT login, so remove those devices when enabling this. Startup and
-# reload refuse a zero `authentication.access_token_ttl` while enabled.
+# A JWT login retires the refresh token its device holds, but a client
+# that only refreshes never logs in, so remove devices holding a refresh
+# token when enabling this. Startup and reload refuse a zero
+# `authentication.access_token_ttl` while enabled.
 #
 # reloadable: yes
 #

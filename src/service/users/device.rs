@@ -52,7 +52,8 @@ pub const TOKEN_LENGTH: usize = 32;
 /// Without a device ID one is generated. A chosen ID is refused when longer
 /// than `MAX_DEVICE_ID_LENGTH` bytes or when it matches one of the user's
 /// cross-signing key IDs. The device is written and given its tokens under the
-/// device lock.
+/// device lock, where an expiring token without a refresh token retires any the
+/// ID already holds.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, access_token, refresh_token))]
 pub async fn create_device(
@@ -88,7 +89,7 @@ pub async fn create_device(
 	.await;
 
 	if let Some(access_token) = access_token {
-		self.issue_tokens(&lock, user_id, &device_id, (access_token, expires_in), refresh_token)
+		self.open_session(&lock, user_id, &device_id, (access_token, expires_in), refresh_token)
 			.await?;
 	}
 
@@ -140,6 +141,32 @@ pub(super) async fn lock_device(&self, user_id: &UserId, device_id: &DeviceId) -
 	let key = (user_id.to_owned(), device_id.to_owned());
 
 	self.updating_device.lock(&key).await
+}
+
+/// Issues the tokens that open a session on one device.
+///
+/// An expiring token given without a refresh token ends the session at its
+/// expiry, so any refresh token the device holds retires first. A rotation
+/// continues a session and keeps its refresh token on the grace path, so it
+/// never comes through here.
+#[implement(super::Service)]
+async fn open_session(
+	&self,
+	lock: &DeviceLock,
+	user_id: &UserId,
+	device_id: &DeviceId,
+	access: (&str, Option<Duration>),
+	refresh_token: Option<&str>,
+) -> Result {
+	let (_, expires_in) = access;
+
+	if expires_in.is_some() && refresh_token.is_none() {
+		self.remove_refresh_token(user_id, device_id)
+			.await?;
+	}
+
+	self.issue_tokens(lock, user_id, device_id, access, refresh_token)
+		.await
 }
 
 /// Removes every device of a user except the one to keep, if any.
@@ -308,7 +335,8 @@ pub async fn remove_tokens(&self, user_id: &UserId, device_id: &DeviceId) {
 /// given.
 ///
 /// The tokens are issued under the device lock, and refused when the device no
-/// longer exists.
+/// longer exists. An expiring token given without a refresh token is meant to
+/// end the session, so the device's own refresh token retires under that lock.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, access_token, refresh_token))]
 pub async fn set_access_token(
@@ -321,7 +349,7 @@ pub async fn set_access_token(
 ) -> Result {
 	let lock = self.lock_device(user_id, device_id).await;
 
-	self.issue_tokens(&lock, user_id, device_id, (access_token, expires_in), refresh_token)
+	self.open_session(&lock, user_id, device_id, (access_token, expires_in), refresh_token)
 		.await
 }
 

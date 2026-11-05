@@ -119,6 +119,15 @@ refresh token, and a refresh token keeps the session going for as long as
 it lasts, which by default is indefinitely. The JWT's own `exp` has no say,
 so a login can far outlast the token that opened it.
 
+> [!WARNING]
+> A client that cannot obtain a fresh JWT would be signed out for good.
+> This is why `expire_access_token` is off by default.
+>
+> When you enable the option, remove the devices of earlier sessions once.
+> With the option enabled, a JWT login retires its device's refresh token.
+> A client that only refreshes never logs in again and can keep refreshing.
+> An access token issued without an expiry also keeps working.
+
 Set `expire_access_token` to let the token issuer decide instead:
 
 ```toml
@@ -136,8 +145,7 @@ Once the token expires the client is soft-logged-out: its requests fail with
 encryption keys. To stay signed in, it logs in with a fresh JWT and the same
 `device_id`.
 
-The option is off by default because a client that cannot obtain a fresh JWT
-would be signed out for good. It also has limits to plan around:
+The option also has limits to plan around:
 
 - **The lifetime is server-wide.** It comes from `access_token_ttl` in
   `[global.authentication]` (7 days by default), not from the JWT's `exp`,
@@ -145,9 +153,6 @@ would be signed out for good. It also has limits to plan around:
 - **The JWT itself must expire.** A client can log in again with any JWT that
   is still valid, so have the issuer set `exp`, and keep `require_exp = true`
   to refuse a token without one.
-- **Existing sessions are untouched.** A session opened earlier keeps its
-  tokens, and a device holding a refresh token keeps it even across a later
-  JWT login. Remove those devices once when you enable the option.
 - **Other sign-in routes stay open.** Password, LDAP and SSO logins keep their
   usual lifetimes. A fresh JWT also passes the interactive authentication of
   `/login/get_token`, and the login token it yields opens a session outside
