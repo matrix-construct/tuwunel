@@ -10,6 +10,7 @@ pub(crate) mod backup;
 pub(crate) mod capabilities;
 pub(crate) mod context;
 pub(crate) mod dehydrated_device;
+pub(crate) mod delayed_events;
 pub(crate) mod device;
 pub(crate) mod directory;
 pub(crate) mod events;
@@ -86,6 +87,10 @@ pub(crate) use self::{
 		delete_dehydrated_device_route, get_dehydrated_device_route, get_dehydrated_events_route,
 		put_dehydrated_device_route,
 	},
+	delayed_events::{
+		send_state_event_or_delayed_route, update_delayed_event_in_body_route,
+		update_delayed_event_route,
+	},
 	device::{
 		delete_device_route, delete_devices_route, get_device_route, get_devices_route,
 		update_device_route,
@@ -158,8 +163,7 @@ pub(crate) use self::{
 	space::get_hierarchy_route,
 	state::{
 		get_state_events_for_empty_key_route, get_state_events_for_key_route,
-		get_state_events_route, send_state_event_for_empty_key_route,
-		send_state_event_for_key_route,
+		get_state_events_route, send_state_event_for_key_route,
 	},
 	sync::{sync_events_route, sync_events_v5_route},
 	tag::{delete_tag_route, get_tags_route, update_tag_route},

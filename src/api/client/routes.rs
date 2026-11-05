@@ -1,7 +1,7 @@
 use axum::{
 	Router,
 	response::IntoResponse,
-	routing::{any, get, post},
+	routing::{any, get, post, put},
 };
 use const_str::{concat, join, replace};
 use http::{HeaderValue, header};
@@ -185,7 +185,14 @@ fn register_client_room_routes(router: Router<State>) -> Router<State> {
 fn register_client_state_and_sync_routes(router: Router<State>) -> Router<State> {
 	router
 		.ruma_route(&client::send_message_event_route)
-		.ruma_route(&client::send_state_event_for_key_route)
+		.route(
+			"/_matrix/client/r0/rooms/{room_id}/state/{event_type}/{state_key}",
+			put(client::send_state_event_or_delayed_route),
+		)
+		.route(
+			"/_matrix/client/v3/rooms/{room_id}/state/{event_type}/{state_key}",
+			put(client::send_state_event_or_delayed_route),
+		)
 		.ruma_route(&client::get_state_events_route)
 		.ruma_route(&client::get_state_events_for_key_route)
 		// Ruma doesn't have support for multiple paths for a single endpoint yet, and these
@@ -194,23 +201,23 @@ fn register_client_state_and_sync_routes(router: Router<State>) -> Router<State>
 		.route(
 			"/_matrix/client/r0/rooms/{room_id}/state/{event_type}",
 			get(client::get_state_events_for_empty_key_route)
-				.put(client::send_state_event_for_empty_key_route),
+				.put(client::send_state_event_or_delayed_route),
 		)
 		.route(
 			"/_matrix/client/v3/rooms/{room_id}/state/{event_type}",
 			get(client::get_state_events_for_empty_key_route)
-				.put(client::send_state_event_for_empty_key_route),
+				.put(client::send_state_event_or_delayed_route),
 		)
 		// These two endpoints allow trailing slashes
 		.route(
 			"/_matrix/client/r0/rooms/{room_id}/state/{event_type}/",
 			get(client::get_state_events_for_empty_key_route)
-				.put(client::send_state_event_for_empty_key_route),
+				.put(client::send_state_event_or_delayed_route),
 		)
 		.route(
 			"/_matrix/client/v3/rooms/{room_id}/state/{event_type}/",
 			get(client::get_state_events_for_empty_key_route)
-				.put(client::send_state_event_for_empty_key_route),
+				.put(client::send_state_event_or_delayed_route),
 		)
 		.ruma_route(&client::events_route)
 		.ruma_route(&client::sync_events_route)
@@ -263,6 +270,8 @@ fn register_client_misc_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::turn_server_route)
 		.ruma_route(&client::get_transports_route)
 		.ruma_route(&client::well_known_support)
+		.ruma_route(&client::update_delayed_event_route)
+		.ruma_route(&client::update_delayed_event_in_body_route)
 		.ruma_route(&client::well_known_client)
 		.ruma_route(&client::tuwunel_remote_version)
 		.route("/_tuwunel/server_version", get(client::tuwunel_server_version))

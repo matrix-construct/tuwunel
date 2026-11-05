@@ -744,3 +744,18 @@ fail to connect and the Livekit container log shows bridge addresses in
 its `using external IPs` line, clients are being offered unreachable
 candidates. See step 2.2 for the `node_ip` and `external_ip_only`
 settings that suppress them.
+
+### A user whose client crashed still shows in the call
+
+A client that crashes, loses its network, or closes without hanging up
+cannot remove its own call membership. Element Call and other clients on
+a current matrix-js-sdk or matrix-rust-sdk therefore schedule their own
+leave with the server when they join, using the delayed events of
+[MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140),
+and keep postponing it while they run. Tuwunel sends that leave shortly
+after the client stops, so the user drops out of the call. Tuwunel
+accepts delayed events only for this call membership.
+
+Scheduled leaves are kept in memory. A client that stops while Tuwunel
+restarts stays in the call until its membership expires, which can take
+hours; a client still running schedules a new leave after the restart.
