@@ -616,6 +616,43 @@ impl Service {
 		Ok(urls.next().await)
 	}
 
+	/// Resolves a filename in the media directory to the MXC URIs whose stored
+	/// metadata keys produce that name.
+	///
+	/// Current filenames are the SHA-256 of the database key; legacy filenames
+	/// are the unpadded base64 of the key.
+	pub async fn mxcs_from_file_name(&self, file_name: &str) -> Result<Vec<OwnedMxcUri>> {
+		let mut mxcs = Vec::new();
+
+		for key in self.db.get_all_media_keys().await {
+			if self.get_media_name_sha256(&key) != file_name && encode_key(&key) != file_name {
+				continue;
+			}
+
+			let Some(bytes) = key.split(|&byte| byte == 0xFF).next() else {
+				continue;
+			};
+
+			let Ok(name) = utils::string_from_bytes(bytes) else {
+				debug_warn!("Failed to parse MXC unicode bytes from our database");
+				continue;
+			};
+
+			let mxc = OwnedMxcUri::from(name);
+
+			if !mxc.is_valid() {
+				debug_warn!("{mxc:?} from database was found to not be valid");
+				continue;
+			}
+
+			if !mxcs.contains(&mxc) {
+				mxcs.push(mxc);
+			}
+		}
+
+		Ok(mxcs)
+	}
+
 	/// Gets all the MXC URIs in our media database
 	pub async fn get_all_mxcs(&self) -> Result<Vec<OwnedMxcUri>> {
 		let all_keys = self.db.get_all_media_keys().await;
