@@ -906,6 +906,10 @@ target "integ-valgrind" {
         cargo_flags = "-j ${valgrind_build_jobs}"
         cargo_args = "--test=*"
 
+        # the only step linking every test binary, so it takes a link slot for
+        # each cargo job; other LTO links keep to lto_linker_jobs
+        LINKER_JOBS = valgrind_build_jobs == "default"? lto_linker_jobs: valgrind_build_jobs
+
         # valgrind already serializes; keep it off the realtime class and the
         # bench pinning integ now grants
         sched_policy = ""

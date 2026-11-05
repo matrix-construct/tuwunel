@@ -151,6 +151,7 @@ jobs:
         sys_version: ${{matrix.sys_version}}
         sys_target: ${{matrix.sys_target}}
         machine: ${{matrix.machine}}
+        runner_name: ${{runner.name}}
         acct: ${{github.actor}}
         repo: ${{github.repository}}
         CI_VERBOSE_ENV: ${{inputs.verbose_env}}
