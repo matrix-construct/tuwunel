@@ -21,7 +21,7 @@ use std::{
 	fmt::{self, write},
 	io,
 	mem::replace,
-	ops::Range,
+	ops::{Range, RangeInclusive},
 	str::from_utf8,
 };
 
@@ -35,6 +35,8 @@ use crate::{Result, arrayvec::ArrayString, smallstr::SmallString};
 /// The value has static lifetime and is suitable for default or fallback
 /// references. It is identical to the empty string literal.
 pub const EMPTY: &str = "";
+
+const OPAQUE_ID_LENGTHS: RangeInclusive<usize> = 1..=255;
 
 /// Formats arguments into a small string with an inline byte capacity.
 ///
@@ -380,4 +382,27 @@ pub fn plural<'a>(count: usize, one: &'a str, many: &'a str) -> &'a str {
 		| 1 => one,
 		| _ => many,
 	}
+}
+
+/// Reports whether a string is a Matrix opaque identifier.
+///
+/// The grammar allows 1 to 255 characters, all of them unreserved.
+#[must_use]
+pub fn is_opaque_id(value: &str) -> bool {
+	OPAQUE_ID_LENGTHS.contains(&value.len()) && is_unreserved(value)
+}
+
+/// Reports whether every byte of a string is unreserved.
+///
+/// An empty string passes, so a grammar with a minimum length checks it apart.
+#[must_use]
+pub fn is_unreserved(value: &str) -> bool { value.bytes().all(is_unreserved_byte) }
+
+/// Reports whether a byte is an RFC 3986 unreserved character.
+///
+/// The set is `[0-9A-Za-z._~-]`, which a URL component carries unescaped.
+#[inline]
+#[must_use]
+pub const fn is_unreserved_byte(byte: u8) -> bool {
+	byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~')
 }

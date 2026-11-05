@@ -8,6 +8,8 @@ use std::fmt::{self, Display, Write};
 use http::Uri;
 use url::{Host, Url};
 
+use super::string::is_unreserved_byte;
+
 /// Percent-encodes a string for use in a URL component.
 ///
 /// ASCII letters, digits and unreserved punctuation remain unchanged.
@@ -16,7 +18,7 @@ use url::{Host, Url};
 pub fn url_encode(s: &str) -> String {
 	s.bytes()
 		.fold(String::with_capacity(s.len()), |mut out, b| {
-			if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+			if is_unreserved_byte(b) {
 				out.push(b.into());
 			} else {
 				write!(&mut out, "%{b:02X}").ok();

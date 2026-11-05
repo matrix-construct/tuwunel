@@ -3,7 +3,10 @@ use std::time::{Duration, SystemTime};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as b64};
 use ruma::OwnedUserId;
 use serde::{Deserialize, Serialize};
-use tuwunel_core::{Err, Result, err, implement, utils, utils::hash::sha256};
+use tuwunel_core::{
+	Err, Result, err, implement,
+	utils::{self, hash::sha256, string::is_unreserved},
+};
 use tuwunel_database::{Cbor, Deserialized};
 
 use super::AuthCode;
@@ -358,10 +361,7 @@ fn validate_code_verifier(verifier: &str) -> Result {
 		return Err!(Request(InvalidParam("code_verifier must be 43-128 characters")));
 	}
 
-	if !verifier
-		.bytes()
-		.all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.' || b == b'_' || b == b'~')
-	{
+	if !is_unreserved(verifier) {
 		return Err!(Request(InvalidParam("code_verifier contains invalid characters")));
 	}
 

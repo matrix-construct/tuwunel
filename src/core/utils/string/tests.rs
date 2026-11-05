@@ -2,7 +2,10 @@
 
 use std::borrow::Cow;
 
-use super::{contains_any, equals_any, markdown_cell, plural};
+use super::{
+	contains_any, equals_any, is_opaque_id, is_unreserved, is_unreserved_byte, markdown_cell,
+	plural,
+};
 use crate::{arrayvec::ArrayString, smallstr::SmallString};
 
 type SmallBuf = SmallString<[u8; 16]>;
@@ -259,4 +262,39 @@ fn plural_takes_the_singular_for_one_only() {
 	let nouns = [0, 1, 2].map(|count| plural(count, "room", "rooms"));
 
 	assert_eq!(nouns, ["rooms", "room", "rooms"]);
+}
+
+#[test]
+fn unreserved_bytes_are_the_rfc_3986_set() {
+	let bytes = 0..=u8::MAX;
+	let unreserved: Vec<u8> = bytes
+		.filter(|&byte| is_unreserved_byte(byte))
+		.collect();
+
+	assert_eq!(
+		unreserved,
+		b"-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz~",
+	);
+}
+
+#[test]
+fn unreserved_tests_every_byte() {
+	assert!(is_unreserved(""));
+	assert!(is_unreserved("0aZ._~-"));
+	assert!(!is_unreserved("a b"));
+	assert!(!is_unreserved("\u{3bb}"));
+}
+
+#[test]
+fn opaque_id_takes_one_to_255_unreserved_characters() {
+	let longest = "a".repeat(255);
+	let overlong = "a".repeat(256);
+
+	assert!(is_opaque_id("a"));
+	assert!(is_opaque_id("0aZ._~-"));
+	assert!(is_opaque_id(&longest));
+	assert!(!is_opaque_id(""));
+	assert!(!is_opaque_id(&overlong));
+	assert!(!is_opaque_id("a/b"));
+	assert!(!is_opaque_id("a%20b"));
 }

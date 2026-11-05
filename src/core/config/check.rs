@@ -23,7 +23,7 @@ use crate::{
 	Config, Err, Result, debug, debug_info, err, error,
 	utils::{
 		is_secret_set,
-		string::equals_any,
+		string::{equals_any, is_opaque_id},
 		sys::storage::{Filesystem, filesystem_from_path},
 		time::timepoint_from_now,
 	},
@@ -501,13 +501,7 @@ fn check_registration(config: &Config) -> Result {
 
 fn check_registration_terms(config: &Config) -> Result {
 	for (id, policy) in &config.registration_terms {
-		let opaque = !id.is_empty()
-			&& id.len() <= 255
-			&& id.bytes().all(
-				|b| matches!(b, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.' | b'_' | b'~' | b'-'),
-			);
-
-		if !opaque {
+		if !is_opaque_id(id) {
 			return Err!(Config(
 				"registration_terms",
 				"Policy id {id:?} must be a non-empty opaque identifier of at most 255 \
