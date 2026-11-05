@@ -30,7 +30,8 @@ use super::true_fn;
 ///   `[[global.identity_provider]]` entry with `brand = "MAS"`; startup warns
 ///   when it is missing.
 /// - `access_token_ttl` applies only to sessions holding a refresh token
-///   (see `[global.authentication.refresh_token]`).
+///   (see `[global.authentication.refresh_token]`), and to JWT logins when
+///   `jwt.expire_access_token` is enabled.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 // No Debug: secrets are reachable from this section.
 #[derive(Clone, Deserialize)]
@@ -72,6 +73,8 @@ pub struct Authentication {
 	/// For clients supporting refresh tokens, the access token supplied at
 	/// login is invalidated after this interval, soft-logging out the client
 	/// until it refreshes.
+	/// Also applies to JWT logins when `jwt.expire_access_token` is enabled;
+	/// those sessions must log in again after expiry without a refresh token.
 	///
 	/// reloadable: yes
 	/// default: 604800

@@ -56,6 +56,7 @@ issuer must agree with the server on this naming.
 | Field | Default | Description |
 |---|---|---|
 | `enable` | `false` | Master switch for JWT login. Also gates the UIAA flow. |
+| `expire_access_token` | `false` | Expire newly issued JWT login access tokens using `authentication.access_token_ttl`, without refresh credentials. |
 | `key` | `""` | Verification key. Plaintext, base64, or PEM depending on `format`. **Sensitive**: keep private when used as an HMAC secret. |
 | `format` | `"HMAC"` | One of `HMAC`, `B64HMAC`, `ECDSA`, `EDDSA`, in any case (`HMACB64` is also accepted for `B64HMAC`). Selects how `key` is decoded. |
 | `algorithm` | `"HS256"` | JWT `alg` header value. Must be compatible with `format`. |
@@ -202,6 +203,34 @@ seconds since the Unix epoch. Configure based on the issuer's behavior:
 
 `nbf` is symmetric with `exp` and most deployments leave it unset on both
 issuer and consumer.
+
+
+## Access-token lifetime
+
+JWT proof expiry (`exp`) controls whether the JWT can authenticate a request.
+It does not set the lifetime of the Matrix access token issued by login.
+
+To require another login after an access token expires, enable:
+
+```toml
+[global.authentication]
+access_token_ttl = 3600
+
+[global.jwt]
+expire_access_token = true
+```
+
+This reloadable option applies to JWT logins performed after it is enabled.
+Those logins return `expires_in_ms` and no refresh token, even if the client
+requests one. Under the device lock, login retires that device's current and
+spent refresh credentials, including credentials from an earlier JWT or password
+login when a device ID is reused. They can no longer be exchanged at `/refresh`.
+After expiry, the client must log in again with a valid proof.
+
+Existing access tokens are not revoked by enabling the option or by another
+login. JWT claim validation and other login methods keep their existing rules;
+this option does not impose a lifetime limit on every session of the account.
+With the option disabled, normal client refresh negotiation applies.
 
 
 ## Audience and issuer validation

@@ -22,7 +22,7 @@ use ruma::api::client::session::{
 	},
 };
 use tuwunel_core::{Err, Result, err, info, utils::stream::ReadyExt};
-use tuwunel_service::users::device::generate_refresh_token;
+use tuwunel_service::users::device::{RefreshTokenPolicy, generate_refresh_token};
 
 use self::{
 	ldap::ldap_login,
@@ -164,11 +164,21 @@ pub(crate) async fn login_route(
 
 	services.users.locked_check(&user_id).await?;
 
+	let expire_jwt_access_token =
+		matches!(body.login_info, LoginInfo::Jwt(_)) && services.config.jwt.expire_access_token;
+
 	let (access_token, expires_in) = services
 		.users
-		.generate_access_token(body.body.refresh_token);
+		.generate_access_token(body.body.refresh_token || expire_jwt_access_token);
 
-	let refresh_token = expires_in.is_some().then(generate_refresh_token);
+	let refresh_token =
+		(expires_in.is_some() && !expire_jwt_access_token).then(generate_refresh_token);
+
+	let refresh_policy = if expire_jwt_access_token {
+		RefreshTokenPolicy::Revoke
+	} else {
+		refresh_token.as_deref().into()
+	};
 
 	let device_id = if let Some(device_id) = &body.device_id
 		&& services
@@ -179,12 +189,12 @@ pub(crate) async fn login_route(
 	{
 		services
 			.users
-			.set_access_token(
+			.set_access_token_with_refresh_policy(
 				&user_id,
 				device_id,
 				&access_token,
 				expires_in,
-				refresh_token.as_deref(),
+				refresh_policy,
 			)
 			.await?;
 
@@ -192,11 +202,11 @@ pub(crate) async fn login_route(
 	} else {
 		services
 			.users
-			.create_device(
+			.create_device_with_refresh_policy(
 				&user_id,
 				body.device_id.as_deref(),
 				(Some(&access_token), expires_in),
-				refresh_token.as_deref(),
+				refresh_policy,
 				body.initial_device_display_name.as_deref(),
 				Some(client_ip),
 			)
