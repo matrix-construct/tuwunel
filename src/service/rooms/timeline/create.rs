@@ -12,14 +12,15 @@ use ruma::{
 	UserId,
 	events::{TimelineEventType, room::create::RoomCreateEventContent},
 	room_version_rules::RoomIdFormatVersion,
+	serde::Raw,
 	uint,
 };
 use serde_json::value::to_raw_value;
 use tuwunel_core::{
 	Err, Error, Result, err, implement,
 	utils::{
-		IterStream, ReadyExt, TryReadyExt, millis_since_unix_epoch, stream::TryIgnore,
-		to_canonical_object,
+		IterStream, ReadyExt, TryReadyExt, millis_since_unix_epoch,
+		rand::string as random_string, stream::TryIgnore, to_canonical_object,
 	},
 };
 use tuwunel_matrix::{
@@ -79,6 +80,20 @@ pub async fn create_hash_and_sign_event(
 		.and_then(|room_version| {
 			Ok((room_version.clone(), room_version::rules(&room_version)?))
 		})?;
+
+	let content = if event_type == TimelineEventType::RoomCreate
+		&& matches!(version_rules.room_id_format, RoomIdFormatVersion::V2)
+	{
+		content
+			.deserialize()
+			.map(|mut content| {
+				content.insert("uwu.nonce".into(), random_string(32).into());
+				content
+			})
+			.and_then(|content| Raw::new(&content))?
+	} else {
+		content
+	};
 
 	let auth_events = self
 		.services
