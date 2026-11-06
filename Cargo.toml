@@ -951,6 +951,7 @@ semicolon_in_expressions_from_macros = "warn"
 single_use_lifetimes = "warn"
 trivial_casts = "warn"
 trivial_numeric_casts = "warn"
+unexpected_cfgs.level = "warn"
 unit_bindings = "warn"
 unnameable_types = "warn"
 unreachable_pub = "warn"
@@ -964,13 +965,7 @@ unused_must_use = "warn"
 unused_qualifications = "warn"
 #unused_results = "warn"                                             # TODO
 
-## some sadness
-mismatched_lifetime_syntaxes = "allow"
-# counts every pub item of test and bench executables as dead code
-dead_code_pub_in_binary = "allow"
-let_underscore_drop = "allow"
-missing_docs = "allow"
-unexpected_cfgs = { level = "warn", check-cfg = [
+unexpected_cfgs.check-cfg = [
 	'cfg(core_intrinsics)',
 	'cfg(disable)',
 	'cfg(panic_trap)',
@@ -980,17 +975,22 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 	'cfg(tuwunel_debug_logging)',
 	'cfg(tuwunel_mods)',
 	'cfg(unabridged)',
-] }
+]
+
+## some sadness
+mismatched_lifetime_syntaxes = "allow"
+# counts every pub item of test and bench executables as dead code
+dead_code_pub_in_binary = "allow"
+let_underscore_drop = "allow"
+missing_docs = "allow"
 # buggy, but worth checking on occasionally
 unused_crate_dependencies = "allow"
 unsafe_code = "allow"
 # skips niche-encoded enums (nearly all of ours) and compares a ratio rather
 # than a magnitude; clippy::large_enum_variant covers this by size instead.
 variant_size_differences = "allow"
-
 # we check nightly clippy lints
 unknown_lints = "allow"
-
 # BoolExt::ok_or/ok_or_else collide with unstable bool inherents on the pinned
 # stable toolchain; silent on nightly, where std no longer has them.
 # <https://github.com/rust-lang/rust/issues/48919>
