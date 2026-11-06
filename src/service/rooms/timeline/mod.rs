@@ -20,7 +20,7 @@ use std::{fmt::Write, sync::Arc};
 use async_trait::async_trait;
 use futures::{
 	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
-	future::{Either, select, select_ok},
+	future::{Either, select, select_ok, try_join},
 	pin_mut,
 };
 use ruma::{
@@ -753,20 +753,26 @@ pub async fn get_pdu_json_from_id(&self, pdu_id: &RawPduId) -> Result<CanonicalJ
 /// Deserializes an event from accepted or outlier storage into `T`.
 ///
 /// Both lookups are polled concurrently, so if duplicate rows exist the first
-/// successful lookup determines the returned value.
+/// successful lookup determines the returned value. If both fail, a storage or
+/// decoding error takes precedence over a missing record.
 #[implement(Service)]
 #[inline]
 pub async fn get<T>(&self, event_id: &EventId) -> Result<T>
 where
 	T: for<'de> Deserialize<'de>,
 {
-	let accepted = self.get_non_outlier(event_id);
-	let outlier = self.get_outlier(event_id);
+	// Success takes the short-circuiting branch; only two failures are joined.
+	let invert = |result: Result<T>| result.map_or_else(Ok, Err);
+	let accepted = self.get_non_outlier(event_id).map(invert);
+	let outlier = self.get_outlier(event_id).map(invert);
 
-	pin_mut!(accepted, outlier);
-	select_ok([accepted.left_future(), outlier.right_future()])
+	try_join(accepted, outlier)
+		.map(|result| match result {
+			| Err(value) => Ok(value),
+			| Ok((accepted, outlier)) if accepted.is_missing() => Err(outlier),
+			| Ok((accepted, _)) => Err(accepted),
+		})
 		.await
-		.map(at!(0))
 }
 
 impl FetchEvent for &Service {
