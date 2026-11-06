@@ -1,9 +1,11 @@
 use std::time::Duration;
 
 use axum::extract::State;
-use ruma::UInt;
 use synapse_admin_api::media::purge_media_cache::v1::{Request, Response};
-use tuwunel_core::{Err, Result, utils::time::timepoint_from_epoch};
+use tuwunel_core::{
+	Err, Result,
+	utils::{math::ruma_from_usize_saturating, time::timepoint_from_epoch},
+};
 
 use super::MIN_BEFORE_TS;
 use crate::{Ruma, require_admin};
@@ -32,7 +34,7 @@ pub(crate) async fn admin_purge_media_cache_route(
 		.delete_range(cutoff, true, false, false)
 		.await?;
 
-	let deleted = UInt::try_from(deleted).unwrap_or(UInt::MAX);
+	let deleted = ruma_from_usize_saturating(deleted);
 
 	Ok(Response { deleted })
 }

@@ -1,10 +1,12 @@
 use axum::extract::State;
 use futures::StreamExt;
-use ruma::UInt;
 use synapse_admin_api::media::delete_user_media::v1 as delete_user_media;
 use tuwunel_core::{
 	Err, Result,
-	utils::stream::{IterStream, WidebandExt},
+	utils::{
+		math::ruma_from_usize_saturating,
+		stream::{IterStream, WidebandExt},
+	},
 };
 
 use super::{select_page, usize_from};
@@ -55,7 +57,7 @@ pub(crate) async fn admin_delete_user_media_route(
 		.collect()
 		.await;
 
-	let total = UInt::try_from(deleted_media.len()).unwrap_or(UInt::MAX);
+	let total = ruma_from_usize_saturating(deleted_media.len());
 
 	Ok(delete_user_media::Response { deleted_media, total })
 }

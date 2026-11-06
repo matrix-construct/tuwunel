@@ -1,8 +1,8 @@
 use axum::extract::State;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as b64};
 use futures::StreamExt;
-use ruma::{OwnedRoomId, UInt, api::client::membership::mutual_rooms};
-use tuwunel_core::{Err, Result, err};
+use ruma::{OwnedRoomId, api::client::membership::mutual_rooms};
+use tuwunel_core::{Err, Result, err, utils::math::ruma_from_usize_saturating};
 
 use crate::{ClientIp, Ruma};
 
@@ -38,7 +38,7 @@ pub(crate) async fn get_mutual_rooms_route(
 		.collect()
 		.await;
 
-	let count = UInt::try_from(all.len()).unwrap_or(UInt::MAX);
+	let count = ruma_from_usize_saturating(all.len());
 
 	let start = match body.from.as_deref() {
 		| None => 0,

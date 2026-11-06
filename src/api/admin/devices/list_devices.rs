@@ -1,8 +1,7 @@
 use axum::extract::State;
 use futures::StreamExt;
-use ruma::UInt;
 use synapse_admin_api::devices::list_devices::v1 as list_devices;
-use tuwunel_core::Result;
+use tuwunel_core::{Result, utils::math::ruma_from_usize_saturating};
 
 use super::{device_response, require_local_user};
 use crate::{Ruma, require_admin};
@@ -30,7 +29,7 @@ pub(crate) async fn admin_list_devices_route(
 		.collect()
 		.await;
 
-	let total = UInt::try_from(devices.len()).unwrap_or(UInt::MAX);
+	let total = ruma_from_usize_saturating(devices.len());
 
 	Ok(list_devices::Response { devices, total })
 }

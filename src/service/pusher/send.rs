@@ -99,7 +99,7 @@ pub async fn send_badge_notice(&self, user_id: &UserId, pusher: &Pusher) -> Resu
 		return Ok(());
 	}
 
-	let unread = UInt::new(self.global_notification_count(user_id).await).unwrap_or(UInt::MAX);
+	let unread = UInt::new_saturating(self.global_notification_count(user_id).await);
 
 	if self.sent_badge(user_id, &pusher.ids.pushkey) == Some(unread) {
 		return Ok(());
@@ -158,9 +158,7 @@ async fn send_http_event_notice<Pdu: Event>(
 
 	let unread = badge_count_disabled(http)
 		.is_false()
-		.then_async(async || {
-			UInt::new(self.global_notification_count(user_id).await).unwrap_or(UInt::MAX)
-		});
+		.then_async(async || UInt::new_saturating(self.global_notification_count(user_id).await));
 
 	let unread = if !event_id_only {
 		if *event.kind() == TimelineEventType::RoomEncrypted

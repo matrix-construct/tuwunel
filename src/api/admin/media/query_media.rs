@@ -45,7 +45,7 @@ fn into_media_info(local: bool, server_name: &ServerName, entry: UserMediaEntry)
 			.media_length
 			.and_then(|len| UInt::try_from(len).ok()),
 		upload_name: entry.upload_name,
-		created_ts: UInt::try_from(entry.created_ts).unwrap_or(UInt::MAX),
+		created_ts: UInt::new_saturating(entry.created_ts),
 		filesystem_id: None,
 		url_cache: None,
 		last_access_ts: None,

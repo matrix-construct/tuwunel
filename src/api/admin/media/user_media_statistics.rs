@@ -78,11 +78,13 @@ pub(crate) async fn admin_user_media_statistics_route(
 		.stream()
 		.broad_then(async |(user_id, (count, length))| {
 			let displayname = services.profile.displayname(&user_id).await.ok();
+			let stat = UserMediaStat::new(
+				user_id,
+				UInt::new_saturating(count),
+				UInt::new_saturating(length),
+			);
 
-			UserMediaStat {
-				displayname,
-				..UserMediaStat::new(user_id, uint_from_u64(count), uint_from_u64(length))
-			}
+			UserMediaStat { displayname, ..stat }
 		})
 		.ready_filter(|row| search_term.is_none_or(|term| row_matches(row, term)))
 		.collect()
@@ -113,8 +115,6 @@ fn into_response(
 		total: ruma_from_usize(total),
 	}
 }
-
-fn uint_from_u64(value: u64) -> UInt { UInt::try_from(value).unwrap_or(UInt::MAX) }
 
 fn in_window(created_ts: u64, from_ts: u64, until_ts: Option<u64>) -> bool {
 	created_ts >= from_ts && until_ts.is_none_or(|until_ts| created_ts <= until_ts)
@@ -166,7 +166,6 @@ mod tests {
 
 	use super::{
 		UserMediaSortOrder, UserMediaStat, in_window, into_response, paginate, row_matches,
-		uint_from_u64,
 	};
 
 	fn row(local: &str, displayname: Option<&str>, count: u32, length: u32) -> UserMediaStat {
@@ -245,8 +244,8 @@ mod tests {
 
 	#[test]
 	fn oversized_aggregate_saturates_on_wire() {
-		assert_eq!(uint_from_u64(42), UInt::from(42_u32));
-		assert_eq!(uint_from_u64(u64::MAX), UInt::MAX);
+		assert_eq!(UInt::new_saturating(42), UInt::from(42_u32));
+		assert_eq!(UInt::new_saturating(u64::MAX), UInt::MAX);
 	}
 
 	#[test]

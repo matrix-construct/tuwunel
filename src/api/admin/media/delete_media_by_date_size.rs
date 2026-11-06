@@ -1,7 +1,6 @@
 use axum::extract::State;
-use ruma::UInt;
 use synapse_admin_api::media::delete_media_by_date_size::v1 as delete_media_by_date_size;
-use tuwunel_core::{Err, Result};
+use tuwunel_core::{Err, Result, utils::math::ruma_from_usize_saturating};
 
 use super::MIN_BEFORE_TS;
 use crate::{Ruma, RumaResponse, require_admin};
@@ -27,7 +26,7 @@ pub(crate) async fn admin_delete_media_by_date_size_route(
 		.delete_by_date_size(u64::from(body.before_ts), size_gt, keep_profiles)
 		.await?;
 
-	let total = UInt::try_from(deleted.len()).unwrap_or(UInt::MAX);
+	let total = ruma_from_usize_saturating(deleted.len());
 
 	let deleted_media = deleted
 		.iter()

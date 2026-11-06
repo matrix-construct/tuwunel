@@ -38,7 +38,7 @@ fn database_token_response(token: String, info: &DatabaseTokenInfo) -> Registrat
 			.max_uses
 			.and_then(|n| UInt::try_from(n).ok()),
 		pending: uint!(0),
-		completed: UInt::try_from(info.uses).unwrap_or(UInt::MAX),
+		completed: UInt::new_saturating(info.uses),
 		expiry_time: info
 			.expires
 			.max_age
