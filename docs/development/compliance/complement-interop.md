@@ -11,12 +11,12 @@ These report-only results are a snapshot from [August 9, 2026 CI run](https://gi
 - Test groups: 205. Passing: **81.5%**
   - ✅ `pass`: 167
   - 🟨 `some`: 19
-  - ❌ `fail`: 17
+  - 🟥 `fail`: 17
   - ⬛ `skip`: 2
 
 - Subtests: 587. Passing: **77.2%**
   - ✅ `pass`: 453
-  - ❌ `fail`: 121
+  - 🟥 `fail`: 121
   - ⬛ `skip`: 13
 
 ### Synapse as `hs1`
@@ -24,12 +24,12 @@ These report-only results are a snapshot from [August 9, 2026 CI run](https://gi
 - Test groups: 205. Passing: **92.7%**
   - ✅ `pass`: 190
   - 🟨 `some`: 9
-  - ❌ `fail`: 6
+  - 🟥 `fail`: 6
   - ⬛ `skip`: 0
 
 - Subtests: 612. Passing: **94.6%**
   - ✅ `pass`: 579
-  - ❌ `fail`: 25
+  - 🟥 `fail`: 25
   - ⬛ `skip`: 8
 
 ## All Top-Level Tests
@@ -55,10 +55,10 @@ These report-only results are a snapshot from [August 9, 2026 CI run](https://gi
 | 🟨 | 1/4/0 | ✅ | 5/0/0 | `ClientSpacesSummary` |
 | ✅ | – | ✅ | – | `ClientSpacesSummaryJoinRules` |
 | ✅ | – | ✅ | – | `ComplementCanCreateValidV12Rooms` |
-| ✅ | – | ❌ | – | `Content` |
+| ✅ | – | 🟥 | – | `Content` |
 | ✅ | – | ✅ | – | `ContentCSAPIMediaV1` |
 | ✅ | – | ✅ | – | `ContentMediaV1` |
-| ❌ | – | ✅ | – | `CorruptedAuthChain` |
+| 🟥 | – | ✅ | – | `CorruptedAuthChain` |
 | ✅ | – | ✅ | – | `CumulativeJoinLeaveJoinSync` |
 | ✅ | 4/0/0 | ✅ | 4/0/0 | `DeactivateAccount` |
 | 🟨 | 6/7/1 | ✅ | 17/0/1 | `DelayedEvents` |
@@ -66,15 +66,15 @@ These report-only results are a snapshot from [August 9, 2026 CI run](https://gi
 | ✅ | – | ✅ | – | `DemotingUsersViaUsersDefault` |
 | 🟨 | 8/2/0 | 🟨 | 9/1/0 | `DeviceListUpdates` |
 | ✅ | 2/0/0 | ✅ | 2/0/0 | `DeviceListsUpdateOverFederation` |
-| ❌ | – | ❌ | – | `DeviceListsUpdateOverFederationOnRoomJoin` |
+| 🟥 | – | 🟥 | – | `DeviceListsUpdateOverFederationOnRoomJoin` |
 | ✅ | 7/0/0 | ✅ | 7/0/0 | `DeviceManagement` |
 | ✅ | – | ✅ | – | `DisplayNameUpdate` |
 | ✅ | 3/0/0 | ✅ | 3/0/0 | `E2EKeyBackupReplaceRoomKeyRules` |
 | ✅ | 3/0/0 | ✅ | 3/0/0 | `Event` |
 | ✅ | 2/0/0 | ✅ | 2/0/0 | `EventAuth` |
-| ❌ | – | ❌ | – | `EventRelationships` |
+| 🟥 | – | 🟥 | – | `EventRelationships` |
 | ✅ | – | ✅ | – | `FederatedClientSpaces` |
-| ❌ | – | ❌ | – | `FederatedEventRelationships` |
+| 🟥 | – | 🟥 | – | `FederatedEventRelationships` |
 | 🟨 | 1/1/0 | ✅ | 2/0/0 | `FederationKeyUploadQuery` |
 | ✅ | – | ✅ | – | `FederationRedactSendsWithoutEvent` |
 | ✅ | – | ✅ | – | `FederationRejectInvite` |
@@ -90,16 +90,16 @@ These report-only results are a snapshot from [August 9, 2026 CI run](https://gi
 | ✅ | – | ✅ | – | `FetchHistoricalSharedEvent` |
 | ✅ | – | ✅ | – | `FetchMessagesFromNonExistentRoom` |
 | ✅ | – | ✅ | – | `Filter` |
-| ❌ | – | ✅ | – | `FilterMessagesByRelType` |
+| 🟥 | – | ✅ | – | `FilterMessagesByRelType` |
 | ✅ | – | ✅ | – | `GappedSyncLeaveSection` |
 | ✅ | 3/0/0 | ✅ | 3/0/0 | `GetFilteredRoomMembers` |
 | ✅ | – | ✅ | – | `GetMissingEventsGapFilling` |
 | ✅ | – | ✅ | – | `GetRoomMembers` |
-| ❌ | – | ✅ | – | `GetRoomMembersAtPoint` |
-| ❌ | 0/4/0 | ✅ | 4/0/0 | `InboundCanReturnMissingEvents` |
+| 🟥 | – | ✅ | – | `GetRoomMembersAtPoint` |
+| 🟥 | 0/4/0 | ✅ | 4/0/0 | `InboundCanReturnMissingEvents` |
 | ✅ | – | ✅ | – | `InboundFederationKeys` |
 | ✅ | 2/0/0 | ✅ | 2/0/0 | `InboundFederationProfile` |
-| ❌ | – | ✅ | 3/0/0 | `InboundFederationRejectsEventsWithRejectedAuthEvents` |
+| 🟥 | – | ✅ | 3/0/0 | `InboundFederationRejectsEventsWithRejectedAuthEvents` |
 | 🟨 | 3/8/0 | ✅ | 11/0/0 | `InviteFiltering` |
 | ✅ | – | ✅ | – | `InviteFromIgnoredUsersDoesNotAppearInSync` |
 | ✅ | – | ✅ | – | `IsDirectFlagFederation` |
@@ -121,12 +121,12 @@ These report-only results are a snapshot from [August 9, 2026 CI run](https://gi
 | ✅ | 25/0/0 | ✅ | 25/0/0 | `KnockingInMSC3787Room` |
 | ✅ | – | ✅ | – | `LeakyTyping` |
 | ✅ | – | ✅ | – | `LeaveEventInviteRejection` |
-| ❌ | – | ✅ | – | `LeaveEventVisibility` |
+| 🟥 | – | ✅ | – | `LeaveEventVisibility` |
 | 🟨 | 2/3/0 | ✅ | 5/0/0 | `LeftRoomFixture` |
 | ✅ | 2/0/0 | 🟨 | 1/1/0 | `LocalPngThumbnail` |
 | ✅ | 8/0/0 | ✅ | 8/0/0 | `Login` |
 | ✅ | 4/0/0 | ✅ | 4/0/0 | `Logout` |
-| ❌ | – | ✅ | 11/0/0 | `MSC3757OwnedState` |
+| 🟥 | – | ✅ | 11/0/0 | `MSC3757OwnedState` |
 | ✅ | – | ✅ | – | `MSC3967` |
 | ✅ | 11/0/0 | ✅ | 11/0/0 | `MSC4289PrivilegedRoomCreators` |
 | ✅ | – | ✅ | – | `MSC4289PrivilegedRoomCreators_Additional` |
@@ -141,20 +141,20 @@ These report-only results are a snapshot from [August 9, 2026 CI run](https://gi
 | ✅ | – | ✅ | – | `MSC4291RoomIDAsHashOfCreateEvent_UpgradedRooms` |
 | ✅ | – | ✅ | – | `MSC4297StateResolutionV2_1_includes_conflicted_subgraph` |
 | ✅ | – | ✅ | – | `MSC4297StateResolutionV2_1_starts_from_empty_set` |
-| ❌ | 0/2/0 | ✅ | 2/0/0 | `MSC4308ThreadSubscriptionsSlidingSync` |
+| 🟥 | 0/2/0 | ✅ | 2/0/0 | `MSC4308ThreadSubscriptionsSlidingSync` |
 | ✅ | – | ✅ | – | `MSC4311FullCreateEventOnStrippedState` |
 | ✅ | – | ✅ | – | `MediaConfig` |
 | 🟨 | 19/6/0 | 🟨 | 12/13/0 | `MediaFilenames` |
 | ✅ | 4/0/0 | 🟨 | 1/3/0 | `MediaWithoutFileName` |
 | ✅ | 4/0/0 | ✅ | 4/0/0 | `MediaWithoutFileNameCSMediaV1` |
 | 🟨 | 3/2/0 | ✅ | 5/0/0 | `MembersLocal` |
-| ❌ | – | ✅ | – | `MembershipOnEvents` |
+| 🟥 | – | ✅ | – | `MembershipOnEvents` |
 | ✅ | 5/0/0 | 🟨 | 3/2/0 | `MessagesOverFederation` |
 | ✅ | – | ✅ | – | `NetworkPartitionOrdering` |
 | ✅ | – | ✅ | – | `NotPresentUserCannotBanOthers` |
 | ✅ | – | ✅ | – | `OlderLeftRoomsNotInLeaveSection` |
-| ❌ | – | ✅ | – | `OutboundFederationEventSizeGetMissingEvents` |
-| ❌ | – | ✅ | – | `OutboundFederationIgnoresMissingEventWithBadJSONForRoomVersion6` |
+| 🟥 | – | ✅ | – | `OutboundFederationEventSizeGetMissingEvents` |
+| 🟥 | – | ✅ | – | `OutboundFederationIgnoresMissingEventWithBadJSONForRoomVersion6` |
 | ✅ | 1/0/0 | ✅ | 1/0/0 | `OutboundFederationProfile` |
 | ✅ | – | ✅ | – | `OutboundFederationSend` |
 | 🟨 | 1/57/7 | 🟨 | 58/1/6 | `PartialStateJoin` |
@@ -175,7 +175,7 @@ These report-only results are a snapshot from [August 9, 2026 CI run](https://gi
 | ✅ | – | ✅ | – | `RelationsPaginationSync` |
 | ✅ | – | ✅ | – | `RemoteAliasRequestsUnderstandUnicode` |
 | 🟨 | 1/1/0 | 🟨 | 1/1/0 | `RemotePngThumbnail` |
-| ❌ | 0/2/0 | 🟨 | 1/1/0 | `RemotePresence` |
+| 🟥 | 0/2/0 | 🟨 | 1/1/0 | `RemotePresence` |
 | ✅ | – | ✅ | – | `RemoteTyping` |
 | ✅ | 4/0/0 | ✅ | 4/0/0 | `RemovingAccountData` |
 | ✅ | 1/0/0 | ✅ | 1/0/0 | `RequestEncodingFails` |
@@ -204,12 +204,12 @@ These report-only results are a snapshot from [August 9, 2026 CI run](https://gi
 | ✅ | 5/0/0 | ✅ | 5/0/0 | `RoomSpecificUsernameAtJoin` |
 | ✅ | 5/0/0 | ✅ | 5/0/0 | `RoomSpecificUsernameChange` |
 | ✅ | 15/0/0 | ✅ | 15/0/0 | `RoomState` |
-| ✅ | – | ❌ | – | `RoomSummary` |
+| ✅ | – | 🟥 | – | `RoomSummary` |
 | ✅ | 2/0/0 | ✅ | 2/0/0 | `RoomSummaryAllowedRoomIDs` |
 | ✅ | 9/0/0 | ✅ | 9/0/0 | `RoomsInvite` |
 | ✅ | 7/0/0 | ✅ | 7/0/0 | `Search` |
 | ✅ | – | ✅ | – | `SendAndFetchMessage` |
-| ✅ | – | ❌ | – | `SendJoinPartialStateResponse` |
+| ✅ | – | 🟥 | – | `SendJoinPartialStateResponse` |
 | ✅ | – | ✅ | – | `SendMessageWithTxn` |
 | ✅ | – | ✅ | – | `ServerCapabilities` |
 | ⬛ | – | ✅ | 8/0/0 | `ServerNotices` |
@@ -220,12 +220,12 @@ These report-only results are a snapshot from [August 9, 2026 CI run](https://gi
 | ✅ | 2/0/0 | ✅ | 2/0/0 | `SyncTimelineGap` |
 | ✅ | – | ✅ | – | `TentativeEventualJoiningAfterRejecting` |
 | 🟨 | 1/7/0 | ✅ | 8/0/0 | `ThreadSubscriptions` |
-| ❌ | – | ✅ | – | `ThreadedReceipts` |
+| 🟥 | – | ✅ | – | `ThreadedReceipts` |
 | ✅ | – | ✅ | – | `ThreadsEndpoint` |
 | ✅ | – | ✅ | – | `ToDeviceMessages` |
 | ✅ | 1/0/0 | ✅ | 1/0/0 | `ToDeviceMessagesOverFederation` |
 | ✅ | – | ✅ | – | `TxnIdWithRefreshToken` |
-| ❌ | – | ✅ | – | `TxnIdempotency` |
+| 🟥 | – | ✅ | – | `TxnIdempotency` |
 | ✅ | – | ✅ | – | `TxnIdempotencyScopedToDevice` |
 | ✅ | – | ✅ | – | `TxnInEvent` |
 | ✅ | – | ✅ | – | `TxnScopeOnLocalEcho` |

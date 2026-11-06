@@ -7,12 +7,12 @@ Tuwunel runs the [Complement Crypto](https://github.com/matrix-org/complement-cr
 - Test groups: 26. Passing: **80.8%**
   - ✅ `pass`: 21
   - 🟨 `some`: 0
-  - ❌ `fail`: 0
+  - 🟥 `fail`: 0
   - ⬛ `skip`: 5
 
 - Subtests: 29. Passing: **82.8%**
   - ✅ `pass`: 24
-  - ❌ `fail`: 0
+  - 🟥 `fail`: 0
   - ⬛ `skip`: 5
 
 ## All Top-Level Tests
