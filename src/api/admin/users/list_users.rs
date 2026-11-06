@@ -112,6 +112,7 @@ async fn list_users(
 	let mut names: Vec<String> = services
 		.users
 		.stream()
+		.ready_filter(|user_id| services.globals.user_is_local(user_id))
 		.map(ToString::to_string)
 		.collect()
 		.await;
