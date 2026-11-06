@@ -1619,6 +1619,21 @@ pub struct SmtpConfig {
 	/// example: "Example <noreply@example.com>"
 	pub sender: Option<String>,
 
+	/// Rejects email domains matching these regular expressions during registration
+	/// and when adding an email address to an existing account.
+	///
+	/// Patterns match only the canonical domain: lowercase with `ß` expanded to
+	/// `ss`, without changing plus-addressing or dots. Anchor patterns to match
+	/// whole domains, for example `^example[.]com$` or `(^|[.])example[.]com$`
+	/// to include subdomains; an empty list imposes no domain exclusions.
+	/// Existing bindings and password resets remain usable, while previously
+	/// verified addresses are checked again before registration or addition.
+	///
+	/// reloadable: yes
+	/// default: []
+	#[serde(default, with = "serde_regex")]
+	pub forbidden_email_domains: RegexSet,
+
 	/// Require a verified email address to complete registration. When set,
 	/// the registration flow does not finish until the user proves control of
 	/// an email address.

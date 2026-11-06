@@ -143,3 +143,26 @@ pub(crate) async fn bind_new_account_email(
 
 	Ok(())
 }
+
+/// Rejects a canonical email address whose domain is forbidden for new bindings.
+///
+/// Callers canonicalize the address before applying this add-time policy;
+/// password reset and existing bindings do not use it.
+pub(crate) fn check_email_domain(services: &Services, email_canon: &str) -> Result {
+	services.sendmail.check_address(email_canon)?;
+
+	let (_, domain) = email_canon
+		.rsplit_once('@')
+		.ok_or_else(|| err!(Request(InvalidParam("Email address must contain a domain"))))?;
+
+	if services
+		.config
+		.smtp
+		.forbidden_email_domains
+		.is_match(domain)
+	{
+		return Err!(Request(ThreepidDenied("Email domain is not allowed")));
+	}
+
+	Ok(())
+}

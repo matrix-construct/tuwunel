@@ -17,7 +17,10 @@ use tuwunel_service::{
 };
 
 use super::{SESSION_ID_LENGTH, is_matrix_appservice_irc};
-use crate::{ClientIp, Ruma, utils::bind_new_account_email};
+use crate::{
+	ClientIp, Ruma,
+	utils::{bind_new_account_email, check_email_domain},
+};
 
 const RANDOM_USER_ID_LENGTH: usize = 10;
 
@@ -84,6 +87,10 @@ pub(crate) async fn register_route(
 		.await?;
 
 	let email_association = enforce_uiaa(services, &body, is_guest).await?;
+
+	if let Some(ref association) = email_association {
+		check_email_domain(&services, &association.address)?;
+	}
 
 	let password = if is_guest { None } else { body.password.as_deref() };
 

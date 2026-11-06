@@ -140,6 +140,7 @@ where
 	args.option.extend([
 		"listening=true".to_owned(),
 		format!("smtp.connection_uri=\"smtp://127.0.0.1:{}\"", config.smtp_port),
+		"smtp.forbidden_email_domains=['^example[.]org$']".to_owned(),
 		"smtp.sender=\"noreply@example.org\"".to_owned(),
 		format!("well_known.client=\"http://127.0.0.1:{port}\""),
 		"jwt.enable=true".to_owned(),

@@ -4,7 +4,7 @@ use tuwunel_core::{Err, Result};
 use tuwunel_service::threepid::canonicalize_email;
 
 use super::email_token::send_email_token;
-use crate::{ClientIp, Ruma};
+use crate::{ClientIp, Ruma, utils::check_email_domain};
 
 /// # `POST /_matrix/client/v3/register/email/requestToken`
 ///
@@ -19,6 +19,8 @@ pub(crate) async fn request_registration_token_via_email_route(
 	}
 
 	let email_canon = canonicalize_email(&body.email)?;
+
+	check_email_domain(&services, &email_canon)?;
 
 	if services
 		.threepid

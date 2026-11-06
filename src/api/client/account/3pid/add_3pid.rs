@@ -5,7 +5,7 @@ use ruma::{
 };
 use tuwunel_core::{Err, Result, err, utils::BoolExt};
 
-use crate::{ClientIp, Ruma, router::auth_uiaa};
+use crate::{ClientIp, Ruma, router::auth_uiaa, utils::check_email_domain};
 
 /// # `POST /_matrix/client/v3/account/3pid/add`
 ///
@@ -29,6 +29,8 @@ pub(crate) async fn add_3pid_route(
 		.threepid
 		.redeem_validated(body.sid.as_str(), body.client_secret.as_str())
 		.await?;
+
+	check_email_domain(&services, &association.address)?;
 
 	let now = MilliSecondsSinceUnixEpoch::now();
 

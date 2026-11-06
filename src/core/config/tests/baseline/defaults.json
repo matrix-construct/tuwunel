@@ -310,7 +310,7 @@
   "show_all_local_users_in_user_directory": "false",
   "show_appservice_users_in_user_directory": "false",
   "single_sso": "false",
-  "smtp": "SmtpConfig { connection_uri: None, sender: None, require_email_for_registration: false, require_email_for_token_registration: false }",
+  "smtp": "SmtpConfig { connection_uri: None, sender: None, forbidden_email_domains: RegexSet([]), require_email_for_registration: false, require_email_for_token_registration: false }",
   "spacehierarchy_cache_ttl_max": "64800",
   "spacehierarchy_cache_ttl_min": "10800",
   "sso_custom_providers_page": "false",
