@@ -1619,15 +1619,19 @@ pub struct SmtpConfig {
 	/// example: "Example <noreply@example.com>"
 	pub sender: Option<String>,
 
-	/// Rejects email domains matching these regular expressions during registration
-	/// and when adding an email address to an existing account.
+	/// Rejects email domains matching these regular expressions during native
+	/// registration and self-service email addition.
+	///
+	/// SSO registration and email addresses supplied by identity providers are
+	/// exempt.
 	///
 	/// Patterns match only the canonical domain: lowercase with `ß` expanded to
 	/// `ss`, without changing plus-addressing or dots. Anchor patterns to match
 	/// whole domains, for example `^example[.]com$` or `(^|[.])example[.]com$`
 	/// to include subdomains; an empty list imposes no domain exclusions.
 	/// Existing bindings and password resets remain usable, while previously
-	/// verified addresses are checked again before registration or addition.
+	/// verified addresses are checked again before native registration or
+	/// self-service addition.
 	///
 	/// reloadable: yes
 	/// default: []
