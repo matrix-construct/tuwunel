@@ -12,7 +12,7 @@ use tuwunel_core::{
 	Err, Error, Result, err, implement,
 	utils::{ReadyExt, stream::TryIgnore},
 };
-use tuwunel_database::{Deserialized, Ignore, Interfix, Map};
+use tuwunel_database::{Deserialized, Ignore, Interfix, Map, Txn, serialize_key};
 use tuwunel_matrix::Event;
 
 use crate::appservice::RegistrationInfo;
@@ -88,16 +88,15 @@ impl Service {
 
 		let count = self.services.globals.next_count();
 
-		let localpart = alias.alias();
+		let localpart = alias.alias().as_bytes();
+		let key = serialize_key((room_id, *count))?;
 
-		// Comes first as we don't want a stuck alias
-		self.db.alias_userid.insert(localpart, user_id);
-
-		self.db.alias_roomid.insert(localpart, room_id);
-
-		self.db
-			.aliasid_alias
-			.put_raw((room_id, *count), alias);
+		Txn::insert_each_slice(&[
+			(&self.db.alias_userid, localpart, user_id.as_bytes()),
+			(&self.db.alias_roomid, localpart, room_id.as_bytes()),
+			(&self.db.aliasid_alias, key.as_slice(), alias.as_bytes()),
+		])
+		.execute();
 
 		Ok(())
 	}
