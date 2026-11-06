@@ -43,13 +43,22 @@ pub async fn send_text(&self, body: &str) {
 /// the admin room, as the server user.
 #[implement(super::Service)]
 pub async fn send_report(&self, body: &str) {
+	self.send_report_content(RoomMessageEventContent::text_markdown(body))
+		.await;
+}
+
+/// Sends prepared report content to the configured report room.
+///
+/// Falls back to the admin room and sends as the server user. The supplied
+/// plaintext and formatted bodies are passed through without Markdown parsing.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn send_report_content(&self, content: RoomMessageEventContent) {
 	let Ok(room_id) = self.get_report_room().await else {
 		return;
 	};
 
-	self.send_to_room(RoomMessageEventContent::text_markdown(body), &room_id)
-		.await
-		.ok();
+	self.send_to_room(content, &room_id).await.ok();
 }
 
 /// Sends a message to the admin room as the admin user (see send_text() for

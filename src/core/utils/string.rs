@@ -372,6 +372,21 @@ pub fn markdown_cell(value: &str) -> Cow<'_, str> {
 		.map_or(Cow::Borrowed(value), Cow::Owned)
 }
 
+/// Replaces control characters and Unicode line separators with spaces.
+///
+/// Each replaced character becomes one space, keeping the value on one line.
+/// Values that need no replacements are borrowed without allocation.
+#[must_use]
+pub fn single_line(value: &str) -> Cow<'_, str> {
+	let breaks_line =
+		|character: char| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}');
+
+	value
+		.contains(breaks_line)
+		.then(|| value.replace(breaks_line, " "))
+		.map_or(Cow::Borrowed(value), Cow::Owned)
+}
+
 /// Picks the singular or plural form of a noun for a count.
 ///
 /// Only a count of exactly one takes the singular, so zero reads as plural.

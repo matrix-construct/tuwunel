@@ -1,10 +1,20 @@
+use std::borrow::Cow;
+
 use axum::extract::State;
-use futures::{StreamExt, pin_mut};
-use ruma::{EventId, RoomAliasId, RoomId, UserId, api::client::room::report_content};
+use futures::{StreamExt, TryFutureExt, pin_mut};
+use ruma::{
+	EventId, RoomAliasId, RoomId, UserId,
+	api::client::room::report_content,
+	events::{
+		StateEventType,
+		room::{create::RoomCreateEventContent, message::RoomMessageEventContent},
+	},
+	room::RoomType,
+};
 use serde::Deserialize;
 use tuwunel_core::{
-	Err, Result, debug_info, info,
-	utils::{ReadyExt, TryFutureExtExt, html::escape, string::markdown_cell},
+	Err, Result, debug_error, debug_info, info,
+	utils::{ReadyExt, html::escape, string::single_line},
 };
 use tuwunel_matrix::{Event, pdu::PduEvent};
 use tuwunel_service::Services;
@@ -15,7 +25,7 @@ use crate::{ClientIp, Ruma};
 #[cfg(test)]
 mod tests;
 
-const BODY_MAX_CHARS: usize = 500;
+const DETAIL_MAX_CHARS: usize = 500;
 
 struct Report<'a> {
 	reporter: &'a UserId,
@@ -69,40 +79,43 @@ pub(crate) async fn report_event_route(
 
 	let room_type = services
 		.state_accessor
-		.get_room_type(&pdu.room_id)
-		.ok()
+		.room_state_get_content(&pdu.room_id, &StateEventType::RoomCreate, "")
+		.map_ok(|content: RoomCreateEventContent| content.room_type)
+		.inspect_err(|error| debug_error!(%error, "Failed to read reported room type"))
 		.await;
 
-	let room_type = room_type.map_or_else(|| "regular".to_owned(), |kind| kind.to_string());
-
-	let aliases = services
-		.alias
-		.local_aliases_for_room(&pdu.room_id);
-
-	pin_mut!(aliases);
-	let room_alias = aliases.next().await;
+	let room_type = room_type
+		.as_ref()
+		.map(|kind| kind.as_ref().map_or("regular", RoomType::as_str))
+		.unwrap_or("unavailable");
 
 	let body = pdu
 		.get_content()
 		.ok()
 		.and_then(|content: Content| content.body);
 
-	let report = Report {
-		reporter: sender_user,
-		reason,
-		event_id: &pdu.event_id,
-		room_id: &pdu.room_id,
-		room_type: &room_type,
-		room_alias,
-		body: body.as_deref(),
-		sender: &pdu.sender,
-		sender_is_local: services.globals.user_is_local(&pdu.sender),
+	let report = {
+		let aliases = services
+			.alias
+			.local_aliases_for_room(&pdu.room_id);
+
+		pin_mut!(aliases);
+		let room_alias = aliases.next().await;
+
+		format_report(&Report {
+			reporter: sender_user,
+			reason,
+			event_id: &pdu.event_id,
+			room_id: &pdu.room_id,
+			room_type,
+			room_alias,
+			body: body.as_deref(),
+			sender: &pdu.sender,
+			sender_is_local: services.globals.user_is_local(&pdu.sender),
+		})
 	};
 
-	services
-		.admin
-		.send_report(&format_report(&report))
-		.await;
+	services.admin.send_report_content(report).await;
 
 	Ok(report_content::v3::Response {})
 }
@@ -150,38 +163,43 @@ async fn is_event_report_valid(
 	Ok(())
 }
 
-fn format_report(report: &Report<'_>) -> String {
+fn format_report(report: &Report<'_>) -> RoomMessageEventContent {
+	let event_id = single_line(report.event_id.as_str());
 	let room_alias = report
 		.room_alias
 		.map_or("none", RoomAliasId::as_str);
 
-	let body = report
-		.body
-		.map_or_else(|| "unavailable".to_owned(), quote_body);
-
-	let redact_hint = if report.sender_is_local {
-		format!("\n\nTo redact it: `!admin users redact-event {}`", report.event_id)
+	let (redact_hint, redact_id) = if report.sender_is_local {
+		("\n\nTo redact it: !admin users redact-event ", event_id.as_ref())
 	} else {
-		String::new()
+		("", "")
 	};
 
-	format!(
+	let body = format!(
 		"@room Event report received from {}\nReport Reason: {}\n\nEvent ID: {}\nRoom ID: \
-		 {}\nRoom Type: {}\nRoom Alias: {}\nSent By: {}\nMessage: {}{}",
-		report.reporter,
-		report.reason,
-		report.event_id,
-		report.room_id,
-		report.room_type,
-		room_alias,
-		report.sender,
-		body,
+		 {}\nRoom Type: {}\nRoom Alias: {}\nSent By: {}\nMessage: {}{}{}",
+		single_line(report.reporter.as_str()),
+		single_line(report.reason),
+		event_id,
+		single_line(report.room_id.as_str()),
+		excerpt(report.room_type),
+		excerpt(room_alias),
+		single_line(report.sender.as_str()),
+		excerpt(report.body.unwrap_or("unavailable")),
 		redact_hint,
-	)
+		redact_id,
+	);
+
+	let html = escape(&body).replace('\n', "<br>");
+
+	RoomMessageEventContent::text_html(body, html)
 }
 
-fn quote_body(body: &str) -> String {
-	let text: String = body.chars().take(BODY_MAX_CHARS).collect();
+fn excerpt(value: &str) -> Cow<'_, str> {
+	let text = value
+		.char_indices()
+		.nth(DETAIL_MAX_CHARS)
+		.map_or(value, |(end, _)| value.split_at(end).0);
 
-	escape(&markdown_cell(&text)).replace('[', "\\[")
+	single_line(text)
 }

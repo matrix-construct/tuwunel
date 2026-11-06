@@ -4,12 +4,24 @@ use std::borrow::Cow;
 
 use super::{
 	contains_any, equals_any, is_opaque_id, is_unreserved, is_unreserved_byte, markdown_cell,
-	plural,
+	plural, single_line,
 };
 use crate::{arrayvec::ArrayString, smallstr::SmallString};
 
 type SmallBuf = SmallString<[u8; 16]>;
 type ArrayBuf = ArrayString<16>;
+
+#[test]
+fn single_line_normalizes_controls_and_separators() {
+	assert_eq!(single_line("a\r\nb\t\0c\u{2028}d\u{2029}e"), "a  b  c d e");
+}
+
+#[test]
+fn single_line_borrows_literal_text() {
+	let text = "**bold** <text> [link](url) | \\";
+
+	assert!(matches!(single_line(text), Cow::Borrowed(value) if value == text));
+}
 
 #[test]
 fn contains_any_skips_empty_needles() {
