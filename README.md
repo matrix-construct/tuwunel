@@ -102,7 +102,7 @@ Tuwunel.
 
 ### Migrating to Tuwunel
 
-| Can I migrate from... | [More about migrating your existing server](https://matrix-construct.github.io/tuwunel/migrating.md) |
+| Can I migrate from... | [More about migrating your existing server](https://matrix-construct.github.io/tuwunel/migrating.html) |
 |-----------------|-----------|
 | conduwuit? | ✅ Yes. This will be supported at a minimum for one year, but likely indefinitely. |
 | A fork of conduwuit? | ✅ Yes. The database migrates in place on first boot. |
