@@ -88,9 +88,8 @@ pub async fn build_and_append_pdu(
 		.boxed() // size firewall
 		.await?;
 
-	// We append to state before appending the pdu, so we don't have a moment in
-	// time with the pdu without it's state. This is okay because append_pdu can't
-	// fail.
+	// Store the event snapshot first; append_pdu installs current state after
+	// the timeline row exists and before publishing its stream count.
 	let statehashid = self.services.state.append_to_state(&pdu).await?;
 
 	let pdu_id = self
@@ -100,16 +99,11 @@ pub async fn build_and_append_pdu(
 			// Since this PDU references all pdu_leaves we can update the leaves
 			// of the room
 			once(pdu.event_id()),
+			Some(statehashid),
 			state_lock,
 		)
 		.boxed() // size firewall
 		.await?;
-
-	// We set the room state after inserting the pdu, so that we never have a moment
-	// in time where events in the current room state do not exist
-	self.services
-		.state
-		.set_room_state(pdu.room_id(), statehashid, state_lock);
 
 	let mut servers: HashSet<OwnedServerName> = self
 		.services

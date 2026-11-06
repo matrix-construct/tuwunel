@@ -29,7 +29,7 @@ use super::{
 use crate::rooms::{
 	state::{IdMapState, RoomMutexGuard, Trigger, prune_goal},
 	state_compressor::{CompressedState, HashSetCompressStateEvent},
-	timeline::RawPduId,
+	timeline::{Incoming, RawPduId},
 };
 
 #[cfg(test)]
@@ -211,22 +211,16 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	let pdu_id = self
 		.services
 		.timeline
-		.append_incoming_pdu(
-			&incoming_pdu,
+		.append_incoming_pdu(Incoming {
+			pdu: &incoming_pdu,
 			pdu_json,
-			extremities,
+			new_room_leafs: extremities,
 			state_ids_compressed,
 			soft_fail,
-			&state_lock,
-		)
+			shortstatehash,
+			state_lock: &state_lock,
+		})
 		.await?;
-
-	// Current state must not reference the incoming event before its timeline row exists.
-	if let Some(shortstatehash) = shortstatehash {
-		self.services
-			.state
-			.install_force_state(room_id, shortstatehash, &state_lock);
-	}
 
 	debug_assert!(
 		pdu_id.is_some() || soft_fail,

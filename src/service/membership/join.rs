@@ -366,9 +366,8 @@ async fn join_remote(
 	self.apply_send_join_state(room_id, &state, &state_lock)
 		.await?;
 
-	// We append to state before appending the pdu, so we don't have a moment in
-	// time with the pdu without it's state. This is okay because append_pdu can't
-	// fail.
+	// Prepare the join's snapshot before appending. The append installs current
+	// state after the timeline row exists and before publishing its stream count.
 	let statehash_after_join = self
 		.services
 		.state
@@ -386,15 +385,10 @@ async fn join_remote(
 			&parsed_join_pdu,
 			join_event,
 			once(parsed_join_pdu.event_id.borrow()),
+			Some(statehash_after_join),
 			&state_lock,
 		)
 		.await?;
-
-	// We set the room state after inserting the pdu, so that we never have a moment
-	// in time where events in the current room state do not exist
-	self.services
-		.state
-		.set_room_state(room_id, statehash_after_join, &state_lock);
 
 	info!(
 		statehash = %statehash_after_join,
