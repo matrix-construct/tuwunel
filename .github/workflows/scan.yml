@@ -1,0 +1,61 @@
+name: Scan
+
+on:
+  workflow_call:
+    inputs:
+      languages:
+        type: string
+        default: '["actions"]'
+      analysis:
+        type: string
+        default: '{"actions": "code-scanning"}'
+      queries:
+        type: string
+        default: '{"actions": "security-extended"}'
+      checkout:
+        type: string
+        default: ${{github.sha}}
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: >
+        ${{fromJSON(inputs.analysis)[matrix.language]}}
+        ${{fromJSON(inputs.queries)[matrix.language]}}
+        ${{matrix.language}}
+
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{fromJSON(inputs.languages)}}
+
+    steps:
+    - id: checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{inputs.checkout || github.sha}}
+        persist-credentials: false
+        fetch-depth: 1
+
+    - id: init
+      name: Initialize
+      uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      with:
+        build-mode: none
+        dependency-caching: true
+        languages: ${{matrix.language}}
+        analysis-kinds: ${{fromJSON(inputs.analysis)[matrix.language]}}
+        queries: ${{fromJSON(inputs.queries)[matrix.language]}}
+
+    - id: analyze
+      name: Analyze
+      uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      with:
+        category: /language:${{matrix.language}}

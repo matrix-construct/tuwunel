@@ -251,6 +251,24 @@ jobs:
         draft: ${{ contains(github.ref, '-draft') }}
         prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-pre') }}
 
+  scan:
+    if: >
+      !failure() && !cancelled()
+      && !fromJSON(needs.init.outputs.is_release)
+
+    name: Scan
+    needs: [init]
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/scan.yml
+    with:
+      checkout: ${{inputs.checkout}}
+      languages: '["actions", "rust"]'
+      analysis: '{"actions": "code-scanning", "rust": "code-scanning"}'
+      queries: '{"actions": "security-extended", "rust": "security-extended"}'
+
   lint:
     if: >
       !failure() && !cancelled()
@@ -396,7 +414,7 @@ jobs:
     name: Package
     permissions:
       contents: write # release asset upload in bake.yml
-    needs: [init, test]
+    needs: [init, scan, lint, test]
     uses: ./.github/workflows/package.yml
     with:
       enable_book: ${{needs.init.outputs.enable_package_book}}
@@ -471,7 +489,7 @@ jobs:
       && !contains(needs.init.outputs.pipeline, '[ci no publish]')
 
     name: Publish
-    needs: [init, test, package]
+    needs: [init, scan, lint, test, package]
     permissions:
       contents: read
       id-token: write # deploy-pages OIDC
