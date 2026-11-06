@@ -66,6 +66,25 @@ pub fn reload(old: &Config, new: &Config) -> Result {
 		));
 	}
 
+	let old = &old.telemetry.sentry;
+	let new = &new.telemetry.sentry;
+
+	if new.enable != old.enable
+		|| new.endpoint != old.endpoint
+		|| new.send_server_name != old.send_server_name
+		|| new.traces_sample_rate.to_bits() != old.traces_sample_rate.to_bits()
+		|| new.attach_stacktrace != old.attach_stacktrace
+		|| new.send_panic != old.send_panic
+		|| new.send_error != old.send_error
+		|| new.filter != old.filter
+	{
+		return Err!(Config(
+			"telemetry.sentry",
+			"Sentry settings cannot be changed at runtime; restart the server to apply this \
+			 change."
+		));
+	}
+
 	Ok(())
 }
 
