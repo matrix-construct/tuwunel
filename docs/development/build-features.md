@@ -26,11 +26,13 @@ The public Cargo feature surface is defined in [`src/main/Cargo.toml`](https://g
 | `release_max_log_level` | ✔️ | Omit debug and trace logging from release builds. Remove this feature to use those log levels in a release build; runtime log filters cannot restore messages omitted at compile time. |
 | `sentry_telemetry` | ✔️ | Sentry error reporting and tracing integration. Enable `telemetry.sentry.enable` and configure `telemetry.sentry.endpoint`. |
 | `synapse_admin` | ✔️ | Synapse admin API, client account suspend and lock endpoints, and the client `whois` alias. Most endpoints require an administrator token; shared-secret registration requires `registration.shared_secret`. |
-| `systemd` | ✔️ | Systemd readiness, watchdog, socket activation, journal logging, and configuration reload integration. Requires Linux and systemd; journal logging is controlled by `logging.journald`. |
+| `systemd` | ✔️ | Systemd readiness, watchdog, socket activation, and configuration reload notifications. Requires Linux and systemd. |
 | `tokio_console` | × | Tokio task instrumentation for tokio-console. Build with `--cfg tokio_unstable`, enable `tracing.tokio_console` and `logging.global_default`, and omit `release_max_log_level` for release builds. |
 | `tuwunel_mods` | × | Hot reloadable development modules. Build with `--cfg tuwunel_mods` and provide loadable modules; see [Hot Reloading](hot_reload.md). |
 | `url_preview` | ✔️ | Fetch URL previews for clients. Configure `media.url_preview.domain_contains_allowlist` or `media.url_preview.domain_explicit_allowlist` for permitted domains. |
 | `zstd_compression` | ✔️ | Zstd HTTP compression/decompression and RocksDB compression. HTTP uses `http.compression.zstd = true` and client negotiation; `network.http.zstd` controls outbound negotiation; RocksDB uses `rocksdb.compression_algo`. |
+
+Journal logging works independently of the `systemd` feature. It requires `logging.journald` and the presence of both `SYSTEMD_EXEC_PID` and `JOURNAL_STREAM` in the environment.
 
 > [!IMPORTANT]
 > Some features reject enabling configuration when absent from the build; see the individual descriptions above.
