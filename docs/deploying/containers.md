@@ -22,12 +22,14 @@ covers the two runtime defaults that affect this server: the task limit that
 can stop startup outright, and the seccomp profile that decides whether the
 database gets io_uring.
 
-## Image registries
+### Registries
 
 | Registry        | Image                                             | Tags                          |
 | --------------- | ------------------------------------------------- | ----------------------------- |
 | GitHub Registry | [`ghcr.io/matrix-construct/tuwunel`][gh]          | `latest`, `preview`, `main`   |
 | Docker Hub      | [`docker.io/jevolk/tuwunel`][dh]                  | `latest`, `preview`, `main`   |
+
+### Images
 
 Three rolling tags trade update frequency for confidence.
 
@@ -37,7 +39,14 @@ Three rolling tags trade update frequency for confidence.
 | `:preview` | Selected higher-confidence updates      | ~weekly       | You want fixes between releases without chasing `main`. |
 | `:main`    | Every reviewed merge to the main branch | ~daily        | You track development and accept unknown-risk changes. |
 
-**For automated updates we strongly advise tracking `:latest`.**
+> [!IMPORTANT]
+> **We strongly advise tracking the `:latest` tag when automatically updating.**
+
+Tracking `:latest` gives us the necessary discretion to keep you on the appropriate stable release
+version. Tracking the `:preview` tag provides select updates of higher confidence between releases.
+Tracking the `:main` branch provides the most frequent updates which have been reviewed and tested
+with confidence for release, the only remaining risk being the unknown. The publication frequency
+for these tags are on average monthly, weekly and daily, respectively.
 
 [gh]: https://github.com/matrix-construct/tuwunel/pkgs/container/tuwunel
 [dh]: https://hub.docker.com/r/jevolk/tuwunel

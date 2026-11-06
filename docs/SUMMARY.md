@@ -6,6 +6,7 @@
 
 - [Introduction](introduction.md)
 - [Deployment](deploying.md)
+  - [Migration](migrating.md)
   - [Configuration](configuration.md)
     - [Examples](configuration/examples.md)
     - [Regeneration](configuration/regeneration.md)

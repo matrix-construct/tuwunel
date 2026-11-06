@@ -49,6 +49,8 @@ Switzerland 🇨🇭 where it is currently deployed for citizens.
 - Gentoo ebuild available in Guru as [net-im/tuwunel](https://gitweb.gentoo.org/repo/proj/guru.git/tree/net-im/tuwunel).
 - Ansible playbook available as [matrix-docker-ansible-deploy](https://github.com/spantaleev/matrix-docker-ansible-deploy/blob/master/docs/configuring-playbook-tuwunel.md).
 
+### Quick Setup
+
 **1.** [Configure](https://matrix-construct.github.io/tuwunel/configuration.html) by
 copying and editing the `tuwunel-example.toml`. The `server_name` and `database_path` must be
 configured. **Most users deploy via docker or a distribution package and should follow the
@@ -82,71 +84,7 @@ granted server admin.
 > [!TIP]
 > Configure a secret `registration_token` and set `allow_registration = true`
 
- 🤗 Did you find this and other documentation helpful? We would love to hear feedback about setting
- up Tuwunel.
-
-
-### Migrating to Tuwunel
-
-| Can I migrate from | |
-|-----------------|-----------|
-| conduwuit? | ✅ Yes. This will be supported at a minimum for one year, but likely indefinitely. |
-| A fork of conduwuit? | ✅ Yes. The database migrates in place on first boot. |
-| Conduit? | ✅ Yes. The RocksDB database migrates in place on first boot. |
-| Synapse? | ❌ Not yet, but this is planned and an important issue. Subscribe to [#2](https://github.com/matrix-construct/tuwunel/issues/2). |
-| Any other Conduit fork? | ❌ No. The migration must be explicitly listed in this table. |
-> [!CAUTION]
-> **Always back up your database before migrating.** Migrating into Tuwunel from a source listed
-> above is safe: Tuwunel recognizes a foreign database and reconciles its schema version on first
-> boot. Switching a database between two other forks of Conduit can still permanently corrupt it,
-> because all derivatives share one linear database version with no awareness of each other.
-
-#### Migrating from conduwuit
-
-Migrating from conduwuit to Tuwunel _just works_. In technical parlance it is a "binary swap."
-All you have to do is update to the latest Tuwunel and change the path to the executable from
-`conduwuit` to `tuwunel`.
-
-Anything else named "conduwuit" is still recognized, this includes environment variables with prefixes
-such as `CONDUWUIT_`. In fact, `CONDUIT_` is still recognized for our legacy users. You may have
-noticed that various configs, yamls, services, users, and other items were renamed, but if you
-were a conduwuit user we recommend against changing anything at all. This will keep things simple.
-If you are not sure please ask. If you found out that something did in fact need to be changed
-please open an issue immediately.
-
-#### Migrating from Conduit or a fork of conduwuit
-
-A RocksDB database from Conduit or a fork of conduwuit migrates in place on first boot. Stop the
-source server, back up its data directory and media, then start Tuwunel against it. Tuwunel
-recognizes the foreign database, reconciles its schema version, and carries over room history,
-account data, and media automatically; no flags are required. See the
-[deploying guide](docs/deploying.md) for media-layout notes that apply to older Conduit databases.
-
-
-### Upgrading & Downgrading Tuwunel
-
-We strive to make moving between versions of Tuwunel safe and easy. Downgrading Tuwunel is always
-safe but often prevented by a guard. An error will indicate the downgrade is not possible and a
-newer version which does not error must be sought.
-
-#### Branches
-
-The main branch is always _reasonably safe_ to run. We understand the propensity for users to simply clone
-the main branch to get up and running, and we're obliged to ensure it's always viable. Nevertheless, only
-tagged releases are true releases.
-
-#### Container Tracking
-
-> [!IMPORTANT]
-> **We strongly advise tracking the `:latest` tag when automatically updating.**
-
-Tracking `:latest` gives us the necessary discretion to keep you on the appropriate stable release
-version. Tracking the `:preview` tag provides select updates of higher confidence between releases.
-Tracking the `:main` branch provides the most frequent updates which have been reviewed and tested
-with confidence for release, the only remaining risk being the unknown. The publication frequency
-for these tags are on average monthly, weekly and daily, respectively.
-
-### Getting Help & Support
+### Help & Support
 
 Security vulnerabilities have their own reporting process; please see
 [SECURITY.md](./SECURITY.md). If you are opposed to using github, or if private discussion is
@@ -155,13 +93,22 @@ required for any other reason, I would be happy to receive your DM at
 be my pleasure to help you when possible. As an emergency contact you can send an email to
 jasonzemos@gmail.com.
 
-##### Tuwunel Chat
+##### 💜 Tuwunel Support Chat 💜
 
 Our official chat is publicly accessible at
 [#tuwunel:matrix.org](https://matrix.to/#/#tuwunel:matrix.org). Project staff are present there to
 offer assistance, and everyone is welcome to ask questions or share their experience running
 Tuwunel.
 
+### Migrating to Tuwunel
+
+| Can I migrate from... | [More about migrating your existing server](https://matrix-construct.github.io/tuwunel/migrating.md) |
+|-----------------|-----------|
+| conduwuit? | ✅ Yes. This will be supported at a minimum for one year, but likely indefinitely. |
+| A fork of conduwuit? | ✅ Yes. The database migrates in place on first boot. |
+| Conduit? | ✅ Yes. The RocksDB database migrates in place on first boot. |
+| Synapse? | ❌ Not yet, but this is planned and an important issue. Subscribe to [#2](https://github.com/matrix-construct/tuwunel/issues/2). |
+| Any other Conduit fork? | ❌ No. The migration must be explicitly listed in this table. |
 
 ## Tuwunel<sup>💕</sup>
 
