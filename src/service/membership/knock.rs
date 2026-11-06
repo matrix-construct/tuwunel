@@ -220,7 +220,7 @@ async fn knock_room_local_federation_fallback(
 	info!("Appending room knock event locally");
 	self.services
 		.timeline
-		.append_pdu(&pdu, event, once(pdu.event_id.borrow()), state_lock)
+		.append_pdu(&pdu, event, once(pdu.event_id.borrow()), None, state_lock)
 		.await?;
 
 	Ok(())

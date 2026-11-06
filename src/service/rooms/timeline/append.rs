@@ -37,8 +37,11 @@ use super::{ExtractBody, ExtractRelatesTo, ExtractRelatesToEventId, RoomMutexGua
 use crate::{
 	admin::CommandInput,
 	rooms::{
-		read_receipt::PrivateRead, short::ShortRoomId, state_accessor::plain_text_topic,
-		state_cache::MembershipUpdate, state_compressor::CompressedState,
+		read_receipt::PrivateRead,
+		short::{ShortRoomId, ShortStateHash},
+		state_accessor::plain_text_topic,
+		state_cache::MembershipUpdate,
+		state_compressor::CompressedState,
 	},
 };
 
@@ -61,6 +64,10 @@ struct Appended<'a> {
 /// marked referenced. Only a nonempty replacement extremity band is stored; an
 /// empty calculation preserves the prior band.
 #[implement(super::Service)]
+#[expect(
+	clippy::too_many_arguments,
+	reason = "event and current state snapshots are distinct"
+)]
 #[tracing::instrument(
 	name = "append_incoming",
 	level = "debug",
@@ -74,14 +81,14 @@ pub(crate) async fn append_incoming_pdu<'a, Leafs>(
 	new_room_leafs: Leafs,
 	state_ids_compressed: Arc<CompressedState>,
 	soft_fail: bool,
+	shortstatehash: Option<ShortStateHash>,
 	state_lock: &'a RoomMutexGuard,
 ) -> Result<Option<RawPduId>>
 where
 	Leafs: Iterator<Item = &'a EventId> + Send + 'a,
 {
-	// We append to state before appending the pdu, so we don't have a moment in
-	// time with the pdu without it's state. This is okay because append_pdu can't
-	// fail.
+	// The event's preceding snapshot is distinct from resolved current state.
+	// Store it before the timeline row; install current state before retirement.
 	self.services
 		.state
 		.set_event_state(&pdu.event_id, &pdu.room_id, state_ids_compressed)
@@ -105,7 +112,7 @@ where
 	}
 
 	let pdu_id = self
-		.append_pdu(pdu, pdu_json, new_room_leafs, state_lock)
+		.append_pdu(pdu, pdu_json, new_room_leafs, shortstatehash, state_lock)
 		.await?;
 
 	Ok(Some(pdu_id))
@@ -126,6 +133,8 @@ where
 /// outlier removal, and timestamp index are committed together, but later
 /// cache, indexing, notification, and membership work is not part of that
 /// transaction, so an error can be returned after the event is stored.
+/// Any prepared current state is installed before the event's stream count
+/// retires, including when a later timeline effect returns an error.
 #[implement(super::Service)]
 #[tracing::instrument(name = "append", level = "debug", skip_all, ret(Debug))]
 pub async fn append_pdu<'a, Leafs>(
@@ -133,6 +142,7 @@ pub async fn append_pdu<'a, Leafs>(
 	pdu: &'a PduEvent,
 	pdu_json: CanonicalJsonObject,
 	leafs: Leafs,
+	shortstatehash: Option<ShortStateHash>,
 	state_lock: &'a RoomMutexGuard,
 ) -> Result<RawPduId>
 where
@@ -221,10 +231,23 @@ where
 		replaced_join,
 	};
 
-	self.append_pdu_effects(appended, state_lock)
-		.await?;
+	let effects = self
+		.append_pdu_effects(appended, state_lock)
+		.await;
+
+	if let Some(shortstatehash) = shortstatehash {
+		self.services
+			.state
+			.set_room_state(pdu.room_id(), shortstatehash, state_lock);
+	}
+
+	// The cached hierarchy summary projects the installed room state.
+	if pdu.state_key().is_some() {
+		self.services.spaces.cache_evict(pdu.room_id());
+	}
 
 	drop(next_count);
+	effects?;
 
 	self.services
 		.appservice
@@ -413,11 +436,6 @@ async fn append_pdu_effects(
 			}
 		},
 		| _ => {},
-	}
-
-	// The cached hierarchy summary projects room state; evict on any state change.
-	if pdu.state_key().is_some() {
-		self.services.spaces.cache_evict(pdu.room_id());
 	}
 
 	if let Ok(content) = pdu.get_content::<ExtractRelatesToEventId>()

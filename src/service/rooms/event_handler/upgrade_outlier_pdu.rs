@@ -217,16 +217,10 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 			extremities,
 			state_ids_compressed,
 			soft_fail,
+			shortstatehash,
 			&state_lock,
 		)
 		.await?;
-
-	// Current state must not reference the incoming event before its timeline row exists.
-	if let Some(shortstatehash) = shortstatehash {
-		self.services
-			.state
-			.install_force_state(room_id, shortstatehash, &state_lock);
-	}
 
 	debug_assert!(
 		pdu_id.is_some() || soft_fail,
