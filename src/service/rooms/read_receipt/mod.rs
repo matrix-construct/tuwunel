@@ -505,8 +505,15 @@ where
 			value.json().get(),
 		)?;
 
-		for (event, receipt) in value.content {
-			json.insert(event, receipt);
+		// Receipts of several users usually target the same event.
+		for (event, receipts) in value.content {
+			let merged: &mut Receipts = json.entry(event).or_default();
+			for (receipt_type, users) in receipts {
+				merged
+					.entry(receipt_type)
+					.or_default()
+					.extend(users);
+			}
 		}
 
 		Ok(json)
