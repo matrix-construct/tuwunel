@@ -1,10 +1,18 @@
 #![cfg(test)]
 
-use ruma::{RoomId, UserId};
+use std::collections::BTreeMap;
+
+use ruma::{
+	RoomId, UserId,
+	events::{AnySyncEphemeralRoomEvent, receipt::ReceiptType},
+	owned_event_id,
+	serde::Raw,
+};
+use serde_json::json;
 use tuwunel_database::{Interfix, SEP, serialize_to_vec};
 use tuwunel_matrix::pdu::PduCount;
 
-use super::{data::position_advances, thread_kind_to_receipt};
+use super::{data::position_advances, pack_receipts_fallible, thread_kind_to_receipt};
 
 const ROOM: &str = "!room:example.com";
 const USER: &str = "@user:example.com";
@@ -202,4 +210,42 @@ mod private_read {
 		assert!(main.starts_with(&prefix));
 		assert!(thread.starts_with(&prefix));
 	}
+}
+
+#[test]
+fn packing_keeps_every_user_on_a_shared_event() {
+	let receipt = |receipt_type: &str, user: &str| {
+		Raw::<AnySyncEphemeralRoomEvent>::from_json(
+			serde_json::value::to_raw_value(&json!({
+				"type": "m.receipt",
+				"content": {"$shared": {receipt_type: {user: {"ts": 1}}}},
+			}))
+			.unwrap(),
+		)
+	};
+
+	let packed = pack_receipts_fallible(
+		[
+			receipt("m.read", "@a:example.com"),
+			receipt("m.read", "@b:example.com"),
+			receipt("m.read.private", "@c:example.com"),
+		]
+		.into_iter(),
+	)
+	.unwrap()
+	.deserialize()
+	.unwrap();
+
+	let shared = &packed.content.0[&owned_event_id!("$shared")];
+	let readers = |receipt_type: ReceiptType| -> Vec<&str> {
+		shared
+			.get(&receipt_type)
+			.into_iter()
+			.flat_map(BTreeMap::keys)
+			.map(AsRef::as_ref)
+			.collect()
+	};
+
+	assert_eq!(readers(ReceiptType::Read), ["@a:example.com", "@b:example.com"]);
+	assert_eq!(readers(ReceiptType::ReadPrivate), ["@c:example.com"]);
 }

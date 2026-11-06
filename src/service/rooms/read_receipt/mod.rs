@@ -500,20 +500,34 @@ pub fn pack_receipts_fallible<I>(
 where
 	I: Iterator<Item = Raw<AnySyncEphemeralRoomEvent>>,
 {
-	let json = receipts.try_fold(BTreeMap::new(), |mut json, value| -> Result<_> {
-		let value = serde_json::from_str::<SyncEphemeralRoomEvent<ReceiptEventContent>>(
-			value.json().get(),
-		)?;
+	let content =
+		receipts.try_fold(ReceiptEventContent(BTreeMap::new()), |json, value| -> Result<_> {
+			let value = serde_json::from_str::<SyncEphemeralRoomEvent<ReceiptEventContent>>(
+				value.json().get(),
+			)?;
 
-		for (event, receipt) in value.content {
-			json.insert(event, receipt);
-		}
+			Ok(merge_receipts(json, value.content))
+		})?;
 
-		Ok(json)
-	})?;
-
-	let content = ReceiptEventContent(json);
 	let event = to_raw_value(&SyncEphemeralRoomEvent { content })?;
 
 	Ok(Raw::from_json(event))
+}
+
+fn merge_receipts(
+	mut content: ReceiptEventContent,
+	incoming: ReceiptEventContent,
+) -> ReceiptEventContent {
+	for (event, receipts) in incoming {
+		let merged = content.0.entry(event).or_default();
+
+		for (receipt_type, users) in receipts {
+			merged
+				.entry(receipt_type)
+				.or_default()
+				.extend(users);
+		}
+	}
+
+	content
 }
