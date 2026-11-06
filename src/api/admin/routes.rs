@@ -21,6 +21,7 @@ pub fn build(server: &Server) -> Router<State> {
 	let router = register_synapse_admin_misc_routes(router);
 
 	router
+		.ruma_route(&admin::media::admin_object_locations_route)
 		.ruma_route(&admin::is_user_suspended_route)
 		.ruma_route(&admin::suspend_user_route)
 		.ruma_route(&admin::is_user_locked_route)

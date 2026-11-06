@@ -19,6 +19,7 @@ crate-type = [
 
 [dependencies]
 axum.workspace = true
+bytes.workspace = true
 const-str.workspace = true
 ctor.workspace = true
 dtor.workspace = true
