@@ -1,5 +1,6 @@
 mod dispatch;
 mod netburst;
+mod queue;
 mod response;
 mod select;
 mod split;
@@ -164,6 +165,12 @@ async fn work_loop<'a>(
 		.expect("Missing channel for sender worker")
 		.1;
 
+	let controls = &self
+		.controls
+		.get(id)
+		.expect("Missing sender controls")
+		.1;
+
 	while !receiver.is_closed() {
 		let next_due = wakes
 			.peek()
@@ -172,6 +179,10 @@ async fn work_loop<'a>(
 		select! {
 			Some(response) = futures.next() => {
 				self.handle_response(response, futures, statuses, wakes).await;
+			},
+			control = controls.recv_async() => match control {
+				Ok(control) => self.handle_control(control, futures, statuses, wakes).await,
+				Err(_) => return,
 			},
 			request = receiver.recv_async() => match request {
 				Ok(request) => self.handle_request(request, futures, statuses, wakes).await,

@@ -229,3 +229,27 @@ pub fn clear_suppressed_pushkey(&self, user_id: &UserId, pushkey: &str) -> usize
 
 	removed
 }
+
+/// Snapshot the suppressed events for one pusher without draining them.
+///
+/// Ownership lets callers inspect the snapshot without holding the queue lock.
+#[implement(super::Service)]
+pub fn suppressed_for_pushkey(
+	&self,
+	user_id: &UserId,
+	pushkey: &str,
+) -> impl Iterator<Item = (OwnedRoomId, RawPduId)> + use<> {
+	self.suppressed
+		.lock()
+		.get(user_id)
+		.and_then(|user| user.get(pushkey))
+		.into_iter()
+		.flat_map(|queue| queue.rooms.iter())
+		.flat_map(|(room, events)| {
+			events
+				.iter()
+				.map(move |event| (room.clone(), event.pdu_id))
+		})
+		.collect::<Vec<_>>()
+		.into_iter()
+}

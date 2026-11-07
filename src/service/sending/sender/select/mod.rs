@@ -130,6 +130,13 @@ pub(super) async fn select_events(
 	}
 
 	let _cork = self.db.db.cork();
+
+	if matches!(dest, Destination::Push(..)) && new_events.is_empty() {
+		let events = self.resume_queued(dest, &[]).await;
+
+		return Ok(Selection::Events(events));
+	}
+
 	let Destination::Federation(server) = dest else {
 		return Ok(Selection::Events(self.claim_new(new_events, &[]).await));
 	};

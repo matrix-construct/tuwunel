@@ -2,6 +2,7 @@ mod appservice;
 mod cleanup;
 mod fixture;
 mod ordering;
+mod queue;
 mod recovery;
 mod startup;
 

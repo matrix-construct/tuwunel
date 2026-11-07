@@ -1,6 +1,7 @@
 mod data;
 mod dest;
 mod device;
+mod queue;
 mod sender;
 #[cfg(test)]
 mod tests;
@@ -16,7 +17,7 @@ use std::{
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
-use loole::unbounded;
+use loole::{Receiver, Sender, unbounded};
 use ruma::{OwnedServerName, RoomId, ServerName, UserId};
 use tokio::task::JoinSet;
 use tuwunel_core::{
@@ -25,13 +26,15 @@ use tuwunel_core::{
 	utils::{IterStream, ReadyExt, TryReadyExt, result::LogErr},
 };
 
-use self::worker::num_senders;
 pub use self::{
 	data::{Data, Park},
 	dest::Destination,
 	sender::{EDU_LIMIT, PDU_LIMIT},
 };
+use self::{queue::Control, worker::num_senders};
 use crate::rooms::timeline::RawPduId;
+
+type Channel<T> = (Sender<T>, Receiver<T>);
 
 type StalledDestinations = StdMutex<HashMap<OwnedServerName, Option<Instant>>>;
 
@@ -44,7 +47,8 @@ pub struct Service {
 	pub db: Data,
 	server: Arc<Server>,
 	services: Arc<crate::services::OnceServices>,
-	channels: Vec<(loole::Sender<Msg>, loole::Receiver<Msg>)>,
+	channels: Vec<Channel<Msg>>,
+	controls: Vec<Channel<Control>>,
 
 	// Aborted and joined when the service stops.
 	flushes: StdMutex<JoinSet<()>>,
@@ -111,6 +115,10 @@ const TAG_PREFIX_LEN: usize = 1 + size_of::<u64>();
 #[async_trait]
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
+		let controls = repeat_with(unbounded)
+			.take(num_senders(args))
+			.collect();
+
 		let channels = repeat_with(unbounded)
 			.take(num_senders(args))
 			.collect();
@@ -120,6 +128,7 @@ impl crate::Service for Service {
 			server: args.server.clone(),
 			services: args.services.clone(),
 			channels,
+			controls,
 			flushes: JoinSet::new().into(),
 			stalled: HashMap::new().into(),
 		}))
@@ -466,7 +475,5 @@ pub async fn cleanup_events(
 		},
 	};
 
-	self.db.delete_all_requests_for(&dest).await;
-
-	Ok(())
+	self.db.delete_all_requests_for(&dest).await
 }

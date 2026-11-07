@@ -22,7 +22,7 @@ use ruma::{OwnedServerName, ServerName, UserId};
 use tuwunel_core::{
 	Error, Result, at, implement, utils,
 	utils::{
-		IterStream, ReadyExt,
+		IterStream, ReadyExt, TryReadyExt,
 		bytes::prefix_successor,
 		str_from_bytes,
 		stream::{TryIgnore, WidebandExt},
@@ -120,20 +120,26 @@ where
 }
 
 #[implement(Data)]
-pub(super) async fn delete_all_requests_for(&self, destination: &Destination) {
+pub(super) async fn delete_all_requests_for(&self, destination: &Destination) -> Result {
 	let prefix = destination.get_prefix();
 
 	self.servercurrentevent_data
 		.raw_keys_prefix(&prefix)
-		.ignore_err()
-		.ready_for_each(|key| self.servercurrentevent_data.remove(key))
-		.await;
+		.ready_try_for_each(|key| {
+			self.servercurrentevent_data.remove(key);
+
+			Ok(())
+		})
+		.await?;
 
 	self.servernameevent_data
 		.raw_keys_prefix(&prefix)
-		.ignore_err()
-		.ready_for_each(|key| self.servernameevent_data.remove(key))
-		.await;
+		.ready_try_for_each(|key| {
+			self.servernameevent_data.remove(key);
+
+			Ok(())
+		})
+		.await
 }
 
 #[implement(Data)]

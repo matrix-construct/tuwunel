@@ -3,6 +3,7 @@ mod tests;
 
 use std::{
 	hash::{BuildHasher, BuildHasherDefault, DefaultHasher, Hash},
+	iter::from_fn,
 	mem::take,
 	sync::Arc,
 };
@@ -69,6 +70,11 @@ async fn join_senders(mut senders: JoinSet<Result>) -> Result {
 #[implement(Service)]
 pub(super) fn close(&self) {
 	self.flushes.lock().expect("locked").abort_all();
+
+	for (sender, receiver) in &self.controls {
+		sender.close();
+		from_fn(|| receiver.try_recv().ok()).for_each(drop);
+	}
 
 	for (sender, _) in &self.channels {
 		sender.close();
