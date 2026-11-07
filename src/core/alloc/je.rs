@@ -16,6 +16,8 @@ use jevmalloc::{
 	stats::print as print_stats,
 };
 pub use jevmalloc::{arenas::trim, background_thread_enable};
+#[cfg(feature = "jemalloc_conf")]
+use libc::c_char;
 use libc::{STDOUT_FILENO, c_void, write};
 
 use crate::{arrayvec::ArrayVec, utils::BoolExt};
@@ -26,14 +28,15 @@ type TraceLine = ArrayVec<u8, 128>;
 
 /// Provides the process-wide jemalloc startup configuration.
 ///
-/// Jemalloc reads this symbol during allocator initialization, which can occur
-/// before `main`. The NUL-terminated options tune the cache and decay
-/// thresholds. CPU-affine arenas, metadata huge pages and background thread
-/// settings are requested only on the platforms whose jemalloc provides them.
+/// Jemalloc declares this symbol as a mutable `const char *` and reads it
+/// during allocator initialization, which can occur before `main`. The
+/// NUL-terminated options tune the cache and decay thresholds. CPU-affine
+/// arenas, metadata huge pages and background thread settings are requested
+/// only on the platforms whose jemalloc provides them.
 #[cfg(feature = "jemalloc_conf")]
 #[used]
 #[unsafe(no_mangle)]
-pub static malloc_conf: &[u8] = MALLOC_CONF;
+pub static mut malloc_conf: *const c_char = MALLOC_CONF.as_ptr().cast();
 
 /// Provides the jemalloc startup configuration under the symbol name a
 /// prefixed build reads.
@@ -46,7 +49,7 @@ pub static malloc_conf: &[u8] = MALLOC_CONF;
 #[cfg(feature = "jemalloc_conf")]
 #[used]
 #[unsafe(export_name = "_rjem_malloc_conf")]
-pub static MALLOC_CONF_PREFIXED: &[u8] = MALLOC_CONF;
+pub static mut MALLOC_CONF_PREFIXED: *const c_char = MALLOC_CONF.as_ptr().cast();
 
 #[cfg(feature = "jemalloc_conf")]
 const MALLOC_CONF: &[u8] = concat_bytes!(
