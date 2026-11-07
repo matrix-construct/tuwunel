@@ -6,7 +6,7 @@ use super::{
 	identity::{Family, Identities, Kind},
 	short_of,
 };
-use crate::{Services, migrations::scan::ScanExt};
+use crate::{Services, integrity::ScanExt};
 
 pub(super) struct References {
 	pub(super) events: BTreeSet<u64>,

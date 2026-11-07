@@ -7,6 +7,7 @@ use crate::{
 	appservice::{self, AppserviceCommand},
 	debug::{self, DebugCommand},
 	federation::{self, FederationCommand},
+	integrity::{IntegrityCommand, process as process_integrity},
 	media::{self, MediaCommand},
 	query::{self, QueryCommand},
 	room::{self, RoomCommand},
@@ -62,6 +63,10 @@ pub(super) enum AdminCommand {
 	Media(MediaCommand),
 
 	#[command(subcommand)]
+	/// - Commands for checking database integrity
+	Integrity(IntegrityCommand),
+
+	#[command(subcommand)]
 	/// - Commands for debugging things
 	Debug(DebugCommand),
 
@@ -88,5 +93,6 @@ pub(super) async fn process(command: AdminCommand, context: &Context<'_>) -> Res
 		| Debug(command) => debug::process(command, context).await,
 		| Query(command) => query::process(command, context).await,
 		| Token(command) => token::process(command, context).await,
+		| Integrity(command) => process_integrity(command, context).await,
 	}
 }

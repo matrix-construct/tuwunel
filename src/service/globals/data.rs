@@ -8,10 +8,10 @@ use std::{ops::Range, sync::Arc};
 use futures::TryFutureExt;
 use tokio::sync::watch::Sender;
 use tuwunel_core::{
-	Result, err, utils,
+	Result, err, implement, utils,
 	utils::two_phase_counter::{Counter as TwoPhaseCounter, Permit as TwoPhasePermit},
 };
-use tuwunel_database::{Database, Deserialized, Map};
+use tuwunel_database::{Database, Deserialized, Handle, Map};
 
 /// Owns persistent global state and the two-phase sequence counter.
 ///
@@ -149,10 +149,19 @@ impl Data {
 	///
 	/// Missing or undecodable values are treated as version zero.
 	pub async fn database_version(&self) -> u64 {
-		self.global
-			.get(b"version")
+		self.database_version_record()
 			.await
 			.deserialized()
 			.unwrap_or(0)
 	}
+}
+
+/// Reads the stored schema version without decoding it.
+///
+/// A caller telling a missing or undecodable record from version zero takes this
+/// over [`Self::database_version`]. A missing record is a not-found error.
+#[implement(Data)]
+#[tracing::instrument(level = "trace", skip_all)]
+pub async fn database_version_record(&self) -> Result<Handle<'_>> {
+	self.global.get(b"version").await
 }

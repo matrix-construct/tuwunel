@@ -13,7 +13,7 @@ use super::{
 	Aliases, Census, Identity, Mapping, Services, claim, identity, lookup, present, short_of,
 	statekey,
 };
-use crate::migrations::scan::ScanExt;
+use crate::integrity::ScanExt;
 
 type Alias = (u64, (u64, Identity));
 

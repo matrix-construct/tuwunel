@@ -8,8 +8,8 @@ use tuwunel_core::{
 };
 use tuwunel_matrix::{event::Event, pdu::PduEvent, room_version::rules as room_rules};
 
-use super::{marker_present, rebuild_thread_summaries, scan::ScanExt};
-use crate::Services;
+use super::{marker_present, rebuild_thread_summaries};
+use crate::{Services, integrity::ScanExt};
 
 /// Stamped once the timeline has been checked for redactions applied without
 /// being recorded.

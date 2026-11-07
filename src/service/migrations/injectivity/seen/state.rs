@@ -27,7 +27,7 @@ use super::{
 };
 use crate::{
 	Services,
-	migrations::scan::ScanExt,
+	integrity::ScanExt,
 	rooms::state_compressor::{
 		CompressedState, CompressedStateEvent, compress_state_event, parse_compressed_state_event,
 	},

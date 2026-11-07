@@ -11,6 +11,7 @@ pub(crate) mod debug;
 #[path = "debug/event_fetcher/mod.rs"]
 mod event_fetcher;
 pub(crate) mod federation;
+pub(crate) mod integrity;
 pub(crate) mod media;
 pub(crate) mod query;
 pub(crate) mod room;

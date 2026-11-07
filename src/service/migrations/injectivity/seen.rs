@@ -22,7 +22,7 @@ use self::{
 		inspect as inspect_states, repair as repair_states,
 	},
 };
-use crate::{Services, migrations::scan::ScanExt};
+use crate::{Services, integrity::ScanExt};
 
 mod identity;
 mod references;

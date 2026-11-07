@@ -18,6 +18,7 @@ pub mod emergency;
 pub mod federation;
 pub mod fetcher;
 pub mod globals;
+pub mod integrity;
 pub mod key_backups;
 pub mod login_ratelimit;
 pub mod media;

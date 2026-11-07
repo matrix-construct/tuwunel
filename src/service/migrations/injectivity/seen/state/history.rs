@@ -30,7 +30,7 @@ use super::{
 	visit as visit_state,
 };
 use crate::{
-	migrations::scan::ScanExt,
+	integrity::ScanExt,
 	rooms::state_compressor::{
 		CompressedStateEvent, compress_state_event, parse_compressed_state_event,
 	},

@@ -60,7 +60,6 @@ mod rebuild_roomid_tscount_pducount;
 mod redactions;
 mod remove_remote_media_userid;
 mod retroactively_fix_bad_data_from_roomuserid_joined;
-mod scan;
 mod split_conduit_highlight_counts;
 mod token_expiry;
 mod upgrade_legacy_mediaid_user;
@@ -92,6 +91,36 @@ const FOREIGN_LINEAGE_MARKER: &[u8] = b"populate_userroomid_leftstate_table";
 
 /// Inline budget for a local user id assembled from a foreign localpart.
 type UserIdBuf = SmallString<[u8; 48]>;
+
+/// The steps every database records as settled, whether they ran or it began
+/// current.
+///
+/// Stamped together on a fresh database, so this list is also what an integrity
+/// check of the schema expects to find. A step gated on a foreign source has no
+/// place here, because a native database never runs it.
+pub(crate) const MARKERS: [&str; 21] = [
+	"feat_sha256_media",
+	"fix_pdu_missing_room_id",
+	"fix_bad_double_separator_in_state_cache",
+	"retroactively_fix_bad_data_from_roomuserid_joined",
+	"fix_referencedevents_missing_sep",
+	"fix_readreceiptid_readreceipt_duplicates",
+	"fix_hashed_sentinel_passwords",
+	"upgrade_legacy_mediaid_user",
+	"remove_remote_media_userid",
+	"rebuild_roomid_tscount_pducount",
+	"rebuild_relatesto_typed",
+	"migrate_profile_keys_to_useridprofilekey",
+	"rebuild_thread_summaries",
+	"clear_servername_status",
+	CLEAR_STATE_LOCAL_ERROR_MEMOS,
+	"adopt_foreign_account_status",
+	"adopt_foreign_email_bindings",
+	token_expiry::RESTORE_MARKER,
+	token_expiry::ADOPT_MARKER,
+	redactions::MARKER,
+	REBUILD_LIVE_THREAD_ACTIVITY,
+];
 
 pub(crate) async fn migrations(services: &Services) -> Result {
 	if services.config.force_migration {
@@ -236,7 +265,7 @@ async fn backfill_server_name(services: &Services) -> Result {
 	Ok(())
 }
 
-async fn fresh(services: &Services) -> Result {
+pub(crate) async fn fresh(services: &Services) -> Result {
 	let db = &services.db;
 
 	services
@@ -245,29 +274,12 @@ async fn fresh(services: &Services) -> Result {
 		.bump_database_version(DATABASE_VERSION);
 
 	db["global"].insert(SERVER_NAME_KEY, services.server.name.as_str());
-	db["global"].insert("feat_sha256_media", []);
-	db["global"].insert("fix_pdu_missing_room_id", []);
-	db["global"].insert("fix_bad_double_separator_in_state_cache", []);
-	db["global"].insert("retroactively_fix_bad_data_from_roomuserid_joined", []);
-	db["global"].insert("fix_referencedevents_missing_sep", []);
-	db["global"].insert("fix_readreceiptid_readreceipt_duplicates", []);
-	db["global"].insert("fix_hashed_sentinel_passwords", []);
-	db["global"].insert("upgrade_legacy_mediaid_user", []);
-	db["global"].insert("remove_remote_media_userid", []);
-	db["global"].insert("rebuild_roomid_tscount_pducount", []);
-	db["global"].insert("rebuild_relatesto_typed", []);
-	db["global"].insert("migrate_profile_keys_to_useridprofilekey", []);
+	for marker in MARKERS {
+		db["global"].insert(marker, []);
+	}
+
 	// Older versions rebuild the thread index under this marker.
 	db["global"].insert("rebuild_thread_activity", []);
-	db["global"].insert("rebuild_thread_summaries", []);
-	db["global"].insert("clear_servername_status", []);
-	db["global"].insert(CLEAR_STATE_LOCAL_ERROR_MEMOS, []);
-	db["global"].insert("adopt_foreign_account_status", []);
-	db["global"].insert("adopt_foreign_email_bindings", []);
-	db["global"].insert(token_expiry::RESTORE_MARKER, []);
-	db["global"].insert(token_expiry::ADOPT_MARKER, []);
-	db["global"].insert(redactions::MARKER, []);
-	db["global"].insert(REBUILD_LIVE_THREAD_ACTIVITY, []);
 	mark_clean_injectivity(services);
 
 	// Create the admin room and server user on first run
@@ -283,7 +295,7 @@ async fn fresh(services: &Services) -> Result {
 }
 
 /// Apply any migrations
-async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
+pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	let db = &services.db;
 
 	services.server.check_running()?;
@@ -631,7 +643,7 @@ async fn pending(services: &Services, marker: &'static str) -> Result<bool> {
 ///
 /// Only a missing marker reads as absent. A read that fails propagates, so a
 /// step is never skipped on the strength of a failed read.
-pub(super) async fn marker_present(services: &Services, marker: &str) -> Result<bool> {
+pub(crate) async fn marker_present(services: &Services, marker: &str) -> Result<bool> {
 	services.db["global"]
 		.get(marker)
 		.await

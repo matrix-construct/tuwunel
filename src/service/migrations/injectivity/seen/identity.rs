@@ -17,7 +17,7 @@ use tuwunel_core::{
 use tuwunel_database::{Database, KeyBuf, Map, SEP, Slice, Txn, serialize_key, serialize_val};
 
 use super::{Identity, references::References, short_of};
-use crate::{Services, migrations::scan::ScanExt};
+use crate::{Services, integrity::ScanExt};
 
 pub(super) struct Identities {
 	pub(super) events: Family,
