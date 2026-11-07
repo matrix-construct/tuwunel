@@ -49,6 +49,25 @@ async fn recover_one(
 	short: u64,
 	events: &BTreeSet<u64>,
 ) -> Result<Option<Alias>> {
+	let Some(alias) = recoverable(services, census, short, events).await? else {
+		return Ok(None);
+	};
+
+	reinstate(&services.db, alias).await
+}
+
+/// The reverse row an orphan state key short can reinstate, decided by reads alone.
+///
+/// Every event the orphan's entries name must be an accepted state event of one
+/// state key, whose forward row names a winner that maps back to it. Anything
+/// less leaves the orphan as it is.
+#[tracing::instrument(level = "trace", skip_all)]
+async fn recoverable(
+	services: &Services,
+	census: &Census,
+	short: u64,
+	events: &BTreeSet<u64>,
+) -> Result<Option<Alias>> {
 	services.server.check_running()?;
 	let db = &services.db;
 	let Some(statekey) = unanimous(db, &census.projection.events, events).await? else {
@@ -70,6 +89,16 @@ async fn recover_one(
 		return Ok(None);
 	}
 
+	Ok(Some((short, (winner, statekey))))
+}
+
+/// Writes a decided reverse row and reads it back.
+///
+/// A reverse row that appeared since the decision is left alone, and a readback
+/// that disagrees with the write is an error.
+#[tracing::instrument(level = "trace", skip_all)]
+async fn reinstate(db: &Database, alias: Alias) -> Result<Option<Alias>> {
+	let (short, (_, statekey)) = &alias;
 	let key = short.to_be_bytes();
 
 	if present(db, "shortstatekey_statekey", &key).await? {
@@ -82,12 +111,12 @@ async fn recover_one(
 
 	if lookup(db, "shortstatekey_statekey", &key)
 		.await?
-		.is_none_or(|published| published != statekey)
+		.is_none_or(|published| published.ne(statekey))
 	{
 		return Err!("orphan identity verification failed");
 	}
 
-	Ok(Some((short, (winner, statekey))))
+	Ok(Some(alias))
 }
 
 #[tracing::instrument(level = "trace", skip_all)]

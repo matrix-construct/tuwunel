@@ -11,6 +11,7 @@ pub(crate) mod seen;
 use tuwunel_core::result::NotFound;
 use tuwunel_database::Database;
 
+pub(crate) use self::seen::check::check;
 use self::seen::{MARKER, repair, run, settle, stamp};
 use crate::Services;
 

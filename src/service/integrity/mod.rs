@@ -23,6 +23,7 @@ pub mod roomid_tscount_pducount;
 pub mod roomuserid_joined;
 mod scan;
 pub mod schema;
+mod short_ids;
 #[cfg(test)]
 mod tests;
 pub mod thread_summaries;
@@ -80,6 +81,7 @@ static CHECKS: &[&Check] = &[
 	&redactions::CHECK,
 	&thread_summaries::CHECK,
 	&threadrootid_latestcount::CHECK,
+	&short_ids::CHECK,
 ];
 
 /// A finding of any check.

@@ -7,7 +7,7 @@ use futures::{
 	Stream, StreamExt, TryStreamExt,
 	future::{ready, try_join},
 };
-use publication::{Applied, apply};
+use publication::{Applied, Writes, apply, plan};
 use rows::{COLUMNS, SCANNED, decode, hints, word};
 use ruma::RoomId;
 use serde_json::from_slice;
@@ -81,21 +81,12 @@ pub(super) async fn repair(services: &Services) -> Result<Rooms> {
 		.try_stream()
 		.try_fold((result, false), async |(result, restored), candidate| {
 			services.server.check_running()?;
-			let keys = census
-				.keys
-				.get(&candidate)
-				.map(Vec::as_slice)
-				.unwrap_or_default();
-
-			let rows = owned(services, candidate, keys).await?;
-
-			let Some(action) = classify(services, &census, candidate, &rows).await? else {
+			let Some((action, writes)) = decide(services, &census, candidate).await? else {
 				return Ok((result, restored));
 			};
 
-			match apply(services, rows, candidate, action).await? {
+			match apply(&services.db, &writes, action).await? {
 				| Applied::Done => Ok((completed(result, candidate, action), restored)),
-				| Applied::Refused => Ok((result, restored)),
 				| Applied::Restored => Ok((result, true)),
 			}
 		})
@@ -205,6 +196,34 @@ fn pending(census: &Census) -> Rooms {
 		moved: 0,
 		restored: false,
 	}
+}
+
+/// What the repair writes for one candidate, decided before it writes.
+///
+/// A candidate whose rows do not classify, or whose move a destination refuses,
+/// gets no writes. Each decision follows the writes of the candidates before it.
+#[tracing::instrument(level = "trace", skip_all)]
+async fn decide(
+	services: &Services,
+	census: &Census,
+	candidate: u64,
+) -> Result<Option<(Action, Writes)>> {
+	let keys = census
+		.keys
+		.get(&candidate)
+		.map(Vec::as_slice)
+		.unwrap_or_default();
+
+	let rows = owned(services, candidate, keys).await?;
+
+	let Some(action) = classify(services, census, candidate, &rows).await? else {
+		return Ok(None);
+	};
+
+	let writes = plan(services, rows, candidate, action).await?;
+	let decision = writes.map(|writes| (action, writes));
+
+	Ok(decision)
 }
 
 #[tracing::instrument(level = "trace", skip_all)]

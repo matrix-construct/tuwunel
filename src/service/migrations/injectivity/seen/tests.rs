@@ -1,30 +1,38 @@
-use std::{cell::Cell, fmt::Debug, iter::repeat_with, ops::RangeInclusive, sync::Arc};
+use std::{
+	cell::Cell, collections::BTreeMap, fmt::Debug, iter::repeat_with, ops::RangeInclusive,
+	sync::Arc,
+};
 
-use futures::future::ready;
+use futures::{TryStreamExt, future::ready};
 use ruma::{RoomId, events::StateEventType, room_id, user_id};
 use tuwunel_core::{
 	Err, Result, Server,
 	config::{Config, Figment, Sources},
 	log::{LogLevelReloadHandles, Logging},
-	utils::{ReadyExt, result::NotFound},
+	utils::{IterStream, ReadyExt, result::NotFound},
 };
 use tuwunel_database::{Database, Txn, TxnError};
 
 use super::{
-	Boundary, IDENTITY_LIMIT, MARKER, Outcome, Reason, SAMPLE_LIMIT, Sample, Shape, Status,
-	Uncertain,
+	Boundary, IDENTITY_LIMIT, Identity, MARKER, Outcome, Reason, SAMPLE_LIMIT, SHAPES, Sample,
+	Shape, Status, Uncertain,
+	check::{Finding, Subject, check, scan},
 	identity::{Kind, census as identity_census, consistent, repair as repair_identities},
 	references::{References, entries},
 	run, stamp, stands, verify,
 };
 use crate::{
 	Services,
+	integrity::find,
 	migrations::{
 		injectivity::{CACHE_CLEARED, SUPERSEDED, fix},
 		migrations,
 	},
 	test_utils::fixture,
 };
+
+type Counts = [u64; SHAPES.len()];
+type Contents = BTreeMap<String, Vec<(Vec<u8>, Vec<u8>)>>;
 
 const EVENTS: (&str, &str) = ("eventid_shorteventid", "shorteventid_eventid");
 const STATEKEYS: (&str, &str) = ("statekey_shortstatekey", "shortstatekey_statekey");
@@ -829,6 +837,165 @@ async fn identity_only_heal_invalidates_space_summaries() -> Result {
 	Ok(())
 }
 
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn check_findings_agree_with_verification_on_seeded_damage() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+	let statediff = &db["shortstatehash_statediff"];
+	let event_id = |short: u64| format!("$agree{short}:example.org");
+	let statekey = |short: u64| {
+		[b"m.room.member\xff".as_slice(), format!("@{short}:example.org").as_bytes()].concat()
+	};
+
+	assert!(agreed(services, &[]).await?.is_empty(), "a fresh database has no findings");
+
+	// Residue alone comes first, while the samples still show the order it records in.
+	seed_identity(db, EVENTS, event_id(121).as_bytes(), 121);
+	seed_identity(db, STATEKEYS, b"m.room.name\xff", 221);
+	statediff.insert(&899_u64.to_be_bytes(), words(&[0, 221, 121]));
+	db["pduid_pdu"].insert(&words(&[77, 5]), b"{}");
+	db["roomid_shortroomid"].insert(b"!unreadable:example.org", [1, 2, 3]);
+	let residue = agreed(services, &[Shape::UnreachableState, Shape::PurgeResidue]).await?;
+	let sample =
+		|shape, identity: &[u8], reason| Sample { shape, identity: identity.into(), reason };
+
+	assert!(uncertain(&residue, Shape::PurgeResidue), "purge residue is unproven");
+	assert_eq!(
+		verify(services, Uncertain::default())
+			.await?
+			.samples
+			.into_vec(),
+		[
+			sample(Shape::UnreachableState, &899_u64.to_be_bytes(), Reason::References),
+			sample(Shape::PurgeResidue, &77_u64.to_be_bytes(), Reason::Ownership),
+			sample(Shape::PurgeResidue, &[], Reason::Ownership),
+		],
+		"unreachable states, then short room ids, then unproven censuses"
+	);
+
+	db["eventid_shorteventid"].insert(&event_id(101), 101_u64.to_be_bytes());
+	agreed(services, &[Shape::DanglingWinner]).await?;
+
+	db["shorteventid_eventid"].insert(&102_u64.to_be_bytes(), event_id(102));
+	agreed(services, &[Shape::PromotableReverse]).await?;
+
+	seed_aliases(db, EVENTS, 301..=301, event_id);
+	seed_aliases(db, STATEKEYS, 501..=501, statekey);
+	agreed(services, &[Shape::EventAlias, Shape::StatekeyAlias]).await?;
+
+	db["statekey_shortstatekey"].insert(b"invalid", b"malformed");
+	db["shortstatekey_statekey"].insert(&201_u64.to_be_bytes(), b"invalid");
+	let malformed = agreed(services, &[Shape::StatekeyAlias]).await?;
+
+	assert!(
+		malformed
+			.iter()
+			.any(|finding| matches!(finding.subject, Subject::Malformed(2))),
+		"malformed rows count again census-wide"
+	);
+
+	let checked: Vec<Finding> = check(services).try_collect().await?;
+
+	assert_eq!(
+		checked.len(),
+		malformed.len().saturating_sub(1),
+		"a check reports each row once"
+	);
+	assert!(
+		checked
+			.iter()
+			.all(|finding| !matches!(finding.subject, Subject::Malformed(_))),
+		"a check leaves the malformed total out"
+	);
+
+	statediff.insert(&900_u64.to_be_bytes(), words(&[0, 211, 111]));
+	let orphans = [Shape::StatekeyOrphanEntry, Shape::EventOrphanEntry, Shape::AffectedState];
+
+	agreed(services, &orphans).await?;
+	statediff.insert(&901_u64.to_be_bytes(), words(&[0, 501, 301]));
+	agreed(services, &[Shape::StatekeyAliasEntry, Shape::EventAliasEntry]).await?;
+
+	statediff.insert(&902_u64.to_be_bytes(), words(&[0, 221, 121, 0, 221, 121]));
+	agreed(services, &[Shape::DiffCollision]).await?;
+
+	statediff.insert(&903_u64.to_be_bytes(), [0_u8; 7]);
+	let unattributed = agreed(services, &[Shape::AffectedState]).await?;
+
+	assert!(
+		unattributed
+			.iter()
+			.any(|finding| matches!(finding.subject, Subject::Incomplete)),
+		"an unattributed state row leaves the state census incomplete"
+	);
+
+	assert!(uncertain(&unattributed, Shape::UnreachableState), "unreachability is unproven");
+	let plain = verify(services, Uncertain::default()).await?;
+	let uncertainty = Uncertain {
+		states: true,
+		collected: true,
+		rooms: true,
+	};
+
+	let joined = verify(services, uncertainty).await?;
+
+	for shape in [Shape::UnreachableState, Shape::PurgeResidue] {
+		assert_eq!(
+			count(&joined, shape),
+			count(&plain, shape),
+			"{shape:?} counts uncertainty once"
+		);
+	}
+
+	assert_eq!(
+		count(&joined, Shape::AffectedState),
+		count(&plain, Shape::AffectedState).saturating_add(1),
+		"the repair's state uncertainty counts beside the census's own"
+	);
+
+	for shape in [Shape::AuthChainCache, Shape::LiveRoomAlias, Shape::DeclinedMarker] {
+		assert_eq!(count(&plain, shape), 0, "{shape:?} has no producer");
+	}
+
+	Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn check_run_writes_nothing() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+	let check = find("short-ids").expect("the short-id check is registered");
+
+	db["eventid_shorteventid"].insert(b"$dangling:example.org", 101_u64.to_be_bytes());
+	seed_aliases(db, EVENTS, 301..=301, |short| format!("$alias{short}:example.org"));
+	db["shortstatehash_statediff"].insert(&900_u64.to_be_bytes(), words(&[0, 211, 111]));
+	db["pduid_pdu"].insert(&words(&[77, 5]), b"{}");
+	db["authchainkey_authchain"].insert(&301_u64.to_be_bytes(), 301_u64.to_be_bytes());
+	db["roomid_spacehierarchy"].insert(SPACE, b"cached summary");
+	let before = contents(db).await?;
+	let findings: Vec<Finding> = scan(services).try_collect().await?;
+
+	assert!(findings.len() > SAMPLE_LIMIT, "the damage is found");
+	assert_eq!(contents(db).await?, before, "every column is unchanged");
+	assert_absent(db, "global", MARKER, "a check run records no outcome").await;
+	for marker in [SUPERSEDED, CACHE_CLEARED] {
+		assert_absent(db, "global", marker, "a check run stamps no legacy marker").await;
+	}
+
+	assert!(check.quiescent && !check.runnable(services), "it refuses a writable database");
+
+	Ok(())
+}
+
 async fn assert_absent<K>(db: &Database, map: &str, key: &K, message: &str)
 where
 	K: AsRef<[u8]> + Debug + Sync + ?Sized,
@@ -951,5 +1118,123 @@ async fn space_child_counts(services: &Services, space: &RoomId) -> (usize, usiz
 			| Ok(_) => (listed.saturating_add(1), failed),
 			| Err(_) => (listed, failed.saturating_add(1)),
 		})
+		.await
+}
+
+/// Folds the check's findings without verification's code and asserts both agree.
+///
+/// Each finding counts once, or its census count, the first few are the samples,
+/// and every shape named must be among the findings.
+async fn agreed(services: &Services, shapes: &[Shape]) -> Result<Vec<Finding>> {
+	let findings: Vec<Finding> = scan(services).try_collect().await?;
+	let counts = findings
+		.iter()
+		.fold(Outcome::clean().counts, tallied);
+
+	let samples = findings
+		.iter()
+		.take(SAMPLE_LIMIT)
+		.map(sampled)
+		.collect();
+
+	let truncated = findings.len().gt(&SAMPLE_LIMIT)
+		|| findings
+			.iter()
+			.any(|finding| weight(finding) > 1 || named(finding).len().gt(&IDENTITY_LIMIT));
+
+	let status = match findings.is_empty() {
+		| true => Status::Clean,
+		| false => Status::Unfinished,
+	};
+
+	let expected = Outcome {
+		status,
+		counts,
+		samples,
+		truncated,
+		..Outcome::clean()
+	};
+
+	assert_eq!(verify(services, Uncertain::default()).await?, expected);
+	assert!(findings.iter().all(|finding| weight(finding) > 0), "no finding counts nothing");
+	assert!(
+		findings
+			.iter()
+			.skip_while(|finding| !matches!(finding.subject, Subject::Uncertain))
+			.all(|finding| matches!(finding.subject, Subject::Uncertain)),
+		"uncertain censuses end the stream"
+	);
+
+	for shape in shapes {
+		assert!(
+			findings
+				.iter()
+				.any(|finding| finding.shape == *shape),
+			"{shape:?} found"
+		);
+	}
+
+	Ok(findings)
+}
+
+fn tallied(mut counts: Counts, finding: &Finding) -> Counts {
+	let slot = finding
+		.shape
+		.slot()
+		.expect("every shape has a count slot");
+
+	counts[slot] = counts[slot].saturating_add(weight(finding));
+	counts
+}
+
+fn weight(finding: &Finding) -> u64 {
+	match finding.subject {
+		| Subject::Malformed(count) => count,
+		| _ => 1,
+	}
+}
+
+fn sampled(finding: &Finding) -> Sample {
+	let named = named(finding);
+	let identity = named
+		.get(..IDENTITY_LIMIT)
+		.unwrap_or(&named)
+		.into();
+
+	Sample {
+		shape: finding.shape,
+		identity,
+		reason: finding.reason,
+	}
+}
+
+fn named(finding: &Finding) -> Identity {
+	match &finding.subject {
+		| Subject::Identity(identity) => identity.clone(),
+		| Subject::Short(id) | Subject::State(id) | Subject::Room(id) =>
+			id.to_be_bytes().as_slice().into(),
+		| Subject::Malformed(_) | Subject::Incomplete | Subject::Uncertain => Identity::new(),
+	}
+}
+
+fn uncertain(findings: &[Finding], shape: Shape) -> bool {
+	findings
+		.iter()
+		.any(|finding| finding.shape == shape && matches!(finding.subject, Subject::Uncertain))
+}
+
+async fn contents(db: &Database) -> Result<Contents> {
+	db.iter()
+		.try_stream()
+		.and_then(async |(name, map)| {
+			let rows = map
+				.raw_stream()
+				.map_ok(|(key, value)| (key.to_vec(), value.to_vec()))
+				.try_collect()
+				.await?;
+
+			Ok((name.to_string(), rows))
+		})
+		.try_collect()
 		.await
 }

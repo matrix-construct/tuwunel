@@ -12,13 +12,12 @@ use super::{
 };
 use crate::Services;
 
-type Writes = Vec<Write>;
+pub(super) type Writes = Vec<Write>;
 
 type Changes = [Option<Write>; 2];
 
 pub(super) enum Applied {
 	Done,
-	Refused,
 	Restored,
 }
 
@@ -28,38 +27,43 @@ enum Operation {
 	Restore,
 }
 
-struct Write {
+pub(super) struct Write {
 	column: usize,
 	key: Box<[u8]>,
 	before: Option<Box<[u8]>>,
 	after: Option<Box<[u8]>>,
 }
 
+/// The writes one candidate's action needs, decided before any of them.
+///
+/// A purge removes every owned row. A move rewrites each row for the winner, and
+/// is refused, as `None`, when a row will not rewrite or a source or destination
+/// no longer holds what the move expects.
 #[tracing::instrument(level = "trace", skip_all)]
-pub(super) async fn apply<I>(
+pub(super) async fn plan<I>(
 	services: &Services,
 	rows: I,
 	from: u64,
 	action: Action,
-) -> Result<Applied>
+) -> Result<Option<Writes>>
 where
 	I: IntoIterator<Item = Row> + Send,
 	I::IntoIter: Send,
 {
 	services.server.check_running()?;
-	let db = &services.db;
-	let writes = match action {
-		| Action::Purge => rows.into_iter().map(removal).collect(),
-		| Action::Move(to) => {
-			let Some(writes) = preflight(db, rows, from, to).await? else {
-				return Ok(Applied::Refused);
-			};
+	match action {
+		| Action::Purge => Ok(Some(rows.into_iter().map(removal).collect())),
+		| Action::Move(to) => preflight(&services.db, rows, from, to).await,
+	}
+}
 
-			writes
-		},
-	};
-
-	if commit(db, &writes, Publish).await? {
+/// Publishes a candidate's planned writes and verifies them.
+///
+/// A move that fails verification is restored to its exact preimage, while a
+/// purge that fails is an error.
+#[tracing::instrument(level = "trace", skip_all)]
+pub(super) async fn apply(db: &Database, writes: &[Write], action: Action) -> Result<Applied> {
+	if commit(db, writes, Publish).await? {
 		return Ok(Applied::Done);
 	}
 
@@ -68,7 +72,7 @@ where
 		return Err!("room deletion verification failed");
 	}
 
-	if !commit(db, &writes, Restore).await? {
+	if !commit(db, writes, Restore).await? {
 		return Err!("room restoration verification failed");
 	}
 

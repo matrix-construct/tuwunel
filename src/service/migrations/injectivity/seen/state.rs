@@ -3,7 +3,9 @@ use std::{
 	iter::{once, repeat},
 };
 
-use futures::{FutureExt, TryFutureExt, TryStreamExt, future::try_join, stream::unfold};
+use futures::{
+	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::try_join, stream::unfold,
+};
 use ruma::events::TimelineEventType;
 use tuwunel_core::{
 	Err, Result, err, implement,
@@ -19,7 +21,8 @@ use tuwunel_core::{
 use tuwunel_database::{Database, SEP, Txn, TxnError, keyval::ValBuf};
 
 use super::{
-	Identity, Outcome, Reason, Shape,
+	Identity, Reason, Shape,
+	check::{Finding, Subject},
 	identity::{
 		Candidate, Family, Identities, Kind, admitted, census as census_identities, clear_cache,
 	},
@@ -57,6 +60,7 @@ type Absence = (u64, u64, bool, bool);
 type Observations = [Option<Observation>; 2];
 type Observation = (Shape, u64, Reason);
 type Materialized = Option<(ValBuf, CompressedState)>;
+type Found = SmallVec<[Finding; 1]>;
 
 const PARENTLESS: [u8; 8] = [0; 8];
 
@@ -79,7 +83,7 @@ pub(super) struct States {
 	pub(super) restored: bool,
 }
 
-struct Census {
+pub(super) struct Census {
 	parents: Parents,
 	seeds: BTreeSet<u64>,
 	unknown: bool,
@@ -226,59 +230,71 @@ pub(super) async fn repair(
 		.await
 }
 
+/// Streams what the state census finds, in the order verification records it.
+///
+/// A census that could not attribute every row leads, then each affected state
+/// follows with its own findings, inspected one at a time.
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) async fn inspect(
+pub(super) fn findings(
 	services: &Services,
-	identities: &Identities,
-	outcome: Outcome,
-) -> Result<Outcome> {
-	let census = survey(services, identities).await?;
-	let outcome = outcome.residue(
-		Shape::AffectedState,
-		u64::from(census.unknown || !census.complete || !census.held.is_empty()),
-		&[],
-		Reason::References,
-	)?;
+	census: Census,
+) -> impl Stream<Item = Result<Finding>> + Send + '_ {
+	let incomplete = census.unknown || !census.complete || !census.held.is_empty();
+	let head = incomplete.then_some(Finding {
+		shape: Shape::AffectedState,
+		subject: Subject::Incomplete,
+		reason: Reason::References,
+	});
+
+	let affected = descendants(&census.parents, &census.seeds).into_iter();
 
 	// Serial: each state materializes in full, and its entries already fan out.
-	descendants(&census.parents, &census.seeds)
-		.try_stream()
-		.try_fold(outcome, |outcome, id| inspect_state(services, &census, outcome, id))
-		.await
+	// A state's findings are owned, as no item may borrow the census the unfold holds.
+	let states = unfold((census, affected), async |(census, mut affected)| {
+		let id = affected.next()?;
+		let found = inspect_state(services, &census, id).await;
+
+		Some((found, (census, affected)))
+	});
+
+	head.try_stream().chain(
+		states
+			.map_ok(IterStream::try_stream)
+			.try_flatten(),
+	)
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn inspect_state(
-	services: &Services,
-	census: &Census,
-	outcome: Outcome,
-	id: u64,
-) -> Result<Outcome> {
+async fn inspect_state(services: &Services, census: &Census, id: u64) -> Result<Found> {
 	services.server.check_running()?;
-	let key = id.to_be_bytes();
+	let state = |shape| Finding {
+		shape,
+		subject: Subject::State(id),
+		reason: Reason::HistoricalState,
+	};
+
 	let Some(bytes) = row(&services.db, id).await? else {
 		return Err!("state disappeared during final injectivity verification");
 	};
 
 	let Some(diff) = decode(&bytes) else {
-		return outcome.residue(Shape::AffectedState, 1, &key, Reason::HistoricalState);
+		return Ok([state(Shape::AffectedState)].into());
 	};
 
-	let outcome = outcome.residue(
-		Shape::DiffCollision,
-		u64::from(!diff.added.is_disjoint(&diff.removed)),
-		&key,
-		Reason::HistoricalState,
-	)?;
+	let collided = diff
+		.added
+		.is_disjoint(&diff.removed)
+		.is_false()
+		.then(|| state(Shape::DiffCollision));
 
-	let outcome = diff
+	let found = diff
 		.added
 		.iter()
 		.chain(&diff.removed)
 		.copied()
 		.try_stream()
 		.wide_and_then(|entry| inspect_entry(services, &census.projection, entry))
-		.ready_try_fold(outcome, inspect_observations)
+		.ready_try_fold(collided.into_iter().collect(), observed)
 		.await?;
 
 	let invalid = materialize(services, id)
@@ -286,12 +302,9 @@ async fn inspect_state(
 		.and_then(|(_, state)| project(state, &census.projection))
 		.is_none();
 
-	outcome.residue(
-		Shape::AffectedState,
-		u64::from(invalid || !census.seeds.contains(&id)),
-		&key,
-		Reason::HistoricalState,
-	)
+	let unverified = invalid || !census.seeds.contains(&id);
+
+	Ok(extended(found, unverified.then(|| state(Shape::AffectedState))))
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
@@ -320,13 +333,22 @@ async fn inspect_entry(
 	try_join(key, event).map_ok(Into::into).await
 }
 
-fn inspect_observations(outcome: Outcome, observations: Observations) -> Result<Outcome> {
-	observations
+fn observed(found: Found, observations: Observations) -> Result<Found> {
+	let entries = observations
 		.into_iter()
 		.flatten()
-		.try_fold(outcome, |outcome, (shape, short, reason)| {
-			outcome.residue(shape, 1, &short.to_be_bytes(), reason)
-		})
+		.map(|(shape, short, reason)| Finding {
+			shape,
+			subject: Subject::Short(short),
+			reason,
+		});
+
+	Ok(extended(found, entries))
+}
+
+fn extended(mut found: Found, more: impl IntoIterator<Item = Finding>) -> Found {
+	found.extend(more);
+	found
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
@@ -345,7 +367,7 @@ async fn inspect_half(
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn survey(services: &Services, identities: &Identities) -> Result<Census> {
+pub(super) async fn survey(services: &Services, identities: &Identities) -> Result<Census> {
 	let (statekeys, events) =
 		try_join(mapping(services, &identities.statekeys), mapping(services, &identities.events))
 			.await?;

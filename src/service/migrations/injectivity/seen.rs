@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
 	Err, Result, async_noinline, debug_warn, err, implement, info,
@@ -11,19 +9,15 @@ use tuwunel_core::{
 use tuwunel_database::{Database, Json, Txn, keyval::ValBuf, serialize_key, serialize_val};
 
 use self::{
-	identity::{
-		Family, Kind, census as census_identities, cleanup, consistent,
-		repair as repair_identities,
-	},
+	check::{Finding, Subject, scan},
+	identity::{cleanup, consistent, repair as repair_identities},
 	references::References,
-	rooms::{inspect as inspect_rooms, repair as repair_rooms},
-	state::{
-		gc::{collect, inspect as inspect_gc},
-		inspect as inspect_states, repair as repair_states,
-	},
+	rooms::repair as repair_rooms,
+	state::{gc::collect, repair as repair_states},
 };
 use crate::{Services, integrity::ScanExt};
 
+pub(super) mod check;
 mod identity;
 mod references;
 mod rooms;
@@ -33,6 +27,7 @@ mod tests;
 
 type Samples = SmallVec<[Sample; 1]>;
 type Identity = SmallVec<[u8; 48]>;
+type Observed = (Outcome, Uncertain);
 
 pub(super) const MARKER: &str = "repair_short_injectivity_seen";
 const VERSION: u8 = 1;
@@ -329,56 +324,55 @@ pub(super) async fn repair(services: &Services) -> Result<Outcome> {
 	Ok(outcome)
 }
 
+/// Folds the census into the outcome a completed repair records.
+///
+/// A finding counts where the stream yields it, except a census that could not
+/// prove further residue absent: that joins the uncertainty the repair captured
+/// before its writes, and each kind counts once at the end. A clean final census
+/// therefore never erases what an earlier pass could not prove.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn verify(services: &Services, uncertain: Uncertain) -> Result<Outcome> {
 	services.server.check_running()?;
-	let identities = census_identities(services).await?;
-	let outcome = Outcome::clean()
-		.residual_family(&identities.events, Shape::EventAlias)?
-		.residual_family(&identities.statekeys, Shape::StatekeyAlias)?;
-
-	let outcome = inspect_states(services, &identities, outcome).await?;
-	let collected = inspect_gc(services).await?;
-	let rooms = inspect_rooms(services).await?;
+	let (outcome, uncertain) = scan(services)
+		.ready_try_fold((Outcome::clean(), uncertain), observe)
+		.await?;
 
 	outcome
-		.residues(Shape::UnreachableState, &collected.unfinished, Reason::References)?
-		// An unclassified stray counts once as purge residue, even as a live-room alias.
-		.residues(Shape::PurgeResidue, &rooms.unfinished, Reason::Ownership)?
 		.uncertain(Shape::AffectedState, uncertain.states, Reason::HistoricalState)?
-		.uncertain(
-			Shape::UnreachableState,
-			uncertain.collected || collected.unknown,
-			Reason::References,
-		)?
-		.uncertain(Shape::PurgeResidue, uncertain.rooms || rooms.unknown, Reason::Ownership)
+		.uncertain(Shape::UnreachableState, uncertain.collected, Reason::References)?
+		.uncertain(Shape::PurgeResidue, uncertain.rooms, Reason::Ownership)
 }
 
-#[implement(Outcome)]
-fn residual_family(self, family: &Family, alias: Shape) -> Result<Self> {
-	family
-		.candidates
-		.iter()
-		.try_fold(self, |outcome, candidate| {
-			let shape = candidate_shape(candidate.kind, alias);
-
-			outcome.residue(shape, 1, &candidate.identity, Reason::Identity)
-		})?
-		.residue(alias, family.malformed, &[], Reason::Identity)
+fn observe((outcome, uncertain): Observed, finding: Finding) -> Result<Observed> {
+	match (&finding.subject, uncertain.raised(finding.shape)) {
+		| (Subject::Uncertain, Some(uncertain)) => Ok((outcome, uncertain)),
+		| _ => outcome
+			.observed(finding)
+			.map(|outcome| (outcome, uncertain)),
+	}
 }
 
-fn candidate_shape(kind: Kind, alias: Shape) -> Shape {
-	match kind {
-		| Kind::Reverse => Shape::DanglingWinner,
-		| Kind::Forward => Shape::PromotableReverse,
-		| Kind::Alias(_) | Kind::Unresolved => alias,
+#[implement(Uncertain)]
+fn raised(self, shape: Shape) -> Option<Self> {
+	match shape {
+		| Shape::AffectedState => Some(Self { states: true, ..self }),
+		| Shape::UnreachableState => Some(Self { collected: true, ..self }),
+		| Shape::PurgeResidue => Some(Self { rooms: true, ..self }),
+		| _ => None,
 	}
 }
 
 #[implement(Outcome)]
-fn residues(self, shape: Shape, ids: &BTreeSet<u64>, reason: Reason) -> Result<Self> {
-	ids.iter()
-		.try_fold(self, |outcome, id| outcome.residue(shape, 1, &id.to_be_bytes(), reason))
+fn observed(self, finding: Finding) -> Result<Self> {
+	let Finding { shape, subject, reason } = finding;
+
+	match subject {
+		| Subject::Identity(identity) => self.residue(shape, 1, &identity, reason),
+		| Subject::Short(id) | Subject::State(id) | Subject::Room(id) =>
+			self.residue(shape, 1, &id.to_be_bytes(), reason),
+		| Subject::Malformed(count) => self.residue(shape, count, &[], reason),
+		| Subject::Incomplete | Subject::Uncertain => self.residue(shape, 1, &[], reason),
+	}
 }
 
 #[implement(Outcome)]
