@@ -31,18 +31,16 @@ that nothing in the default code path accidentally depends on an optional featur
 
 The feature set shipped to users in standard packages:
 
-`brotli_compression`, `element_hacks`, `gzip_compression`, `io_uring`,
-`jemalloc`, `jemalloc_conf`, `media_thumbnail`, `release_max_log_level`,
-`systemd`, `url_preview`, `zstd_compression`
+`brotli_compression`, `bzip2_compression`, `console`, `direct_tls`,
+`element_hacks`, `gzip_compression`, `io_uring`, `jemalloc`, `jemalloc_conf`,
+`ldap`, `lz4_compression`, `mas`, `media_thumbnail`, `oidc`,
+`release_max_log_level`, `sentry_telemetry`, `synapse_admin`, `systemd`,
+`url_preview`, `zstd_compression`
 
 #### `logging`
 
-All of `default` (without `release_max_log_level`) plus features useful for
-development and diagnostics:
-
-`blurhashing`, `bzip2_compression`, `console`, `direct_tls`, `jemalloc_prof`,
-`jemalloc_stats`, `ldap`, `lz4_compression`, `perf_measurements`,
-`sentry_telemetry`, `tokio_console`, `tuwunel_mods`
+All of `default` without `release_max_log_level`, so release builds keep the
+debug and trace log levels.
 
 #### `all`
 

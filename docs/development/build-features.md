@@ -43,46 +43,51 @@ Journal logging works independently of the `systemd` feature. It requires `loggi
 
 ## Feature projection and dependency implications
 
-Every feature is rooted in the `main` crate. The crate column lists the additional workspace crates further involved in forwarding or applying the feature; due to forwarding, not all listed crates contain actual conditional code for that feature.
-The last column names direct optional dependencies activated along the forwarding path, or feature changes to existing dependencies.
+The `main` crate defines every public feature and forwards it to the workspace crates that apply it. The crate column lists those crates, whether they use the feature in conditional code or to enable a dependency feature. The last column lists direct optional dependencies enabled along the forwarding path and feature changes to existing dependencies.
 
 | Feature | Crates involved | Dependency implications |
 | --- | --- | --- |
-| `brotli_compression` | `admin`, `api`, `core`, `router`, `service` | Compression features on existing HTTP dependencies. |
-| `bzip2_compression` | `admin`, `api`, `database`, `router`, `service` | RocksDB Bzip2 support. |
-| `console` | `core`, `service` | `rustyline-async`, `termimad`. |
+| `brotli_compression` | `api`, `core`, `router`, `service` | Compression features on existing HTTP dependencies. |
+| `bzip2_compression` | `database` | RocksDB Bzip2 support. |
+| `console` | `service` | `rustyline-async`, `termimad`. |
 | `direct_tls` | `router` | `axum-server-dual-protocol`, `rustls`. |
-| `element_hacks` | `api`, `service` | No optional dependency activated by this feature. |
-| `gzip_compression` | `admin`, `api`, `core`, `router`, `service` | Compression features on existing HTTP dependencies. |
-| `io_uring` | `admin`, `api`, `database`, `router`, `service` | RocksDB io_uring support and its native library requirements. |
-| `jemalloc` | `admin`, `api`, `core`, `database`, `router`, `service` | `jevmalloc`; native allocator build. |
-| `jemalloc_conf` | `admin`, `api`, `core`, `database`, `router`, `service` | Allocator configuration; does not itself enable `jemalloc`. |
+| `element_hacks` | `service` | No optional dependency activated by this feature. |
+| `gzip_compression` | `api`, `core`, `router`, `service` | Compression features on existing HTTP dependencies. |
+| `io_uring` | `database` | RocksDB io_uring support and its native library requirements. |
+| `jemalloc` | `core`, `database` | `jevmalloc`; native allocator build. |
+| `jemalloc_conf` | `core` | Allocator configuration; does not itself enable `jemalloc`. |
 | `jemalloc_prof` | `core` | Profiling on `jevmalloc` if the allocator is enabled. |
 | `jemalloc_stats` | `core` | Statistics on `jevmalloc` if the allocator is enabled. |
 | `ldap` | `api`, `api-client`, `service` | `ldap3`. |
-| `lz4_compression` | `admin`, `api`, `database`, `router`, `service` | RocksDB LZ4 support. |
+| `lz4_compression` | `database` | RocksDB LZ4 support. |
 | `mas` | `api-mas`, `router` | Optional workspace crate `tuwunel-api-mas`. |
 | `media_thumbnail` | `service` | `image`. |
 | `oidc` | `api-oidc`, `router` | Optional workspace crate `tuwunel-api-oidc`; service-side issuer code remains compiled without this API feature. |
-| `perf_measurements` | `core` | `opentelemetry`, `opentelemetry-otlp`, `opentelemetry_sdk`, `tracing-flame`, `tracing-opentelemetry`; also enables core Sentry support. |
-| `release_max_log_level` | `admin`, `api`, `core`, `database`, `router`, `service` | Log-level filtering on existing `log` and `tracing` dependencies. |
-| `sentry_telemetry` | `core`, `router` | `reqwest`, `sentry`, `sentry-tower`, `sentry-tracing`. |
+| `perf_measurements` | None | `opentelemetry`, `opentelemetry-otlp`, `opentelemetry_sdk`, `tracing-flame`, `tracing-opentelemetry`. |
+| `release_max_log_level` | `admin`, `api`, `api-admin`, `api-client`, `api-federation`, `api-mas`, `api-oidc`, `core`, `database`, `matrix`, `router`, `service` | Log-level filtering on existing `log` and `tracing` dependencies. |
+| `sentry_telemetry` | `router` | `reqwest`, `sentry`, `sentry-tower`, `sentry-tracing`. |
 | `synapse_admin` | `api-admin`, `router` | Optional workspace crate `tuwunel-api-admin`. |
 | `systemd` | `router`, `service` | `sd-notify` on Linux Unix targets. |
 | `tokio_console` | None | `console-subscriber`, plus Tokio tracing support. |
 | `tuwunel_mods` | `core` | `libloading`. |
 | `url_preview` | `service` | `image`, `webpage`. |
-| `zstd_compression` | `admin`, `api`, `core`, `database`, `router`, `service` | HTTP and RocksDB Zstd support. |
+| `zstd_compression` | `api`, `core`, `database`, `router`, `service` | HTTP and RocksDB Zstd support. |
 
 > [!NOTE]
 >
 > - `jemalloc_conf`, `jemalloc_prof`, and `jemalloc_stats` do not select the allocator themselves.
 >
-> - `perf_measurements` enables core Sentry support, but does not select the main `sentry_telemetry` feature.
->
 > - `image` is shared by thumbnails and URL previews, so removing only one feature can leave that dependency enabled.
 >
 > - Shared dependencies can already be enabled by another feature.
+
+### Crate defaults
+
+Each workspace crate that defines `default` lists its own default features and enables the `default` of each workspace dependency that defines one. A crate built alone, such as with `cargo build -p tuwunel_service`, gets the same features it has in the full server.
+
+The `default` of `main` also enables these crate defaults. A build from the workspace root and a build of `-p tuwunel` therefore resolve the same features and share compiled artifacts.
+
+To build a crate alone with a dependency's feature, name the feature through that dependency. For example, use `cargo build -p tuwunel_service --features tuwunel-core/jemalloc_prof`.
 
 ## Rust `cfg` selectors
 

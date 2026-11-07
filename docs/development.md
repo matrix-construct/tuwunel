@@ -90,29 +90,27 @@ for handling inbound web requests; but it was never completed or worked.
 
 ## Adding compile-time [features][features]
 
-If you'd like to add a compile-time feature, you must first define it in
-the `main` workspace crate located in `src/main/Cargo.toml`. The feature must
-enable a feature in the other workspace crate(s) you intend to use it in. Then
-the said workspace crate(s) must define the feature there in its `Cargo.toml`.
+To add a compile-time feature:
 
-So, if this is adding a feature to the API such as `woof`, you define the feature
-in the `api` crate's `Cargo.toml` as `woof = []`. The feature definition in `main`'s
-`Cargo.toml` will be `woof = ["tuwunel-api/woof"]`.
+1. Define it in the `Cargo.toml` of each workspace crate whose code or
+   dependencies it changes. Crates in between do not define it.
+2. Define it in `src/main/Cargo.toml`, forwarding it to each of those crates.
+   For example, a feature named `woof` in the `api` crate is defined there as
+   `woof = []` and in `main` as `woof = ["tuwunel-api/woof"]`.
+3. If the feature is on by default, add it to the `default` list of `main` and
+   of each crate defining it.
+4. Add a row to [Build Features](development/build-features.md), with its
+   default membership and any runtime requirement.
 
-Then add a row for the feature to [Build Features](development/build-features.md),
-with its default membership and any runtime requirement.
+A crate's `default` also enables the `default` of each workspace dependency
+that defines one. This gives the crate the same features when built alone as
+in the server. See [Crate defaults](development/build-features.md#crate-defaults).
 
-The rationale for this is due to Rust / Cargo not supporting
-["workspace level features"][9], we must make a choice of; either scattering
-features all over the workspace crates, making it difficult for anyone to add
-or remove default features; or define all the features in one central workspace
-crate that propagate down/up to the other workspace crates. It is a Cargo pitfall,
-and we'd like to see better developer UX in Rust's Workspaces.
-
-Additionally, the definition of one single place makes "feature collection" in our
-Nix flake a million times easier instead of collecting and deduping them all from
-searching in all the workspace crates' `Cargo.toml`s. Though we wouldn't need to
-do this if Rust supported workspace-level features to begin with.
+Rust / Cargo does not support ["workspace level features"][9], so `main` is the
+one place that defines the public features and their defaults, and the crate
+defaults only mirror it. Our Nix flake collects the default feature set from
+`main`'s `default` alone. It takes that crate's own feature names and skips the
+forwarded crate defaults.
 
 ## List of forked dependencies
 
