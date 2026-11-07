@@ -70,6 +70,11 @@ release_max_log_level = [
 	"tracing/release_max_level_info",
 	"tuwunel-admin/release_max_log_level",
 	"tuwunel-api/release_max_log_level",
+	"tuwunel-api-admin?/release_max_log_level",
+	"tuwunel-api-client/release_max_log_level",
+	"tuwunel-api-federation/release_max_log_level",
+	"tuwunel-api-mas?/release_max_log_level",
+	"tuwunel-api-oidc?/release_max_log_level",
 	"tuwunel-core/release_max_log_level",
 	"tuwunel-service/release_max_log_level",
 ]

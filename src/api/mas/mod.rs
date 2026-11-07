@@ -21,6 +21,7 @@ use axum_extra::{
 	headers::{Authorization, authorization::Bearer},
 };
 use http::request::Parts;
+use log as _;
 use ruma::{OwnedUserId, UserId};
 use tuwunel_api::router::{Ruma, State};
 use tuwunel_core::{Err, Error, Result, err, mod_ctor, mod_dtor};

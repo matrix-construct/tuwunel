@@ -60,6 +60,7 @@ release_max_log_level = [
 	"tracing/release_max_level_info",
 	"tuwunel-core/release_max_log_level",
 	"tuwunel-database/release_max_log_level",
+	"tuwunel-matrix/release_max_log_level",
 ]
 systemd = [
 	"dep:sd-notify",

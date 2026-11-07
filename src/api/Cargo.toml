@@ -48,6 +48,7 @@ release_max_log_level = [
 	"tracing/max_level_trace",
 	"tracing/release_max_level_info",
 	"tuwunel-core/release_max_log_level",
+	"tuwunel-matrix/release_max_log_level",
 	"tuwunel-service/release_max_log_level",
 ]
 zstd_compression = [

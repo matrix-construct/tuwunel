@@ -19,11 +19,24 @@ crate-type = [
 
 [features]
 default = [
+	"release_max_log_level",
 	"tuwunel-api/default",
 	"tuwunel-api-client/default",
 	"tuwunel-core/default",
 	"tuwunel-matrix/default",
 	"tuwunel-service/default",
+]
+
+release_max_log_level = [
+	"log/max_level_trace",
+	"log/release_max_level_info",
+	"tracing/max_level_trace",
+	"tracing/release_max_level_info",
+	"tuwunel-api/release_max_log_level",
+	"tuwunel-api-client/release_max_log_level",
+	"tuwunel-core/release_max_log_level",
+	"tuwunel-matrix/release_max_log_level",
+	"tuwunel-service/release_max_log_level",
 ]
 
 [dependencies]
@@ -34,6 +47,7 @@ ctor.workspace = true
 dtor.workspace = true
 futures.workspace = true
 itertools.workspace = true
+log.workspace = true
 rand.workspace = true
 ruma.workspace = true
 serde.workspace = true

@@ -18,6 +18,7 @@ pub mod routes;
 
 use axum::{Json, body::Body, response::IntoResponse};
 use http::{Response, StatusCode};
+use log as _;
 use ruma::{OwnedUserId, UserId};
 use serde_json::json;
 use tuwunel_api::router::{ClientIp, RateLimitIp, State};

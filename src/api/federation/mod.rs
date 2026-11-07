@@ -1,3 +1,4 @@
+use log as _;
 use tuwunel_api::router::{self, ClientIp, Ruma, State};
 
 pub(crate) mod backfill;

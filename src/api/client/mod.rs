@@ -1,3 +1,4 @@
+use log as _;
 use ruma::UserId;
 use tuwunel_api::router::{self, ClientIp, Ruma, RumaResponse, State};
 use tuwunel_service::{Services, rooms::timeline::PdusIterItem};

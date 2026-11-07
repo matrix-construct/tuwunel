@@ -20,6 +20,7 @@ crate-type = [
 [features]
 default = [
 	"ldap",
+	"release_max_log_level",
 	"tuwunel-api/default",
 	"tuwunel-core/default",
 	"tuwunel-matrix/default",
@@ -27,6 +28,17 @@ default = [
 ]
 
 ldap = ["tuwunel-api/ldap", "tuwunel-service/ldap"]
+
+release_max_log_level = [
+	"log/max_level_trace",
+	"log/release_max_level_info",
+	"tracing/max_level_trace",
+	"tracing/release_max_level_info",
+	"tuwunel-api/release_max_log_level",
+	"tuwunel-core/release_max_log_level",
+	"tuwunel-matrix/release_max_log_level",
+	"tuwunel-service/release_max_log_level",
+]
 
 [dependencies]
 axum.workspace = true
@@ -40,6 +52,7 @@ futures.workspace = true
 hmac.workspace = true
 http.workspace = true
 itertools.workspace = true
+log.workspace = true
 rand.workspace = true
 reqwest.workspace = true
 ruma.workspace = true

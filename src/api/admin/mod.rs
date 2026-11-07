@@ -18,6 +18,7 @@ pub(crate) mod tokens;
 pub(crate) mod users;
 
 use futures::future::join3;
+use log as _;
 use ruma::UserId;
 pub(crate) use tuwunel_api::router::require_admin;
 use tuwunel_api::router::{ClientIp, Ruma, RumaAdmin, RumaResponse, State};
