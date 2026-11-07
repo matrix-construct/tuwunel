@@ -290,7 +290,8 @@ async fn unreadable_counted(services: &Services, base: &str) -> Result {
 /// Departure delivery and its retry retain unresolved required-state keys.
 ///
 /// Restoring the PDU before leaving must not mark its state delivered, since
-/// the departure response carries only the user's membership.
+/// the departure response carries only the user's membership. Forgetting the
+/// room between retries keeps the same keys through that delivery as well.
 #[test]
 fn departure_preserves_unread_state_across_retry() -> Result {
 	boot("sync-v5-departure-unread-state", ["logging.enable=false"], departure_unread)
@@ -337,19 +338,44 @@ async fn departure_unread(services: &Services, base: &str) -> Result {
 		.post(&format!("rooms/{room}/leave"), &json!({}))
 		.await?;
 
-	let left = client.sync(Some(&initial), &request).await?;
+	replies
+		.expect_departure(&initial, &request, &unread, "departure discarded unread keys")
+		.await?;
 
-	assert_eq!(left["rooms"][room.as_str()]["membership"], "leave");
-	assert_eq!(room_unread(services, &room).await?, unread, "departure discarded unread keys");
+	replies
+		.expect_departure(&initial, &request, &unread, "departure retry discarded unread keys")
+		.await?;
 
-	let retried = client.sync(Some(&initial), &request).await?;
+	client
+		.post(&format!("rooms/{room}/forget"), &json!({}))
+		.await?;
 
-	assert_eq!(retried["rooms"][room.as_str()]["membership"], "leave");
-	assert_eq!(
-		room_unread(services, &room).await?,
-		unread,
-		"departure retry discarded unread keys"
-	);
+	replies
+		.expect_departure(
+			&initial,
+			&request,
+			&unread,
+			"forgotten departure discarded unread keys",
+		)
+		.await
+}
+
+/// Sync once and fail unless the room departs keeping its unread keys.
+///
+/// A departure delivers the membership alone, so the connection's retry
+/// obligation for the room's required state must come through unchanged.
+#[implement(Replies, params = "<'_>")]
+async fn expect_departure(
+	&self,
+	since: &Value,
+	request: &Value,
+	unread: &UnreadState,
+	context: &str,
+) -> Result {
+	let reply = self.client.sync(Some(since), request).await?;
+
+	assert_eq!(reply["rooms"][self.room.as_str()]["membership"], "leave");
+	assert_eq!(room_unread(self.client.services, self.room).await?, *unread, "{context}");
 
 	Ok(())
 }

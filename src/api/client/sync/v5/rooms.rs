@@ -62,7 +62,7 @@ use self::{
 };
 use super::{
 	super::{load_timeline_fallible, own_departure, stand_in_leave, strip_prev_state},
-	Connection, ListIds, SyncInfo, WindowRoom, stripped_content, stripped_state,
+	Connection, ListIds, SyncInfo, WindowRoom, departed, stripped_content, stripped_state,
 };
 use crate::{ignored_filter, with_membership};
 
@@ -158,7 +158,7 @@ pub(super) async fn handle_room(
 	let WindowRoom { lists, membership, room_id, .. } = window_room;
 	let roomsince = room.roomsince;
 
-	if matches!(*membership, Some(MembershipState::Leave | MembershipState::Ban)) {
+	if departed(membership.as_ref()) {
 		return leave_or_ban_response(sync_info, conn, window_room, roomsince)
 			.map_ok(|payload| (payload, (None, room.unread_state.clone())))
 			.map_err(Failure::Payload)

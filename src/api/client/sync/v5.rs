@@ -69,6 +69,7 @@ struct SyncInfo<'a> {
 struct WindowRoom {
 	room_id: OwnedRoomId,
 	membership: Option<MembershipState>,
+	forgotten: bool,
 	lists: ListIds,
 	event_count: u64,
 	payload_count: u64,
@@ -434,4 +435,9 @@ where
 		})?
 		.get_field("content")
 		.flat_ok()
+}
+
+#[inline]
+fn departed(membership: Option<&MembershipState>) -> bool {
+	matches!(membership, Some(MembershipState::Leave | MembershipState::Ban))
 }

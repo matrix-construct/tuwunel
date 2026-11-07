@@ -22,8 +22,8 @@ use tuwunel_service::{sync::Connection, users::InviteFilter};
 
 use super::{
 	super::invite_permitted_room,
-	ListIds, ResponseLists, SyncInfo, Window, WindowRoom,
-	filter::{filter_room, filter_room_meta},
+	ListIds, ResponseLists, SyncInfo, Window, WindowRoom, departed,
+	filter::{filter_room, filter_room_meta, is_forgotten},
 };
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -130,9 +130,8 @@ async fn matcher(
 		.map(|lists| (lists.is_empty().is_false(), lists))
 		.await;
 
-	let selected = matched
-		|| conn.subscriptions.contains_key(&room_id)
-		|| matches!(membership, Some(MembershipState::Leave | MembershipState::Ban));
+	let selected =
+		matched || conn.subscriptions.contains_key(&room_id) || departed(membership.as_ref());
 
 	if !selected {
 		return None;
@@ -217,6 +216,7 @@ async fn matcher(
 	Some(WindowRoom {
 		room_id,
 		membership,
+		forgotten: false, // Subscriptions filter these, and selections exclude departures.
 		lists,
 		event_count,
 		payload_count,
@@ -317,9 +317,7 @@ where
 		.collect();
 
 	rooms
-		.filter(|room| {
-			!matches!(room.membership, Some(MembershipState::Leave | MembershipState::Ban))
-		})
+		.filter(|room| !departed(room.membership.as_ref()))
 		.flat_map(|room| room.lists.iter())
 		.fold(lists, |mut lists, id| {
 			let list = lists.entry(id.clone()).or_default();
@@ -367,10 +365,7 @@ where
 				.map(apply!(2, usize_from_ruma))
 				.map(move |range| (id, range))
 		})
-		.flat_map(|(id, (start, end))| {
-			select_list_range(rooms.clone(), id, start, end)
-				.map(|room| (room.room_id.clone(), room.clone()))
-		})
+		.flat_map(|(id, (start, end))| select_list_range(rooms.clone(), id, start, end).cloned())
 		.stream();
 
 	let indexed_subscriptions = (conn.subscriptions.len() > 1).then(|| {
@@ -384,7 +379,7 @@ where
 	let retractions = rooms
 		.clone()
 		.filter(|room| {
-			matches!(room.membership, Some(MembershipState::Leave | MembershipState::Ban))
+			departed(room.membership.as_ref())
 				&& conn
 					.rooms
 					.get(&room.room_id)
@@ -392,8 +387,13 @@ where
 						conn_room.roomsince != 0 && room.payload_count > conn_room.roomsince
 					})
 		})
-		.map(|room| (room.room_id.clone(), detached_room(room.clone())))
-		.stream();
+		.cloned()
+		.map(detached_room)
+		.stream()
+		.broad_then(async |room| WindowRoom {
+			forgotten: is_forgotten(sync_info, &room.room_id).await,
+			..room
+		});
 
 	let subscriptions = conn
 		.subscriptions
@@ -443,12 +443,12 @@ where
 			matcher(sync_info, conn, room_id.clone(), membership)
 				.await
 				.map(detached_room)
-		})
-		.map(|room| (room.room_id.clone(), room));
+		});
 
 	retractions
 		.chain(subscriptions)
 		.chain(selections)
+		.map(|room| (room.room_id.clone(), room))
 		.collect()
 		.await
 }
@@ -466,9 +466,7 @@ where
 {
 	rooms
 		.filter(move |room| room.lists.contains(id))
-		.filter(|room| {
-			!matches!(room.membership, Some(MembershipState::Leave | MembershipState::Ban))
-		})
+		.filter(|room| !departed(room.membership.as_ref()))
 		.skip(start)
 		.take(end.saturating_add(1).saturating_sub(start))
 }
@@ -642,6 +640,7 @@ mod tests {
 		WindowRoom {
 			room_id,
 			membership,
+			forgotten: false,
 			lists: ListIds::new(),
 			event_count,
 			payload_count,

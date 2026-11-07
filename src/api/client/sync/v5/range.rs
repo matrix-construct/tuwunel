@@ -7,7 +7,7 @@ use ruma::{
 	events::{
 		AnyRawAccountDataEvent, AnyRoomAccountDataEvent, AnySyncEphemeralRoomEvent,
 		GlobalAccountDataEventType, ignored_user_list::IgnoredUserListEvent,
-		receipt::SyncReceiptEvent, room::member::MembershipState,
+		receipt::SyncReceiptEvent,
 	},
 	serde::Raw,
 };
@@ -180,7 +180,7 @@ async fn collect_room(
 		.map(Option::transpose)
 		.map_err(Failure::from);
 
-	if matches!(window_room.membership, Some(MembershipState::Leave | MembershipState::Ban)) {
+	if window_room.forgotten {
 		let (payload, state_read) = delivery.map_ok(Option::unzip).await?;
 		let (shortstatehash, unread_state) = state_read.unwrap_or_default();
 		let shortstatehash = shortstatehash.unwrap_or(room.shortstatehash);

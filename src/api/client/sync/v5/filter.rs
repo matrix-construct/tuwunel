@@ -158,16 +158,10 @@ async fn knock_summary(
 
 #[tracing::instrument(name = "filter_meta", level = "trace", skip_all)]
 pub(super) async fn filter_room_meta(
-	SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
+	sync_info @ SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
 	room_id: &RoomId,
 ) -> bool {
-	if services
-		.state_cache
-		.is_forgotten(sender_user, room_id)
-		.await
-		.inspect_err(|error| warn!(%sender_user, %room_id, %error, "Unreadable forgotten state"))
-		.unwrap_or(true)
-	{
+	if is_forgotten(sync_info, room_id).await {
 		return false;
 	}
 
@@ -197,4 +191,21 @@ pub(super) async fn filter_room_meta(
 		.or3(not_exists, is_disabled, is_banned)
 		.is_false()
 		.await
+}
+
+/// Tests whether the sender forgot a room.
+///
+/// An unreadable marker counts as forgotten, so a failed read withholds
+/// rather than exposes.
+#[tracing::instrument(level = "trace", skip_all)]
+pub(super) async fn is_forgotten(
+	SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
+	room_id: &RoomId,
+) -> bool {
+	services
+		.state_cache
+		.is_forgotten(sender_user, room_id)
+		.await
+		.inspect_err(|error| warn!(%sender_user, %room_id, %error, "Unreadable forgotten state"))
+		.unwrap_or(true)
 }

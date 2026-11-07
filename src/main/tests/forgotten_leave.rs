@@ -6,7 +6,7 @@ use reqwest::StatusCode;
 use serde_json::{Value, json};
 use tuwunel_core::{
 	Result, err,
-	ruma::{RoomId, UserId},
+	ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId},
 	utils::BoolExt,
 };
 use tuwunel_service::Services;
@@ -31,6 +31,17 @@ const OWNER_TOKEN: &str = "forgotten-leave-owner-access-token";
 const ALICE_TOKEN: &str = "forgotten-leave-alice-a-access-token";
 const SECOND_TOKEN: &str = "forgotten-leave-alice-b-access-token";
 const MARKER: &[u8] = &[0xCA, 0xF6];
+const ACCOUNT_DATA: &str = "org.tuwunel.test.forgotten";
+const RECEIPTS: &str = "readreceiptid_readreceipt";
+
+struct Members<'a> {
+	owner_id: OwnedUserId,
+	alice: OwnedUserId,
+	owner: Client<'a>,
+	first: Client<'a>,
+	second: Client<'a>,
+	room: OwnedRoomId,
+}
 
 /// A second device receives a forgotten room's departure once.
 ///
@@ -51,30 +62,29 @@ fn forgotten_departure_reaches_other_device() -> Result {
 	)
 }
 
+/// A departure left unforgotten keeps delivering its room extensions.
+///
+/// Account data and receipts recorded before the leave reach the other device
+/// beside its departure, and a later subscription still receives account data
+/// updates; only forgetting reduces delivery to the membership.
+#[test]
+fn unforgotten_departure_keeps_extensions() -> Result {
+	boot(
+		"forgotten-leave-retained",
+		["logging.enable=false", "rooms.forget_forced_upon_leave=false"],
+		retained,
+	)
+}
+
 async fn exercise(services: &Services, base: &str) -> Result {
-	let owner_id = register(services, "forgotten-owner", OWNER_TOKEN).await?;
-
-	let alice = register(services, "forgotten-alice", ALICE_TOKEN).await?;
-
-	services
-		.users
-		.create_device(&alice, None, (Some(SECOND_TOKEN), None), None, None, None)
-		.await?;
-
-	let owner = Client { services, base, token: OWNER_TOKEN };
-	let first = Client { services, base, token: ALICE_TOKEN };
-	let second = Client { services, base, token: SECOND_TOKEN };
-	let room = owner
-		.create_room(&json!({"preset": "private_chat"}))
-		.await?;
-
-	owner
-		.post(&format!("rooms/{room}/invite"), &json!({"user_id": alice}))
-		.await?;
-
-	first
-		.post(&format!("rooms/{room}/join"), &json!({}))
-		.await?;
+	let Members {
+		owner_id,
+		alice,
+		owner,
+		first,
+		second,
+		room,
+	} = members(services, base).await?;
 
 	let initial_v3 = sync_v3(&second, None).await?;
 	let initial_v5 = second.sliding_sync(None, 0, &list()).await?;
@@ -110,12 +120,20 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	}
 
 	assert_forgotten(services, &alice, &room, count).await?;
-	post_forget_data(&owner, &first, &room, &owner_id, &alice).await?;
+	room_activity(&owner, &first, &room, &owner_id, &alice).await?;
+
+	// An unreadable extension row must not withhold the forgotten departure.
+	let receipts = &services.db[RECEIPTS];
+	let receipt = (&*room, *services.globals.next_count(), &*owner_id, "");
+
+	receipts.put_raw(receipt, "{");
 
 	let left_v3 = sync_v3(&second, Some(field(&initial_v3, "next_batch")?)).await?;
 	let left_v5 = second
 		.sliding_sync(Some(field(&initial_v5, "pos")?), 0, &list())
 		.await?;
+
+	receipts.del(receipt);
 
 	let legacy = &left_v3["rooms"]["leave"][room.as_str()];
 	let sliding = &left_v5["rooms"][room.as_str()];
@@ -223,17 +241,121 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	Ok(())
 }
 
-async fn post_forget_data(
+async fn retained(services: &Services, base: &str) -> Result {
+	let Members {
+		owner_id,
+		alice,
+		owner,
+		first,
+		second,
+		room,
+	} = members(services, base).await?;
+
+	let initial = second.sliding_sync(None, 0, &list()).await?;
+	let id = room.as_str();
+
+	assert_eq!(initial["rooms"][id]["membership"], "join");
+
+	let event = room_activity(&owner, &first, &room, &owner_id, &alice).await?;
+
+	first
+		.post(&format!("rooms/{room}/leave"), &json!({}))
+		.await?;
+
+	let left = second
+		.sliding_sync(Some(field(&initial, "pos")?), 0, &list())
+		.await?;
+
+	let receipt = left["extensions"]["receipts"]["rooms"][id]["content"]
+		.get(&event)
+		.is_some();
+
+	assert_eq!(left["rooms"][id]["membership"], "leave", "{left}");
+	assert!(account_data(&left, id).is_some(), "unforgotten room lost account data: {left}");
+	assert!(receipt, "unforgotten room lost receipts: {left}");
+
+	let tracked = list();
+	let subscription = json!({
+		"conn_id": tracked["conn_id"],
+		"extensions": tracked["extensions"],
+		"room_subscriptions": {id: {"timeline_limit": 0}},
+	});
+
+	let subscribed = second
+		.sliding_sync(Some(field(&left, "pos")?), 0, &subscription)
+		.await?;
+
+	let content = json!({"updated": true});
+
+	put_account_data(&first, &alice, &room, &content).await?;
+
+	let updated = second
+		.sliding_sync(Some(field(&subscribed, "pos")?), 0, &subscription)
+		.await?;
+
+	let delivered = account_data(&updated, id).map(|data| &data["content"]);
+
+	assert_eq!(delivered, Some(&content), "subscribed room lost account data: {updated}");
+
+	Ok(())
+}
+
+fn account_data<'a>(reply: &'a Value, room: &str) -> Option<&'a Value> {
+	reply["extensions"]["account_data"]["rooms"][room]
+		.as_array()?
+		.iter()
+		.find(|data| data["type"] == ACCOUNT_DATA)
+}
+
+async fn members<'a>(services: &'a Services, base: &'a str) -> Result<Members<'a>> {
+	let owner_id = register(services, "forgotten-owner", OWNER_TOKEN).await?;
+
+	let alice = register(services, "forgotten-alice", ALICE_TOKEN).await?;
+
+	services
+		.users
+		.create_device(&alice, None, (Some(SECOND_TOKEN), None), None, None, None)
+		.await?;
+
+	let owner = Client { services, base, token: OWNER_TOKEN };
+	let first = Client { services, base, token: ALICE_TOKEN };
+	let second = Client { services, base, token: SECOND_TOKEN };
+	let room = owner
+		.create_room(&json!({"preset": "private_chat"}))
+		.await?;
+
+	owner
+		.post(&format!("rooms/{room}/invite"), &json!({"user_id": alice}))
+		.await?;
+
+	first
+		.post(&format!("rooms/{room}/join"), &json!({}))
+		.await?;
+
+	Ok(Members {
+		owner_id,
+		alice,
+		owner,
+		first,
+		second,
+		room,
+	})
+}
+
+/// Sends a message with its read receipt, typing, and member account data.
+///
+/// The returned event identifier is the message the receipt marks.
+async fn room_activity(
 	owner: &Client<'_>,
-	departed: &Client<'_>,
+	member: &Client<'_>,
 	room: &RoomId,
 	owner_id: &UserId,
 	user: &UserId,
-) -> Result {
+) -> Result<String> {
 	let message = owner
 		.put(
-			&format!("rooms/{room}/send/m.room.message/after-forget"),
-			&json!({"msgtype": "m.text", "body": "after forgetting"}),
+			&format!("rooms/{room}/send/m.room.message/activity"),
+			&json!({"msgtype": "m.text", "body": "room activity"}),
 		)
 		.await?;
 
@@ -250,14 +372,21 @@ async fn post_forget_data(
 		)
 		.await?;
 
-	departed
-		.put(
-			&format!("user/{user}/rooms/{room}/account_data/org.tuwunel.test.forgotten"),
-			&json!({"secret": true}),
-		)
-		.await?;
+	put_account_data(member, user, room, &json!({"secret": true})).await?;
 
-	Ok(())
+	Ok(event.to_owned())
+}
+
+async fn put_account_data(
+	member: &Client<'_>,
+	user: &UserId,
+	room: &RoomId,
+	content: &Value,
+) -> Result {
+	member
+		.put(&format!("user/{user}/rooms/{room}/account_data/{ACCOUNT_DATA}"), content)
+		.await
+		.map(drop)
 }
 
 async fn assert_forgotten(

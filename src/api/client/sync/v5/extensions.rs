@@ -5,6 +5,9 @@ mod receipts;
 mod to_device;
 mod typing;
 
+#[cfg(test)]
+mod tests;
+
 use std::{collections::BTreeMap, fmt::Debug};
 
 use futures::{FutureExt, future::join4};
@@ -15,7 +18,6 @@ use ruma::{
 		request::ExtensionRoomConfig,
 		response::{Extensions, Room as ResponseRoom},
 	},
-	events::room::member::MembershipState,
 };
 use tuwunel_core::{Result, apply, at, extract_variant, utils::BoolExt};
 use tuwunel_service::sync::Connection;
@@ -208,9 +210,9 @@ where
 		.chain(rooms_explicit)
 		.chain(rooms_selected)
 		.filter(|room_id| {
-			window.get(*room_id).is_some_and(|room| {
-				!matches!(room.membership, Some(MembershipState::Leave | MembershipState::Ban))
-			})
+			window
+				.get(*room_id)
+				.is_some_and(|room| !room.forgotten)
 		})
 }
 
@@ -223,125 +225,4 @@ where
 			.clone()
 			.any(|list| room.lists.contains(list))
 	})
-}
-
-#[cfg(test)]
-mod tests {
-	use std::slice::Iter;
-
-	use ruma::room_id;
-
-	use super::*;
-	use crate::sync::v5::ListIds;
-
-	#[test]
-	fn explicit_room_outside_the_window_is_rejected() {
-		let selected = room_id!("!selected:example.com");
-		let foreign = room_id!("!foreign:example.com");
-		let window = window(selected, 0);
-		let conn = Connection::default();
-		let list = ListId::from("unmatched");
-		let lists = [list];
-		let rooms = [ExtensionRoomConfig::Room(foreign.to_owned())];
-
-		assert!(
-			selector(&conn, &window, Some(lists.iter()), Some(rooms.iter()))
-				.next()
-				.is_none()
-		);
-	}
-
-	#[test]
-	fn all_subscribed_room_outside_the_window_is_rejected() {
-		let selected = room_id!("!selected:example.com");
-		let foreign = room_id!("!foreign:example.com");
-		let window = window(selected, 0);
-		let mut conn = Connection::default();
-		conn.subscriptions
-			.insert(foreign.to_owned(), Default::default());
-		let list = ListId::from("unmatched");
-		let lists = [list];
-		let rooms = [ExtensionRoomConfig::AllSubscribed];
-
-		assert!(
-			selector(&conn, &window, Some(lists.iter()), Some(rooms.iter()))
-				.next()
-				.is_none()
-		);
-	}
-
-	#[test]
-	fn stale_payload_room_in_the_window_remains_extension_eligible() {
-		let room_id = room_id!("!stale:example.com");
-		let window = window(room_id, 1);
-		let mut conn = Connection::default();
-		conn.rooms
-			.entry(room_id.to_owned())
-			.or_default()
-			.roomsince = 9;
-
-		let lists: Option<Iter<'_, ListId>> = None;
-		let rooms: Option<Iter<'_, ExtensionRoomConfig>> = None;
-
-		let selected = selector(&conn, &window, lists, rooms).collect::<Vec<_>>();
-
-		assert_eq!(selected, [room_id]);
-	}
-
-	#[test]
-	fn explicit_room_already_selected_by_list_is_not_duplicated() {
-		let room_id = room_id!("!explicit-overlap:example.com");
-		let list = ListId::from("main");
-		let mut window = window(room_id, 0);
-
-		window
-			.get_mut(room_id)
-			.expect("test room should be present")
-			.lists
-			.push(list.clone());
-
-		let conn = Connection::default();
-		let lists = [list];
-		let rooms = [ExtensionRoomConfig::Room(room_id.to_owned())];
-		let selected =
-			selector(&conn, &window, Some(lists.iter()), Some(rooms.iter())).collect::<Vec<_>>();
-
-		assert_eq!(selected, [room_id]);
-	}
-
-	#[test]
-	fn subscribed_room_already_selected_by_list_is_not_duplicated() {
-		let room_id = room_id!("!subscribed-overlap:example.com");
-		let list = ListId::from("main");
-		let mut window = window(room_id, 0);
-
-		window
-			.get_mut(room_id)
-			.expect("test room should be present")
-			.lists
-			.push(list.clone());
-
-		let mut conn = Connection::default();
-		conn.subscriptions
-			.insert(room_id.to_owned(), Default::default());
-
-		let lists = [list];
-		let rooms = [ExtensionRoomConfig::AllSubscribed];
-		let selected =
-			selector(&conn, &window, Some(lists.iter()), Some(rooms.iter())).collect::<Vec<_>>();
-
-		assert_eq!(selected, [room_id]);
-	}
-
-	fn window(room_id: &RoomId, payload_count: u64) -> Window {
-		let room = WindowRoom {
-			room_id: room_id.to_owned(),
-			membership: None,
-			lists: ListIds::new(),
-			event_count: 0,
-			payload_count,
-		};
-
-		[(room_id.to_owned(), room)].into()
-	}
 }
