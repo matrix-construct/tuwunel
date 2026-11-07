@@ -72,17 +72,16 @@ const MALLOC_CONF: &[u8] = concat_bytes!(
 /// them a release build falls back to its default arena count and prints a
 /// notice, and a debug build aborts during allocator initialization.
 #[cfg(feature = "jemalloc_conf")]
-const MALLOC_CONF_PERCPU_ARENA: &str = if cfg!(any(
-	target_os = "linux",
-	target_os = "android",
-	target_os = "freebsd",
-	target_os = "dragonfly",
-	target_vendor = "apple",
-	target_os = "windows",
-)) {
-	",percpu_arena:percpu"
-} else {
-	""
+const MALLOC_CONF_PERCPU_ARENA: &str = cfg_select! {
+	any(
+		target_os = "linux",
+		target_os = "android",
+		target_os = "freebsd",
+		target_os = "dragonfly",
+		target_vendor = "apple",
+		target_os = "windows",
+	) => ",percpu_arena:percpu",
+	_ => "",
 };
 
 /// Asks jemalloc to back allocator metadata with huge pages where it can.
@@ -94,33 +93,31 @@ const MALLOC_CONF_PERCPU_ARENA: &str = if cfg!(any(
 /// since base blocks keep the 2 MiB alignment and rounding of
 /// `BASE_BLOCK_MIN_ALIGN` either way.
 #[cfg(feature = "jemalloc_conf")]
-const MALLOC_CONF_METADATA_THP: &str = if cfg!(any(
-	all(any(target_os = "linux", target_os = "android"), not(target_arch = "arm")),
-	target_os = "illumos",
-	target_os = "solaris",
-)) {
-	",metadata_thp:always"
-} else {
-	""
+const MALLOC_CONF_METADATA_THP: &str = cfg_select! {
+	any(
+		target_os = "solaris",
+		target_os = "illumos",
+		all(
+			any(target_os = "linux", target_os = "android"),
+			not(target_arch = "arm"),
+		),
+	) => ",metadata_thp:always",
+	_ => "",
+};
+
+#[cfg(feature = "jemalloc_conf")]
+const _MALLOC_CONF_PROF: &str = cfg_select! {
+	all(feature = "jemalloc_prof", target_arch = "x86_64") =>
+		",prof_active:false",
+	_ => "",
 };
 
 // Apple's jemalloc has no background threads and prints a notice when asked.
-#[cfg(all(feature = "jemalloc_conf", not(target_vendor = "apple")))]
-const MALLOC_CONF_BACKGROUND: &str = ",background_thread:false,max_background_threads:-1";
-#[cfg(all(feature = "jemalloc_conf", target_vendor = "apple"))]
-const MALLOC_CONF_BACKGROUND: &str = "";
-
-#[cfg(all(
-	feature = "jemalloc_conf",
-	feature = "jemalloc_prof",
-	target_arch = "x86_64",
-))]
-const _MALLOC_CONF_PROF: &str = ",prof_active:false";
-#[cfg(all(
-	feature = "jemalloc_conf",
-	any(not(feature = "jemalloc_prof"), not(target_arch = "x86_64")),
-))]
-const _MALLOC_CONF_PROF: &str = "";
+#[cfg(feature = "jemalloc_conf")]
+const MALLOC_CONF_BACKGROUND: &str = cfg_select! {
+	target_vendor = "apple" => "",
+	_ => ",background_thread:false,max_background_threads:-1",
+};
 
 #[global_allocator]
 static JEMALLOC: Jemalloc = Jemalloc;
