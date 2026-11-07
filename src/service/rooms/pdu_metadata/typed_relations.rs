@@ -1,16 +1,18 @@
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, RoomId, events::relation::RelationType,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, RoomId,
+	events::relation::RelationType,
 };
 use tuwunel_core::{
 	Result,
 	arrayvec::ArrayVec,
 	implement,
+	result::NotFound,
 	utils::{
 		stream::{ReadyExt, TryIgnore},
 		u64_from_u8,
 	},
 };
-use tuwunel_matrix::{Event, PduCount, RawPduId};
+use tuwunel_matrix::{Event, PduCount, PduId, RawPduId};
 
 use super::Service;
 use crate::rooms::short::ShortRoomId;
@@ -22,6 +24,21 @@ use crate::rooms::short::ShortRoomId;
 pub(crate) type Key = ArrayVec<u8, KEY_LEN>;
 
 type Prefix = ArrayVec<u8, PREFIX_LEN>;
+
+/// What deriving an event's `relatesto_typed` row from storage found.
+///
+/// The derivation reads the parent's mapping without trusting it, so a damaged
+/// mapping is an answer of its own rather than a panic.
+pub(crate) enum Derived {
+	/// The key the event is indexed under.
+	Key(Key),
+
+	/// The event is not an indexed relation.
+	Unindexed,
+
+	/// The parent's `eventid_pduid` value is not a PDU id.
+	UnreadableParent(OwnedEventId),
+}
 
 /// `relatesto_typed` rel_type discriminant, occupying one key byte between the
 /// parent `RawPduId` and the child's ts. Stable on-disk format; the explicit
@@ -65,16 +82,11 @@ pub async fn add_typed_relation<E: Event>(
 	child: &E,
 	rel_type: RelationType,
 ) {
-	let Some(tag) = tag(&rel_type) else {
+	let Ok(Some(key)) = self
+		.relation_key(shortroomid, child_count, parent, child, &rel_type)
+		.await
+	else {
 		return;
-	};
-
-	let Ok(parent_count) = self.services.timeline.get_pdu_count(parent).await else {
-		return;
-	};
-
-	let (PduCount::Normal(_), PduCount::Normal(_)) = (parent_count, child_count) else {
-		return; // backfilled relations are not indexed
 	};
 
 	let child_short = self
@@ -83,20 +95,65 @@ pub async fn add_typed_relation<E: Event>(
 		.get_or_create_shorteventid(child.event_id())
 		.await;
 
-	let child_ts = u64::from(child.origin_server_ts().get());
-	let key = key(shortroomid, parent_count, tag, child_ts, child_count);
-
 	self.db
 		.relatesto_typed
 		.aput_raw::<KEY_LEN, _, _>(key.as_slice(), child_short.to_be_bytes());
 }
 
-fn tag(rel_type: &RelationType) -> Option<Tag> {
+/// The key an `m.replace` or `m.reference` child of `parent` is indexed under.
+///
+/// Another relation type, a parent not stored, or a backfilled event on either
+/// side gives `None`. A parent lookup failing other than as absent is returned.
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+pub(super) async fn relation_key<E: Event>(
+	&self,
+	shortroomid: ShortRoomId,
+	child_count: PduCount,
+	parent: &EventId,
+	child: &E,
+	rel_type: &RelationType,
+) -> Result<Option<Key>> {
+	let Some(tag) = tag(rel_type) else {
+		return Ok(None);
+	};
+
+	let key = self
+		.services
+		.timeline
+		.get_pdu_count(parent)
+		.await
+		.optional()?
+		.and_then(|parent_count| indexed_key(shortroomid, parent_count, tag, child, child_count));
+
+	Ok(key)
+}
+
+pub(super) fn tag(rel_type: &RelationType) -> Option<Tag> {
 	match rel_type {
 		| RelationType::Replacement => Some(Tag::Replace),
 		| RelationType::Reference => Some(Tag::Reference),
 		| _ => None,
 	}
+}
+
+/// The key a relation is indexed under, once its parent's position is known.
+///
+/// A backfilled event on either side is not indexed, and gives `None`.
+pub(super) fn indexed_key<E: Event>(
+	shortroomid: ShortRoomId,
+	parent_count: PduCount,
+	tag: Tag,
+	child: &E,
+	child_count: PduCount,
+) -> Option<Key> {
+	let (PduCount::Normal(_), PduCount::Normal(_)) = (parent_count, child_count) else {
+		return None;
+	};
+
+	let child_ts = u64::from(child.origin_server_ts().get());
+
+	Some(key(shortroomid, parent_count, tag, child_ts, child_count))
 }
 
 pub(super) fn key(
@@ -114,6 +171,16 @@ pub(super) fn key(
 	key.extend(child_ts.to_be_bytes());
 	key.extend(child.to_be_bytes());
 	key
+}
+
+/// Reads the child a stored `relatesto_typed` key names.
+///
+/// A key of any length but the writer's is not a relation row and gives `None`.
+pub(crate) fn key_child(key: &[u8]) -> Option<PduId> {
+	key.len().eq(&KEY_LEN).then(|| PduId {
+		shortroomid: u64_from_u8(&key[..size_of::<ShortRoomId>()]),
+		count: PduCount::from_unsigned(u64_from_u8(&key[CHILD_COUNT_OFFSET..])),
+	})
 }
 
 /// Remove the `relatesto_typed` row for a redacted `m.replace` or `m.reference`

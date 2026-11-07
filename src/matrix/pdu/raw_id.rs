@@ -39,6 +39,20 @@ impl RawId {
 	const MAX_LEN: usize = Self::BACKFILLED_LEN;
 	const NORMAL_LEN: usize = size_of::<ShortRoomId>() + size_of::<u64>();
 
+	/// Reads a raw PDU key from bytes that may not be one.
+	///
+	/// A slice of either layout's length is taken as that layout, and any other
+	/// length gives `None`, where the `From` conversion panics. Integrity checks
+	/// read keys through here, since a damaged key is what they look for.
+	#[inline]
+	#[must_use]
+	pub fn try_from_bytes(id: &[u8]) -> Option<Self> {
+		<&RawIdNormal>::try_from(id)
+			.map(Self::from)
+			.or_else(|_| <&RawIdBackfilled>::try_from(id).map(Self::from))
+			.ok()
+	}
+
 	/// Checks whether two raw PDU keys belong to the same room.
 	///
 	/// Only the leading compact room identifier is compared. Timeline kind and

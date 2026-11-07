@@ -79,6 +79,26 @@ pub(crate) struct RedactedRoot {
 	activity: Option<RawPduId>,
 }
 
+/// A thread root's stored summary set against its replies.
+///
+/// Rewriting the root with these values brings its summary back in line.
+pub(crate) struct Recount {
+	/// The count the summary holds.
+	pub(crate) stored: Option<UInt>,
+
+	/// The count the replies give, or the stored one for a backfilled root.
+	pub(crate) counted: Option<UInt>,
+
+	/// Whether the summary's latest reply is gone or redacted.
+	pub(crate) stale_latest: bool,
+
+	/// The newest reply, to replace a stale latest reply, or none to drop the summary.
+	pub(crate) newest: Option<CanonicalJsonValue>,
+
+	/// Relation index keys under the root too short to hold a position, left uncounted.
+	pub(crate) malformed: usize,
+}
+
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
@@ -676,7 +696,10 @@ async fn latest_count(&self, root_id: &RawPduId) -> Result<PduCount> {
 		.map_de(PduCount::from_unsigned)
 }
 
-fn activity_key(root_id: RawPduId, count: PduCount) -> RawPduId {
+/// The key of the activity row listing a thread at `count`.
+///
+/// It shares the root's room, so a room's thread list is one prefix.
+pub(crate) fn activity_key(root_id: RawPduId, count: PduCount) -> RawPduId {
 	let PduId { shortroomid, .. } = root_id.into();
 
 	PduId { shortroomid, count }.into()
@@ -720,21 +743,79 @@ async fn rebuild_thread_summary(&self, root_id: RawPduId) -> Result<bool> {
 		return Ok(false);
 	};
 
-	let Some(_) = thread_bundle(&root) else { return Ok(false) };
+	let recount = self.recount_summary(root_id, &root).await?;
 
-	let (count, latest) = self
-		.thread_replies(root_id, usize::MAX)
-		.ready_try_fold((0_usize, None), |(count, latest), (_, pdu)| {
-			Ok((count.saturating_add(1), latest.or(Some(pdu))))
+	if recount
+		.as_ref()
+		.is_some_and(|recount| recount.malformed > 0)
+	{
+		return Err!(Database(
+			"Thread root {root_id:?} has relation keys too short to count its replies by"
+		));
+	}
+
+	let Some(Recount { counted, stale_latest, newest, .. }) = recount.filter(Recount::changed)
+	else {
+		return Ok(false);
+	};
+
+	let root = set_thread_count(root, counted);
+	let root = if stale_latest {
+		set_thread_latest(root, newest)
+	} else {
+		root
+	};
+
+	self.services
+		.timeline
+		.replace_pdu(&root_id, &root)
+		.await?;
+
+	Ok(true)
+}
+
+/// Measures a root's stored thread summary against a recount of its replies.
+///
+/// A root with no summary gives `None`. A backfilled root's replies are not in
+/// the relation index, so it keeps its count, and a stored latest reply that is
+/// gone or redacted gives way to the newest reply. Relation keys are read
+/// without trusting them, so a damaged one is counted apart rather than
+/// panicking.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip(self, root))]
+pub(crate) async fn recount_summary(
+	&self,
+	root_id: RawPduId,
+	root: &CanonicalJsonObject,
+) -> Result<Option<Recount>> {
+	let Some(_) = thread_bundle(root) else {
+		return Ok(None);
+	};
+
+	let PduId { shortroomid, count: root_count } = root_id.into();
+	let (count, newest, malformed) = self
+		.services
+		.pdu_metadata
+		.try_get_relations_checked(shortroomid, root_count, Direction::Backward)
+		.ready_try_filter(|related| {
+			related
+				.as_ref()
+				.is_none_or(|(_, pdu)| !pdu.is_redacted() && is_thread_reply(pdu))
+		})
+		.ready_try_fold((0_usize, None, 0_usize), |(count, newest, malformed), related| {
+			Ok(match related {
+				| None => (count, newest, malformed.saturating_add(1)),
+				| Some((_, pdu)) => (count.saturating_add(1), newest.or(Some(pdu)), malformed),
+			})
 		})
 		.await?;
 
-	// A backfilled root keeps its count; its replies are not in the relation index.
-	let count = matches!(root_id.pdu_count(), PduCount::Normal(_))
+	let stored = thread_count(root);
+	let counted = matches!(root_id.pdu_count(), PduCount::Normal(_))
 		.and_then(|| UInt::try_from(count).ok())
-		.or_else(|| thread_count(&root));
+		.or(stored);
 
-	let replace = match thread_latest(&root).and_then(|id| <&EventId>::try_from(id).ok()) {
+	let replace = match thread_latest(root).and_then(|id| <&EventId>::try_from(id).ok()) {
 		| None => false,
 		| Some(latest) => self
 			.services
@@ -745,26 +826,28 @@ async fn rebuild_thread_summary(&self, root_id: RawPduId) -> Result<bool> {
 			.is_none_or(|pdu| pdu.is_redacted()),
 	};
 
-	let changed = replace || thread_count(&root) != count;
+	let newest = replace
+		.then(|| newest.as_ref().and_then(thread_reply_json))
+		.flatten();
 
-	if !changed {
-		return Ok(false);
-	}
-
-	let latest = replace.then(|| latest.as_ref().and_then(thread_reply_json));
-	let root = set_thread_count(root, count);
-	let root = match latest {
-		| None => root,
-		| Some(latest) => set_thread_latest(root, latest),
+	let recount = Recount {
+		stored,
+		counted,
+		stale_latest: replace,
+		newest,
+		malformed,
 	};
 
-	self.services
-		.timeline
-		.replace_pdu(&root_id, &root)
-		.await?;
-
-	Ok(true)
+	Ok(Some(recount))
 }
+
+/// Whether the root's summary needs rewriting.
+///
+/// The count or the latest reply disagrees with the replies the recount read.
+#[implement(Recount)]
+#[inline]
+#[must_use]
+pub(crate) fn changed(&self) -> bool { self.stale_latest || self.stored != self.counted }
 
 /// Keeps a failed root's error only when the storage engine could not read it.
 ///

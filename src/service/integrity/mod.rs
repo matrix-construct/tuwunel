@@ -7,21 +7,29 @@
 //! finding calls for, re-deciding anything a write may have changed.
 
 pub mod columns;
+pub mod joined_members;
 pub mod mediaid_user;
 pub mod readreceiptid_readreceipt;
 pub mod referencedevents;
+pub mod relatesto_typed;
+pub mod roomid_tscount_pducount;
 pub mod roomuserid_joined;
 mod scan;
 pub mod schema;
 #[cfg(test)]
 mod tests;
+pub mod thread_summaries;
+pub mod threadrootid_latestcount;
 pub mod userid_password;
 pub mod useridprofilekey_value;
 
 use std::{collections::BTreeMap, fmt::Display};
 
 use futures::{FutureExt, Stream, future::BoxFuture};
-use tuwunel_core::{Err, Result, implement, utils::TryReadyExt};
+use ruma::api::error::ErrorKind;
+use serde::Deserialize;
+use tuwunel_core::{Err, Error, Result, implement, utils::TryReadyExt};
+use tuwunel_database::SEP;
 
 pub(crate) use self::scan::ScanExt;
 use crate::Services;
@@ -40,6 +48,11 @@ static CHECKS: &[&Check] = &[
 	&mediaid_user::REMOTE,
 	&useridprofilekey_value::CHECK,
 	&userid_password::CHECK,
+	&joined_members::CHECK,
+	&roomid_tscount_pducount::CHECK,
+	&relatesto_typed::CHECK,
+	&thread_summaries::CHECK,
+	&threadrootid_latestcount::CHECK,
 ];
 
 /// A finding of any check.
@@ -164,4 +177,43 @@ fn record(mut self, finding: &impl Report, limit: usize) -> Self {
 
 	*count = count.saturating_add(1);
 	self
+}
+
+/// Splits off the leading record of a stored key or value, as a release build
+/// decodes a lone string from it.
+///
+/// The rest is whatever follows the separator ending that record, or `None`
+/// when no separator does. A release build ignores the rest, where a debug build
+/// asserts there is none.
+pub(crate) fn leading_record(bytes: &[u8]) -> (&[u8], Option<&[u8]>) {
+	let split = bytes
+		.iter()
+		.position(|&byte| byte == SEP)
+		.and_then(|at| bytes.split_at_checked(at));
+
+	split.map_or((bytes, None), |(leading, rest)| (leading, rest.get(1..)))
+}
+
+/// Decodes the JSON object a stored row holds, as a release build's database
+/// decoder reads it.
+///
+/// That decoder parses the object at the start of the leading record and, in
+/// either build, ignores whatever follows the object within that record. A
+/// release build also ignores any further record, where a debug build panics on
+/// one beyond a single trailing separator.
+pub(crate) fn leading_json<T>(bytes: &[u8]) -> Result<T>
+where
+	T: for<'de> Deserialize<'de>,
+{
+	let (record, _) = leading_record(bytes);
+
+	T::deserialize(&mut serde_json::Deserializer::from_slice(record)).map_err(Into::into)
+}
+
+/// Whether a failed read found its data but could not decode it.
+///
+/// A row that is not JSON, or content that does not fit, fails this way, and a
+/// storage fault never does.
+pub(crate) fn undecodable(error: &Error) -> bool {
+	matches!(error.kind(), ErrorKind::BadJson | ErrorKind::NotJson)
 }

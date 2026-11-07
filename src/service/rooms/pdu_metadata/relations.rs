@@ -1,4 +1,10 @@
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{
+	Stream, StreamExt, TryFutureExt, TryStreamExt,
+	future::{
+		Either::{Left, Right},
+		ready,
+	},
+};
 use ruma::{
 	EventId, OwnedUserId, UserId,
 	api::Direction,
@@ -14,12 +20,19 @@ use tuwunel_core::{
 		u64_from_u8,
 	},
 };
+use tuwunel_database::keyval::Key;
 use tuwunel_matrix::{Event, Pdu, PduCount, PduId, RawPduId, event::RelationTypeEqual};
 
 use super::Service;
 use crate::rooms::short::ShortRoomId;
 
 type StartKey = ArrayVec<u8, 16>;
+
+/// One row of a checked relation walk.
+///
+/// It is a related event at its position, or `None` for an index key too short
+/// to hold a position.
+type Checked = Option<(PduCount, Pdu)>;
 
 /// Parameters controlling a relation-row query.
 ///
@@ -207,6 +220,53 @@ pub fn relation_counts(
 	dir: Direction,
 	limit: usize,
 ) -> impl Stream<Item = Result<PduCount>> + Send + '_ {
+	self.relation_keys(target, from, dir)
+		.take(limit)
+		.map_ok(|to_from| u64_from_u8(&to_from[8..16]))
+		.map_ok(PduCount::from_unsigned)
+}
+
+/// Walks every event related to a target, reading each index key fallibly.
+///
+/// It walks as [`Service::try_get_relations_limited`] does from the end `dir`
+/// leads away from, with no limit, except that a key under the target too short
+/// to hold a position comes back as `None` where that walk panics. Missing
+/// children are skipped, and other load errors are yielded.
+#[implement(Service)]
+pub fn try_get_relations_checked(
+	&self,
+	shortroomid: ShortRoomId,
+	target: PduCount,
+	dir: Direction,
+) -> impl Stream<Item = Result<Checked>> + Send + '_ {
+	self.relation_keys(target, None, dir)
+		.map_ok(|to_from| {
+			to_from
+				.get(8..16)
+				.map(u64_from_u8)
+				.map(PduCount::from_unsigned)
+		})
+		.wide_and_then(move |count| match count {
+			| None => Left(ready(Ok(Some(None)))),
+			| Some(count) => Right(
+				self.related_pdu(None, shortroomid, count)
+					.map_ok(|related| related.map(Some)),
+			),
+		})
+		.ready_try_filter_map(Ok)
+}
+
+/// Walks the index keys of the events related to a target.
+///
+/// `from` is exclusive, and without one the walk starts at the end `dir` leads
+/// away from. Each key begins with the target's count.
+#[implement(Service)]
+fn relation_keys(
+	&self,
+	target: PduCount,
+	from: Option<PduCount>,
+	dir: Direction,
+) -> impl Stream<Item = Result<Key<'_>>> + Send + '_ {
 	let target = target.to_be_bytes();
 	let from = from
 		.map(|from| from.saturating_inc(dir))
@@ -233,9 +293,6 @@ pub fn relation_counts(
 			.right_stream(),
 	}
 	.ready_try_take_while(move |key| Ok(key.starts_with(&target)))
-	.take(limit)
-	.map_ok(|to_from| u64_from_u8(&to_from[8..16]))
-	.map_ok(PduCount::from_unsigned)
 }
 
 #[implement(Service)]

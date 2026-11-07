@@ -14,8 +14,7 @@ pub(super) async fn retroactively_fix_bad_data_from_roomuserid_joined(
 ) -> Result {
 	warn!("Retroactively fixing bad data from broken roomuserid_joined");
 
-	let db = &services.db;
-	let _cork = db.cork_and_sync();
+	let _cork = services.db.cork_and_sync();
 
 	// The room count is cheap beside the per-member work, so the total is exact.
 	let total = services.metadata.iter_ids().count().await;
@@ -74,6 +73,5 @@ pub(super) async fn retroactively_fix_bad_data_from_roomuserid_joined(
 
 	info!("Finished fixing");
 
-	db["global"].insert(b"retroactively_fix_bad_data_from_roomuserid_joined", []);
 	Ok(())
 }

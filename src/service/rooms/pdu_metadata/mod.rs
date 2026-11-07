@@ -26,6 +26,7 @@ pub struct Service {
 }
 
 struct Data {
+	eventid_pduid: Arc<Map>,
 	tofrom_relation: Arc<Map>,
 	relatesto_typed: Arc<Map>,
 	referencedevents: Arc<Map>,
@@ -72,6 +73,7 @@ impl crate::Service for Service {
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
 			db: Data {
+				eventid_pduid: args.db["eventid_pduid"].clone(),
 				tofrom_relation: args.db["tofrom_relation"].clone(),
 				relatesto_typed: args.db["relatesto_typed"].clone(),
 				referencedevents: args.db["referencedevents"].clone(),

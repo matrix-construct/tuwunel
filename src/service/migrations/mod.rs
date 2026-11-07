@@ -344,9 +344,12 @@ pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Resul
 	)
 	.await?;
 
-	if pending(services, "retroactively_fix_bad_data_from_roomuserid_joined").await? {
-		retroactively_fix_bad_data_from_roomuserid_joined(services).await?;
-	}
+	run_once(
+		services,
+		"retroactively_fix_bad_data_from_roomuserid_joined",
+		retroactively_fix_bad_data_from_roomuserid_joined,
+	)
+	.await?;
 
 	run_once(services, "fix_referencedevents_missing_sep", fix_referencedevents_missing_sep)
 		.await?;
@@ -364,26 +367,25 @@ pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Resul
 	run_once(services, "upgrade_legacy_mediaid_user", upgrade_legacy_mediaid_user).await?;
 	run_once(services, "remove_remote_media_userid", remove_remote_media_userid).await?;
 
-	if pending(services, "rebuild_roomid_tscount_pducount").await? {
-		rebuild_roomid_tscount_pducount(services).await?;
-	}
+	run_once(services, "rebuild_roomid_tscount_pducount", rebuild_roomid_tscount_pducount)
+		.await?;
 
-	if pending(services, "rebuild_relatesto_typed").await? {
+	run_once(services, "rebuild_relatesto_typed", async |services: &Services| {
 		services
 			.pdu_metadata
 			.rebuild_typed_relations()
-			.await?;
-
-		db["global"].insert("rebuild_relatesto_typed", []);
-	}
+			.await
+	})
+	.await?;
 
 	run_once(services, "migrate_profile_keys_to_useridprofilekey", migrate_profile_keys).await?;
 
-	if pending(services, "rebuild_thread_summaries").await? {
+	run_once(services, "rebuild_thread_summaries", async |services: &Services| {
 		rebuild_thread_summaries(services).await;
 
-		db["global"].insert("rebuild_thread_summaries", []);
-	}
+		Ok(())
+	})
+	.await?;
 
 	if pending(services, "clear_servername_status").await? {
 		clear_servername_status(services).await?;
