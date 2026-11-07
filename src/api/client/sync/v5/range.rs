@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, mem::take};
+use std::{collections::BTreeMap, iter::empty, mem::take};
 
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join4};
 use ruma::{
@@ -7,7 +7,7 @@ use ruma::{
 	events::{
 		AnyRawAccountDataEvent, AnyRoomAccountDataEvent, AnySyncEphemeralRoomEvent,
 		GlobalAccountDataEventType, ignored_user_list::IgnoredUserListEvent,
-		receipt::SyncReceiptEvent,
+		receipt::SyncReceiptEvent, room::member::MembershipState,
 	},
 	serde::Raw,
 };
@@ -179,6 +179,20 @@ async fn collect_room(
 		})
 		.map(Option::transpose)
 		.map_err(Failure::from);
+
+	if matches!(window_room.membership, Some(MembershipState::Leave | MembershipState::Ban)) {
+		let (payload, state_read) = delivery.map_ok(Option::unzip).await?;
+		let (shortstatehash, unread_state) = state_read.unwrap_or_default();
+		let shortstatehash = shortstatehash.unwrap_or(room.shortstatehash);
+
+		return assemble(
+			payload,
+			empty(),
+			PrivateReadEvents::new(),
+			Vec::new(),
+			(config_hash, Default::default(), shortstatehash, unread_state),
+		);
+	}
 
 	let public_receipts = public_receipts(sync_info, conn, room_id, room.roomsince, ignored)
 		.map_err(|error| Failure::new(Domain::PublicReceipt, error));

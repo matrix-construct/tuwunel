@@ -56,9 +56,10 @@ pub(super) fn collect_rooms<'a>(
 ) -> impl Future<Output = BTreeMap<OwnedRoomId, LeftRoom>> + Send + 'a {
 	services
 		.state_cache
-		.rooms_left_state(sender_user)
-		.ready_filter(|(room_id, _)| filter.room.matches(room_id))
-		.broad_filter_map(move |(room_id, _)| {
+		.rooms_departed(sender_user)
+		.ready_filter(|room_id| filter.room.matches(room_id))
+		.map(ToOwned::to_owned)
+		.broad_filter_map(move |room_id| {
 			handle_left_room(
 				services,
 				since,
@@ -99,7 +100,7 @@ async fn handle_left_room(
 ) -> Result<Option<LeftRoom>> {
 	let left_count = services
 		.state_cache
-		.get_left_count(room_id, sender_user)
+		.get_departure_count(room_id, sender_user)
 		.await
 		.unwrap_or(0);
 
@@ -118,6 +119,15 @@ async fn handle_left_room(
 		return Ok(None);
 	}
 
+	let forgotten = services
+		.state_cache
+		.is_forgotten(sender_user, room_id)
+		.await?;
+
+	if forgotten && since == 0 {
+		return Ok(None);
+	}
+
 	let is_not_found = services.metadata.exists(room_id).is_false();
 
 	let is_disabled = services.metadata.is_disabled(room_id);
@@ -127,11 +137,23 @@ async fn handle_left_room(
 	// Last, so a refusal on the same poll spares its reads.
 	let is_out_of_band = departed_out_of_band(services, room_id, sender_user, since);
 
-	if is_not_found
-		.or3(is_disabled, is_banned, is_out_of_band)
-		.await
+	if forgotten
+		|| is_not_found
+			.or3(is_disabled, is_banned, is_out_of_band)
+			.await
 	{
-		let event = stand_in_leave(services, room_id, sender_user)?;
+		let departure = forgotten
+			.then_async(async || {
+				own_departure(services, room_id, sender_user)
+					.await
+					.map(Event::into_format)
+			})
+			.await
+			.flatten();
+
+		let event =
+			departure.map_or_else(|| stand_in_leave(services, room_id, sender_user), Ok)?;
+
 		let state = state_after.wrap(StateEvents {
 			events: vec![trim_event_fields(event, filter.event_fields.as_deref())],
 		});

@@ -4,15 +4,15 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 218. Passing: **87.2%**
-  - ✅ `pass`: 190
-  - 🟨 `some`: 11
+- Test groups: 218. Passing: **87.6%**
+  - ✅ `pass`: 191
+  - 🟨 `some`: 10
   - 🟥 `fail`: 17
   - ⬛ `skip`: 0
 
-- Subtests: 606. Passing: **81.7%**
-  - ✅ `pass`: 495
-  - 🟥 `fail`: 103
+- Subtests: 606. Passing: **82.0%**
+  - ✅ `pass`: 497
+  - 🟥 `fail`: 101
   - ⬛ `skip`: 8
 
 ## All Top-Level Tests
@@ -188,7 +188,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | 15/0/0 | `RoomCreate` |
 | ✅ | 6/0/0 | `RoomCreationReportsEventsToMyself` |
 | ✅ | 9/0/0 | `RoomDeleteAlias` |
-| 🟨 | 6/2/0 | `RoomForget` |
+| ✅ | 8/0/0 | `RoomForget` |
 | ✅ | – | `RoomImageRoundtrip` |
 | ✅ | 10/0/0 | `RoomMembers` |
 | ✅ | – | `RoomMessagesLazyLoading` |

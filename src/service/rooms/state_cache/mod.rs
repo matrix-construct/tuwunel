@@ -37,7 +37,9 @@ use tuwunel_core::{
 	},
 	warn,
 };
-use tuwunel_database::{Deserialized, Ignore, IgnoreAll, Interfix, Map, SEP};
+use tuwunel_database::{
+	Deserialized, Ignore, IgnoreAll, Interfix, Map, SEP, deserialize_from_slice,
+};
 use tuwunel_matrix::{Event, Pdu, event::Owned};
 use update::EMPTY_INVITE_STATE;
 /// Input types for applying membership-cache transitions.
@@ -82,6 +84,9 @@ type AppServiceInRoomCache = RwLock<HashMap<OwnedRoomId, HashMap<String, bool>>>
 type StrippedState = Vec<Raw<AnyStrippedStateEvent>>;
 type StrippedStateEventItem = (OwnedRoomId, StrippedState);
 type SyncStateEventItem = (OwnedRoomId, Vec<Raw<AnySyncStateEvent>>);
+
+// CBOR tag 10 enclosing null, reserved for forgotten membership by this codec.
+const FORGOTTEN_STATE: &[u8] = b"\xCA\xF6";
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
@@ -600,20 +605,55 @@ pub async fn get_knock_count(&self, room_id: &RoomId, user_id: &UserId) -> Resul
 		.deserialized()
 }
 
-/// Returns the stream position last recorded for a user's current leave or ban.
+/// Returns the stream position of a retained leave or ban.
 ///
-/// Each leave or ban event for the user rewrites it, as does a forced state
-/// replay, so it neither counts departures nor marks the first. Missing or
-/// malformed index rows return an error.
+/// Forgotten rooms return a missing-row error even though their departure
+/// position survives for incremental sync. Storage and decoding failures are
+/// propagated.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn get_left_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {
+	let count = self.get_departure_count(room_id, user_id).await?;
+
+	if self.is_forgotten(user_id, room_id).await? {
+		return Err!(Request(NotFound("Room has been forgotten")));
+	}
+
+	Ok(count)
+}
+
+/// Returns the stream position of a current departure, including forgotten rooms.
+///
+/// Incremental sync uses this position to deliver pending departures.
+/// Forgotten departures retain their original position across state replay;
+/// missing or malformed count rows return an error.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub async fn get_departure_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {
 	let key = (room_id, user_id);
+
 	self.db
 		.roomuserid_leftcount
 		.qry(&key)
 		.await
 		.deserialized()
+}
+
+/// Tests whether a user's departure carries the forgotten marker.
+///
+/// Only the complete canonical marker matches; legacy state values do not.
+/// Missing rows return false and storage failures propagate.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub async fn is_forgotten(&self, user_id: &UserId, room_id: &RoomId) -> Result<bool> {
+	let key = (user_id, room_id);
+
+	self.db
+		.userroomid_leftstate
+		.qry(&key)
+		.await
+		.optional()
+		.map(|state| state.is_some_and(|state| state.as_ref().eq(FORGOTTEN_STATE)))
 }
 
 /// Returns the stream position last recorded for a user's current join.
@@ -787,12 +827,44 @@ pub fn rooms_knocked<'a>(
 
 /// Streams rooms for which a user's leave state is retained.
 ///
-/// Forgotten rooms have no leave row and therefore do not appear. Storage and
+/// Forgotten rooms are filtered by their marker value. Storage and
 /// decoding failures are skipped, and each room identifier borrows the cursor
 /// until its next poll.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn rooms_left<'a>(&'a self, user_id: &'a UserId) -> impl Stream<Item = &RoomId> + Send + 'a {
+	self.retained_left_rows(user_id).map(at!(0))
+}
+
+#[implement(Service)]
+fn retained_left_rows<'a>(
+	&'a self,
+	user_id: &'a UserId,
+) -> impl Stream<Item = (&RoomId, &[u8])> + Send + 'a {
+	let prefix = (user_id, Interfix);
+
+	self.db
+		.userroomid_leftstate
+		.stream_prefix_raw(&prefix)
+		.ignore_err()
+		.ready_filter(|(_, state)| *state != FORGOTTEN_STATE)
+		.map(|(key, state)| {
+			deserialize_from_slice(key).map(|(_, room_id): (Ignore, &RoomId)| (room_id, state))
+		})
+		.ignore_err()
+}
+
+/// Streams rooms with departure evidence, including forgotten rooms.
+///
+/// Incremental sync checks each room's departure position before emitting it.
+/// Identifiers borrow the cursor until its next poll; storage and key-decoding
+/// failures are skipped.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub fn rooms_departed<'a>(
+	&'a self,
+	user_id: &'a UserId,
+) -> impl Stream<Item = &RoomId> + Send + 'a {
 	let prefix = (user_id, Interfix);
 	self.db
 		.userroomid_leftstate
@@ -860,15 +932,12 @@ pub fn rooms_left_state<'a>(
 	&'a self,
 	user_id: &'a UserId,
 ) -> impl Stream<Item = SyncStateEventItem> + Send + 'a {
-	type KeyVal<'a> = (Key<'a>, Raw<Vec<Raw<AnySyncStateEvent>>>);
-	type Key<'a> = (&'a UserId, &'a RoomId);
-
-	let prefix = (user_id, Interfix);
-	self.db
-		.userroomid_leftstate
-		.stream_prefix(&prefix)
+	self.retained_left_rows(user_id)
+		.map(|(room_id, state)| {
+			deserialize_from_slice(state)
+				.map(|state: Raw<Vec<AnySyncStateEvent>>| (room_id.to_owned(), state))
+		})
 		.ignore_err()
-		.map(|((_, room_id), state): KeyVal<'_>| (room_id.to_owned(), state))
 		.map(|(room_id, state)| {
 			let state = state_events(&room_id, &state);
 
@@ -965,8 +1034,8 @@ fn without_superseded_membership(state: StrippedState, user_id: &UserId) -> Stri
 /// Returns the cached state for a room a user has left.
 ///
 /// Native state arrays and compatible single-event rows are normalized into
-/// one vector. Missing or unreadable rows return an error, while an unusable
-/// stored JSON shape is logged and becomes an empty vector.
+/// one vector. Forgotten, missing or unreadable rows return an error. An
+/// unusable stored JSON shape is logged and becomes an empty vector.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn left_state(
@@ -979,6 +1048,13 @@ pub async fn left_state(
 		.userroomid_leftstate
 		.qry(&key)
 		.await
+		.and_then(|state| {
+			if state.as_ref().eq(FORGOTTEN_STATE) {
+				return Err!(Request(NotFound("Room has been forgotten")));
+			}
+
+			Ok(state)
+		})
 		.deserialized()
 		.map(|state: Raw<Vec<AnyStrippedStateEvent>>| state_events(room_id, &state))
 }
@@ -1089,13 +1165,18 @@ pub async fn is_invited(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 
 /// Tests whether a user's leave state is currently retained for a room.
 ///
-/// Explicitly forgotten rooms have no row and return `false`. Missing rows and
+/// Explicitly forgotten rooms carry a marker and return `false`. Missing rows and
 /// storage failures are otherwise indistinguishable.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn is_left(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	let key = (user_id, room_id);
-	self.db.userroomid_leftstate.contains(&key).await
+
+	self.db
+		.userroomid_leftstate
+		.qry(&key)
+		.await
+		.is_ok_and(|state| state.as_ref().ne(FORGOTTEN_STATE))
 }
 
 /// Deletes a room's aggregate and paired membership indexes.

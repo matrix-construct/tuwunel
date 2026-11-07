@@ -36,6 +36,8 @@ use tuwunel_core::{
 use tuwunel_database::{Json, Map, Txn, keyval::ValBuf, serialize_key, serialize_val};
 use tuwunel_matrix::PduCount;
 
+use super::FORGOTTEN_STATE;
+
 /// Optional stripped room state attached to invite and knock transitions.
 ///
 /// `None` means the caller supplied no state, while `Some` can contain an empty
@@ -166,7 +168,7 @@ pub async fn update_membership(
 				.await?;
 		},
 		| MembershipState::Leave | MembershipState::Ban => {
-			self.handle_leave(room_id, user_id, count).await;
+			self.handle_leave(room_id, user_id, count).await?;
 
 			// A departure drops the room from the account-wide badge total.
 			if self.services.globals.user_is_local(user_id) {
@@ -427,19 +429,30 @@ async fn stripped_state_row(
 
 /// Forgets a user's retained leave state for a room.
 ///
-/// Only the paired leave rows are deleted; once-joined history and other room
-/// data remain untouched. Without a separate forget marker, absence of these
-/// rows is the durable forgotten state.
+/// The state value becomes a tombstone while its departure position remains
+/// available to incremental sync. Callers hold the room state lock so a rejoin
+/// cannot race this write; a room without a recorded departure stays absent.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
-pub fn forget(&self, room_id: &RoomId, user_id: &UserId) {
+pub async fn forget(&self, room_id: &RoomId, user_id: &UserId) -> Result {
 	let userroom_id = (user_id, room_id);
-	let roomuser_id = (room_id, user_id);
-	let mut txn = self.services.db.txn();
 
-	txn.del(&self.db.userroomid_leftstate, userroom_id);
-	txn.del(&self.db.roomuserid_leftcount, roomuser_id);
-	txn.execute();
+	if self
+		.get_departure_count(room_id, user_id)
+		.await
+		.optional()?
+		.is_none()
+	{
+		self.db.userroomid_leftstate.del(userroom_id);
+
+		return Ok(());
+	}
+
+	self.db
+		.userroomid_leftstate
+		.put_raw(userroom_id, FORGOTTEN_STATE);
+
+	Ok(())
 }
 
 #[implement(super::Service)]
@@ -651,11 +664,15 @@ async fn copy_predecessor_direct(
 
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
-async fn handle_leave(&self, room_id: &RoomId, user_id: &UserId, count: PduCount) {
+async fn handle_leave(&self, room_id: &RoomId, user_id: &UserId, count: PduCount) -> Result {
+	if self.is_forgotten(user_id, room_id).await? {
+		return Ok(());
+	}
+
 	self.mark_as_left(user_id, room_id, count);
 
 	if !self.services.globals.user_is_local(user_id) {
-		return;
+		return Ok(());
 	}
 
 	if self
@@ -678,9 +695,9 @@ async fn handle_leave(&self, room_id: &RoomId, user_id: &UserId, count: PduCount
 			.is_false();
 
 		if not_disabled.and(not_banned).await {
-			return;
+			return Ok(());
 		}
 	}
 
-	self.forget(room_id, user_id);
+	self.forget(room_id, user_id).await
 }

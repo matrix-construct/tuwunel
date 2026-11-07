@@ -15,6 +15,7 @@ use ruma::{
 		request::ExtensionRoomConfig,
 		response::{Extensions, Room as ResponseRoom},
 	},
+	events::room::member::MembershipState,
 };
 use tuwunel_core::{Result, apply, at, extract_variant, utils::BoolExt};
 use tuwunel_service::sync::Connection;
@@ -206,6 +207,11 @@ where
 	all_subscribed
 		.chain(rooms_explicit)
 		.chain(rooms_selected)
+		.filter(|room_id| {
+			window.get(*room_id).is_some_and(|room| {
+				!matches!(room.membership, Some(MembershipState::Leave | MembershipState::Ban))
+			})
+		})
 }
 
 fn implicit_match<'a, ListIter>(room: &WindowRoom, implicit: Option<&ListIter>) -> bool

@@ -7,7 +7,7 @@ use tuwunel_core::{
 	utils::BoolExt,
 };
 use tuwunel_matrix::pdu::PduBuilder;
-use tuwunel_service::Services;
+use tuwunel_service::{Services, sync::UnreadState};
 
 use self::{
 	client::{Client, register},
@@ -285,6 +285,92 @@ async fn unreadable_counted(services: &Services, base: &str) -> Result {
 		.expect_recorded(&read, &request)
 		.await
 		.map(drop)
+}
+
+/// Departure delivery and its retry retain unresolved required-state keys.
+///
+/// Restoring the PDU before leaving must not mark its state delivered, since
+/// the departure response carries only the user's membership.
+#[test]
+fn departure_preserves_unread_state_across_retry() -> Result {
+	boot("sync-v5-departure-unread-state", ["logging.enable=false"], departure_unread)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn departure_unread(services: &Services, base: &str) -> Result {
+	register(services, "departing", TOKEN).await?;
+	register(services, "remaining", BYSTANDER_TOKEN).await?;
+
+	let client = Client { services, base, token: TOKEN };
+	let remaining = Client { services, base, token: BYSTANDER_TOKEN };
+	let room = client
+		.create_room(&json!({"preset": "public_chat"}))
+		.await?;
+
+	remaining
+		.post(&format!("rooms/{room}/join"), &json!({}))
+		.await?;
+
+	let counted = client
+		.put_state(&room, CALL_MEMBER, COUNTED_KEY, &json!({"revision": 1}))
+		.await?;
+
+	client.send_text(&room, "first", "first").await?;
+	client
+		.send_text(&room, "second", "second")
+		.await?;
+
+	let pdu_id = services.timeline.get_pdu_id(&counted).await?;
+	let stored = replace_row(services, PDUS, pdu_id.as_bytes(), Some(UNREADABLE)).await?;
+	let request = sync_request("*");
+	let replies = Replies { client: &client, room: &room };
+	let initial = replies
+		.expect_next(None, &request, &[], "unread before departure")
+		.await?;
+
+	let unread = room_unread(services, &room).await?;
+
+	assert!(!unread.is_empty(), "failed PDU read recorded no retry obligation");
+
+	services.db[PDUS].insert(&pdu_id, stored);
+	client
+		.post(&format!("rooms/{room}/leave"), &json!({}))
+		.await?;
+
+	let left = client.sync(Some(&initial), &request).await?;
+
+	assert_eq!(left["rooms"][room.as_str()]["membership"], "leave");
+	assert_eq!(room_unread(services, &room).await?, unread, "departure discarded unread keys");
+
+	let retried = client.sync(Some(&initial), &request).await?;
+
+	assert_eq!(retried["rooms"][room.as_str()]["membership"], "leave");
+	assert_eq!(
+		room_unread(services, &room).await?,
+		unread,
+		"departure retry discarded unread keys"
+	);
+
+	Ok(())
+}
+
+async fn room_unread(services: &Services, room: &RoomId) -> Result<UnreadState> {
+	let keys = services.sync.list_loaded_connections().await;
+
+	assert_eq!(keys.len(), 1, "fixture opened an unexpected connection");
+
+	let connection = services
+		.sync
+		.get_loaded_connection(&keys[0])
+		.await?;
+
+	let connection = connection.lock().await;
+	let room = connection
+		.rooms
+		.get(room)
+		.ok_or_else(|| err!("connection omitted the room"))?;
+
+	Ok(room.unread_state.clone())
 }
 
 /// Overwrite one database row, or remove it, returning the value it held.

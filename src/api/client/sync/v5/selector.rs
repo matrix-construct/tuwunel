@@ -69,8 +69,9 @@ pub(super) async fn selector(
 		.broad_filter_map(async |room_id| {
 			services
 				.state_cache
-				.is_left(sender_user, room_id)
+				.get_departure_count(room_id, sender_user)
 				.await
+				.is_ok()
 				.then_some((room_id.clone(), Some(Leave)))
 		});
 
@@ -189,7 +190,7 @@ async fn matcher(
 			| Some(MembershipState::Leave | MembershipState::Ban) => Some(
 				services
 					.state_cache
-					.get_left_count(&room_id, sender_user)
+					.get_departure_count(&room_id, sender_user)
 					.await,
 			),
 			| _ => None,

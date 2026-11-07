@@ -24,6 +24,7 @@ pub(crate) async fn forget_room_route(
 ) -> Result<forget_room::v3::Response> {
 	let user_id = body.sender_user();
 	let room_id = &body.room_id;
+	let _state_lock = services.state.mutex.lock(room_id).await;
 
 	let joined = services.state_cache.is_joined(user_id, room_id);
 	let knocked = services.state_cache.is_knocked(user_id, room_id);
@@ -41,7 +42,10 @@ pub(crate) async fn forget_room_route(
 		.map_ok_or(false, is_matching!(MembershipState::Leave | MembershipState::Ban));
 
 	if left.or(left_or_banned).await {
-		services.state_cache.forget(room_id, user_id);
+		services
+			.state_cache
+			.forget(room_id, user_id)
+			.await?;
 	}
 
 	Ok(forget_room::v3::Response::new())

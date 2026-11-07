@@ -14,6 +14,7 @@ use tuwunel_core::{
 		future::{self, OptionFutureExt, ReadyBoolExt, ReadyEqExt},
 		option::OptionExt,
 	},
+	warn,
 };
 use tuwunel_service::{Services, rooms::state_cache::StrippedRoomState};
 
@@ -160,6 +161,16 @@ pub(super) async fn filter_room_meta(
 	SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
 	room_id: &RoomId,
 ) -> bool {
+	if services
+		.state_cache
+		.is_forgotten(sender_user, room_id)
+		.await
+		.inspect_err(|error| warn!(%sender_user, %room_id, %error, "Unreadable forgotten state"))
+		.unwrap_or(true)
+	{
+		return false;
+	}
+
 	let not_exists = services.metadata.exists(room_id).is_false();
 
 	let is_disabled = services.metadata.is_disabled(room_id);

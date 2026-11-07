@@ -1,14 +1,54 @@
 use futures::StreamExt;
+use minicbor_serde::tag::Required;
 use ruma::{
 	OwnedRoomId, event_id, events::room::member::MembershipState, room_id, serde::Raw, user_id,
 };
 use serde_json::{Value as JsonValue, json};
 use tuwunel_core::{Result, config::Figment};
-use tuwunel_database::Json;
+use tuwunel_database::{Cbor, Json, serialize_val};
 use tuwunel_matrix::PduCount;
 
-use super::MembershipUpdate;
+use super::{FORGOTTEN_STATE, MembershipUpdate};
 use crate::test_utils::{fixture, json_events, membership_update};
+
+#[test]
+fn forgotten_state_is_cbor_tag_ten_enclosing_null() -> Result {
+	let encoded = serialize_val(Cbor(Required::<10, Option<()>>::new(None)))?;
+
+	assert_eq!(encoded.as_slice(), FORGOTTEN_STATE);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn forgotten_state_requires_the_exact_marker() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let user = user_id!("@alice:localhost");
+	let room = room_id!("!forgotten:localhost");
+	let cache = &services.state_cache;
+
+	for state in [FORGOTTEN_STATE, b"\xCA\xF6\0", b"\xCA\xF6\xFF", b"null", b"[]"] {
+		services.db["userroomid_leftstate"].put_raw((user, room), state);
+		let forgotten = state == FORGOTTEN_STATE;
+
+		assert_eq!(cache.is_forgotten(user, room).await?, forgotten);
+		assert_eq!(cache.is_left(user, room).await, !forgotten);
+		assert_eq!(cache.rooms_left(user).count().await, usize::from(!forgotten));
+		assert_eq!(cache.rooms_departed(user).count().await, 1);
+	}
+
+	cache.forget(room, user).await?;
+	cache.forget(room, user).await?;
+	assert_eq!(cache.rooms_departed(user).count().await, 0);
+	assert!(!cache.is_left(user, room).await);
+	assert!(!cache.is_forgotten(user, room).await?);
+
+	Ok(())
+}
 
 /// A user's room lists hold only the rows keyed by that exact user ID, not
 /// those of a user whose server name extends hers.

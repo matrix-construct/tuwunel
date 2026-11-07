@@ -245,7 +245,7 @@ async fn departed_member_reads_the_state_after_their_leave_event() -> Result {
 			.await
 	);
 
-	services.state_cache.forget(room, member);
+	services.state_cache.forget(room, member).await?;
 
 	let forgotten = accessor
 		.user_visible_shortstatehash(member, room, None)

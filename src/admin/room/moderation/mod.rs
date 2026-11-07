@@ -88,9 +88,12 @@ async fn do_ban_room(services: &Services, room_id: &RoomId) {
 			warn!("Failed to leave room: {e}");
 		}
 
-		drop(state_lock);
-
-		services.state_cache.forget(room_id, user_id);
+		services
+			.state_cache
+			.forget(room_id, user_id)
+			.await
+			.inspect_err(|error| warn!(%user_id, %room_id, %error, "Failed to forget room"))
+			.ok();
 	}
 
 	// remove any local aliases, ignore errors
