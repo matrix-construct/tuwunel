@@ -2,7 +2,9 @@
 //!
 //! A fresh database is stamped current and a legacy database is walked
 //! through the named migrations, once the version and server name gates
-//! decide it is safe to touch.
+//! decide it is safe to touch. Each step stamps a marker once it has run, and
+//! removing the marker of a step safe to run twice schedules it for the next
+//! start.
 
 use std::{cmp::Ordering, time::Duration};
 
@@ -13,12 +15,14 @@ use tuwunel_core::{
 	Err, Result, err, format_small_string, info,
 	result::NotFound,
 	smallstr::SmallString,
-	utils::{BoolExt, ReadyExt, TryReadyExt},
+	smallvec::SmallVec,
+	utils::{BoolExt, IterStream, ReadyExt, TryReadyExt},
 	warn,
 };
 use tuwunel_database::Deserialized;
 
 use self::{
+	Rerun::{Clear, Refuse},
 	account_status::migrate_account_status,
 	clear_servername_status::clear_servername_status,
 	clear_state_local_error_memos::clear_state_local_error_memos,
@@ -45,8 +49,11 @@ use self::{
 };
 use crate::{
 	Services,
-	integrity::forbidden_names::{
-		Username, matched as forbidden_patterns, usernames as forbidden_usernames,
+	integrity::{
+		find as find_check,
+		forbidden_names::{
+			Username, matched as forbidden_patterns, usernames as forbidden_usernames,
+		},
 	},
 };
 
@@ -88,6 +95,14 @@ const SERVER_NAME_KEY: &[u8] = b"server_name";
 
 const FORCE_MIGRATION_DELAY: Duration = Duration::from_secs(15);
 
+const FIX_PDU_MISSING_ROOM_ID: &str = "fix_pdu_missing_room_id";
+
+const SPLIT_CONDUIT_HIGHLIGHT: &str = "split_conduit_highlight";
+
+const REBUILD_RELATESTO_TYPED: &str = "rebuild_relatesto_typed";
+
+const REBUILD_THREAD_SUMMARIES: &str = "rebuild_thread_summaries";
+
 const CLEAR_STATE_LOCAL_ERROR_MEMOS: &str = "clear_state_local_error_memos";
 
 const REBUILD_LIVE_THREAD_ACTIVITY: &str = "rebuild_live_thread_activity";
@@ -111,6 +126,34 @@ const FOREIGN_LINEAGE_MARKER: &[u8] = b"populate_userroomid_leftstate_table";
 /// Inline budget for a local user id assembled from a foreign localpart.
 type UserIdBuf = SmallString<[u8; 48]>;
 
+type Stamps = SmallVec<[Stamp; 1]>;
+
+/// A step stamp that [`rerun`] removed or found absent.
+///
+/// The admin command lists one per marker, so an operator sees which startup
+/// steps the next start runs again.
+#[derive(Clone, Copy)]
+pub struct Stamp {
+	/// The marker naming the step.
+	pub marker: &'static str,
+
+	/// Whether the marker was there to remove; without it the step was pending.
+	pub cleared: bool,
+}
+
+/// What [`rerun`] does for an integrity check.
+///
+/// Every check has an entry, so a check added without a decision on its repair
+/// fails the table's test.
+#[derive(Clone, Copy)]
+enum Rerun {
+	/// Clears these markers in order, whose steps are safe to run twice.
+	Clear(&'static [&'static str]),
+
+	/// Refuses, for this reason.
+	Refuse(&'static str),
+}
+
 /// The steps every database records as settled, whether they ran or it began
 /// current.
 ///
@@ -119,7 +162,7 @@ type UserIdBuf = SmallString<[u8; 48]>;
 /// place here, because a native database never runs it.
 pub(crate) const MARKERS: [&str; 21] = [
 	SHA256_MEDIA,
-	"fix_pdu_missing_room_id",
+	FIX_PDU_MISSING_ROOM_ID,
 	"fix_bad_double_separator_in_state_cache",
 	"retroactively_fix_bad_data_from_roomuserid_joined",
 	"fix_referencedevents_missing_sep",
@@ -128,9 +171,9 @@ pub(crate) const MARKERS: [&str; 21] = [
 	"upgrade_legacy_mediaid_user",
 	"remove_remote_media_userid",
 	"rebuild_roomid_tscount_pducount",
-	"rebuild_relatesto_typed",
+	REBUILD_RELATESTO_TYPED,
 	"migrate_profile_keys_to_useridprofilekey",
-	"rebuild_thread_summaries",
+	REBUILD_THREAD_SUMMARIES,
 	"clear_servername_status",
 	CLEAR_STATE_LOCAL_ERROR_MEMOS,
 	ADOPT_ACCOUNT_STATUS,
@@ -140,6 +183,69 @@ pub(crate) const MARKERS: [&str; 21] = [
 	redactions::MARKER,
 	REBUILD_LIVE_THREAD_ACTIVITY,
 ];
+
+/// How the repair of each integrity check is scheduled, or why it cannot be.
+///
+/// These repairs run from the startup ladder, so one is scheduled by clearing
+/// its step's stamp. Only a step safe to run twice lists its markers;
+/// clearing the summaries also clears the activity index, which the ladder
+/// rebuilds after them because a summary rebuild can empty a thread.
+static RERUNS: &[(&str, Rerun)] = &[
+	("schema", Refuse(NO_REPAIR)),
+	("columns", Refuse(NO_REPAIR)),
+	("unused-columns", Refuse(NO_REPAIR)),
+	("pdu-room-ids", Clear(&[FIX_PDU_MISSING_ROOM_ID])),
+	("joined-keys", Refuse(UNVERIFIED)),
+	("referenced-events", Refuse(UNVERIFIED)),
+	("read-receipts", Refuse(UNVERIFIED)),
+	("highlight-keys", Clear(&[SPLIT_CONDUIT_HIGHLIGHT])),
+	("media-uploader-keys", Refuse(UNVERIFIED)),
+	("remote-media-uploaders", Refuse(UNVERIFIED)),
+	("legacy-media-names", Refuse(MEDIA_RENAME)),
+	("media-files", Refuse(MEDIA_CHECKUP)),
+	("profile-values", Refuse(PROFILE_COPY)),
+	("sentinel-passwords", Refuse(UNVERIFIED)),
+	("forbidden-usernames", Refuse(NO_REPAIR)),
+	("forbidden-aliases", Refuse(NO_REPAIR)),
+	("joined-members", Refuse(UNVERIFIED)),
+	("foreign-moderation", Refuse(EVERY_START)),
+	("foreign-account-status", Refuse(ADOPTION)),
+	("foreign-email-bindings", Refuse(ADOPTION)),
+	("foreign-token-expiry", Refuse(ADOPTION)),
+	("timestamp-index", Refuse(UNVERIFIED)),
+	("relation-index", Clear(&[REBUILD_RELATESTO_TYPED])),
+	("unrecorded-redactions", Refuse(REDACTIONS)),
+	// Activity first, so a removal cut short leaves only the half safe alone.
+	(
+		"thread-summaries",
+		Clear(&[REBUILD_LIVE_THREAD_ACTIVITY, REBUILD_THREAD_SUMMARIES]),
+	),
+	("thread-activity", Clear(&[REBUILD_LIVE_THREAD_ACTIVITY])),
+	("short-ids", Refuse(OUTCOME_RECORD)),
+];
+
+const NO_REPAIR: &str = "it has no repair";
+
+const UNVERIFIED: &str = "a second run of its repair has not been verified safe";
+
+const EVERY_START: &str = "its repair keeps no stamp and runs at every start";
+
+const MEDIA_CHECKUP: &str =
+	"its repair keeps no stamp and runs at every start while media.startup_check is set";
+
+const MEDIA_RENAME: &str =
+	"a second run of its repair can lose media files when media.compat_file_link is set";
+
+const PROFILE_COPY: &str =
+	"its step also copies profile fields from older columns over the current ones";
+
+const ADOPTION: &str = "its step adopts a foreign database's state once, and a second run would \
+                        undo changes made here since";
+
+const REDACTIONS: &str =
+	"a second run of its repair could also record redactions this server refused";
+
+const OUTCOME_RECORD: &str = "its repair is gated by the outcome it records rather than a stamp";
 
 pub(crate) async fn migrations(services: &Services) -> Result {
 	if services.config.force_migration {
@@ -337,11 +443,11 @@ pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Resul
 
 	migrate_media(services).await?;
 
-	run_once(services, "fix_pdu_missing_room_id", migrate_pdus).await?;
+	run_once(services, FIX_PDU_MISSING_ROOM_ID, migrate_pdus).await?;
 
 	import_conduit_knocks(services).await?;
 
-	run_once(services, "split_conduit_highlight", split_conduit_highlight_counts).await?;
+	run_once(services, SPLIT_CONDUIT_HIGHLIGHT, split_conduit_highlight_counts).await?;
 
 	// The next two repairs fix a conduwuit-era roomuserid_joined bug Conduit
 	// never had; record them done for a Conduit database instead of running.
@@ -386,7 +492,7 @@ pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Resul
 	run_once(services, "rebuild_roomid_tscount_pducount", rebuild_roomid_tscount_pducount)
 		.await?;
 
-	run_once(services, "rebuild_relatesto_typed", async |services: &Services| {
+	run_once(services, REBUILD_RELATESTO_TYPED, async |services: &Services| {
 		services
 			.pdu_metadata
 			.rebuild_typed_relations()
@@ -396,7 +502,7 @@ pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Resul
 
 	run_once(services, "migrate_profile_keys_to_useridprofilekey", migrate_profile_keys).await?;
 
-	run_once(services, "rebuild_thread_summaries", async |services: &Services| {
+	run_once(services, REBUILD_THREAD_SUMMARIES, async |services: &Services| {
 		rebuild_thread_summaries(services).await;
 
 		Ok(())
@@ -623,6 +729,57 @@ async fn pending(services: &Services, marker: &'static str) -> Result<bool> {
 	}
 
 	Ok(pending)
+}
+
+/// Schedules the repair of an integrity check for the next start.
+///
+/// The repair is left to the startup ladder, which runs while nothing else
+/// writes: this removes the stamps of the steps carrying it, and the next start
+/// with migrations enabled runs them again. A check whose steps are not safe to
+/// run twice is refused with the reason, as is a database that cannot be written.
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn rerun(services: &Services, check: &str) -> Result<impl Iterator<Item = Stamp>> {
+	let markers = rerun_markers(check)?;
+
+	if services.db.is_read_only() {
+		return Err!("scheduling a repair needs a writable database");
+	}
+
+	// Every read precedes every removal, so a failed read schedules nothing.
+	let stamps: Stamps = markers
+		.iter()
+		.copied()
+		.stream()
+		.then(|marker| stamp(services, marker))
+		.try_collect()
+		.await?;
+
+	for marker in markers {
+		services.db["global"].remove(marker);
+	}
+
+	Ok(stamps.into_iter())
+}
+
+fn rerun_markers(name: &str) -> Result<&'static [&'static str]> {
+	let check = find_check(name).ok_or_else(|| err!("no integrity check is named {name}"))?;
+
+	let rerun = RERUNS
+		.iter()
+		.find(|(listed, _)| *listed == check.name)
+		.map_or(Refuse(NO_REPAIR), |&(_, rerun)| rerun);
+
+	match rerun {
+		| Clear(markers) => Ok(markers),
+		| Refuse(reason) => Err!("cannot schedule a repair for {name}: {reason}"),
+	}
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn stamp(services: &Services, marker: &'static str) -> Result<Stamp> {
+	let cleared = marker_present(services, marker).await?;
+
+	Ok(Stamp { marker, cleared })
 }
 
 /// Whether a migration step has stamped its marker.

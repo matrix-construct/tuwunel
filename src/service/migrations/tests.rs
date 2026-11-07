@@ -6,14 +6,14 @@ use tuwunel_database::{Json, serialize_key};
 use tuwunel_matrix::pdu::PduCount;
 
 use super::{
-	REBUILD_LIVE_THREAD_ACTIVITY, fresh, local_user_id, marker_present, migrate,
-	migrate_profile_keys::repair as repair_profile_value, moderation::copy as copy_moderation,
-	tally::Outcome,
+	MARKERS, REBUILD_LIVE_THREAD_ACTIVITY, REBUILD_THREAD_SUMMARIES, RERUNS, Stamp, fresh,
+	local_user_id, marker_present, migrate, migrate_profile_keys::repair as repair_profile_value,
+	moderation::copy as copy_moderation, rerun, rerun_markers, tally::Outcome,
 };
 use crate::{
 	Services,
 	integrity::{
-		Report,
+		Report, checks,
 		moderation::{Source, scan as moderation},
 		useridprofilekey_value::Finding,
 	},
@@ -252,6 +252,113 @@ async fn emptied_thread_unlisting_runs_once() -> Result {
 			.await;
 
 		assert_eq!(pointer.is_ok(), listed, "run {run}");
+	}
+
+	Ok(())
+}
+
+#[test]
+fn rerun_table_covers_every_check() {
+	let listed = RERUNS
+		.iter()
+		.map(|&(name, _)| name)
+		.sorted_unstable();
+
+	let registered = checks().map(|check| check.name).sorted_unstable();
+
+	assert!(listed.eq(registered), "every check needs exactly one entry in the rerun table");
+}
+
+#[test]
+fn rerun_unstamps_thread_activity_before_summaries() -> Result {
+	// A summary rebuild scheduled alone can empty a thread its activity index still lists.
+	let markers = rerun_markers("thread-summaries")?;
+
+	assert_eq!(markers, [REBUILD_LIVE_THREAD_ACTIVITY, REBUILD_THREAD_SUMMARIES]);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn rerun_schedules_the_summary_and_activity_rebuilds() -> Result {
+	let config = Figment::new().merge(("admin.room.create", false));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let [summaries, activity] = [REBUILD_THREAD_SUMMARIES, REBUILD_LIVE_THREAD_ACTIVITY];
+
+	fresh(services).await?;
+
+	// A summary the summary pass drops, still listed by the activity index.
+	set_root_latest(services, &json!({ "event_id": "$purged:localhost" }));
+	list_root(services);
+
+	let stamps = rerun_stamps(services, "thread-summaries").await?;
+
+	assert_eq!(stamps, [(activity, true), (summaries, true)]);
+
+	let stamps = rerun_stamps(services, "thread-summaries").await?;
+
+	assert_eq!(stamps, [(activity, false), (summaries, false)]);
+
+	migrate(services, false).await?;
+
+	let pointer = services.db["threadrootid_latestcount"]
+		.exists(&pdu_id(1))
+		.await;
+
+	assert!(pointer.is_err(), "the next start must unlist the emptied thread");
+	assert!(marker_present(services, summaries).await?);
+	assert!(marker_present(services, activity).await?);
+
+	Ok(())
+}
+
+async fn rerun_stamps(services: &Services, check: &str) -> Result<Vec<(&'static str, bool)>> {
+	rerun(services, check).await.map(|stamps| {
+		stamps
+			.map(|Stamp { marker, cleared }| (marker, cleared))
+			.collect()
+	})
+}
+
+#[tokio::test]
+async fn rerun_refuses_a_check_without_a_safe_step() -> Result {
+	let config = Figment::new().merge(("admin.room.create", false));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let refusals = [
+		("short-ids", "the outcome it records"),
+		("schema", "it has no repair"),
+		("legacy-media-names", "can lose media files"),
+		("unrecorded-redactions", "redactions this server refused"),
+		("foreign-token-expiry", "adopts a foreign database's state once"),
+		("no-such-check", "no integrity check is named"),
+	];
+
+	fresh(services).await?;
+
+	for (check, reason) in refusals {
+		let error = rerun(services, check)
+			.await
+			.err()
+			.map(|error| error.to_string());
+
+		assert!(
+			error
+				.as_deref()
+				.is_some_and(|error| error.contains(reason)),
+			"{check} must be refused for {reason:?}, not {error:?}"
+		);
+	}
+
+	for marker in MARKERS {
+		assert!(marker_present(services, marker).await?, "{marker} must stay stamped");
 	}
 
 	Ok(())

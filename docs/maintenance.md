@@ -145,6 +145,80 @@ useless for average users unless troubleshooting something low-level. If you
 would like to store nearly none at all, see the `rocksdb_max_log_files`
 config option.
 
+### Integrity checks
+
+Use the `!admin integrity` commands in the admin room to check your database
+for problems. The checks do not change the database.
+
+1. Run `!admin integrity list` to see every check and what it verifies.
+2. Run `!admin integrity check` to run every check available on the open
+   database. To run only certain checks, add their names after the command.
+   Add `--limit N` to show up to `N` findings from each check (`8` by default).
+
+A check reports `clean` when it finds no problems. Otherwise, it reports
+the number of findings and a sample, or `failed` with the error.
+
+Checks marked `(read-only open)` compare data across database columns.
+Writes during a check could look like defects, so these checks run only
+when the database is opened read-only. On a writable database,
+`!admin integrity check` skips them and lists them at the end. If you
+request one by name, it reports that it needs a read-only open.
+
+#### Checking with the server stopped
+
+To run the `(read-only open)` checks, stop the server and open its database
+read-only for the check.
+
+> [!WARNING]
+> Stop the server before opening its database read-only. RocksDB documents a
+> read-only open beside a running server as undefined behavior, and Tuwunel
+> does not refuse one.
+
+Before running the commands below, check your Tuwunel configuration file.
+An explicit setting takes precedence over `--read-only`. For example,
+`read_only = false` under `[global.rocksdb]` keeps the database writable.
+In that case, the read-only open checks are reported as skipped.
+
+For a systemd installation, run the following commands on the server host.
+The example uses the `tuwunel` service and user, and the configuration file
+`/etc/tuwunel/tuwunel.toml`. Adjust these to match your installation.
+
+```bash
+systemctl stop tuwunel
+sudo -u tuwunel tuwunel --config /etc/tuwunel/tuwunel.toml --read-only \
+	-O database_migrations=false --execute "integrity check" \
+	--execute "server shutdown"
+systemctl start tuwunel
+```
+
+The temporary process prints the findings, then
+`--execute "server shutdown"` shuts it down. The last command starts the
+normal service again. The `--read-only` option opens the database read-only,
+subject to the configuration override above. The
+`-O database_migrations=false` option skips startup migrations, which write
+to the database.
+
+If startup reports that the required local state memo invalidation has not
+run, start once with `database_migrations` enabled before trying again.
+
+#### Scheduling a repair
+
+To schedule a repair, run
+`!admin integrity repair NAME --yes-i-know-what-im-doing` in the admin room.
+Replace `NAME` with one of the supported check names below.
+
+- `pdu-room-ids`
+- `highlight-keys`
+- `relation-index`
+- `thread-summaries` (also rebuilds the thread activity index)
+- `thread-activity`
+
+The repair runs on the next start with `database_migrations` enabled,
+before the server begins serving. The command refuses to schedule a repair
+without the confirmation flag, on a database it cannot write, or for a
+check whose repair step is not safe to run twice. It gives the reason
+when it refuses.
+
 ### Backups
 
 Database backup, checkpoint, and restore procedures are documented on the

@@ -1,5 +1,6 @@
 mod check;
 mod list;
+mod repair;
 
 use clap::Subcommand;
 use tuwunel_core::Result;
@@ -22,5 +23,17 @@ pub(crate) enum IntegrityCommand {
 		/// The number of findings to show from each check.
 		#[arg(long, default_value_t = DEFAULT_LIMIT)]
 		limit: usize,
+	},
+
+	/// - Schedule a check's repair for the next start by clearing its stamp
+	///
+	/// Requires the `--yes-i-know-what-im-doing` flag.
+	Repair {
+		/// The check whose repair to schedule.
+		name: String,
+
+		/// Confirms clearing the stamp.
+		#[arg(long)]
+		yes_i_know_what_im_doing: bool,
 	},
 }

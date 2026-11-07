@@ -4,8 +4,8 @@ use clap::Parser;
 use ruma::room_id;
 
 use crate::{
-	admin::AdminCommand, debug::DebugCommand, federation::FederationCommand, media::MediaCommand,
-	query::QueryCommand,
+	admin::AdminCommand, debug::DebugCommand, federation::FederationCommand,
+	integrity::IntegrityCommand, media::MediaCommand, query::QueryCommand,
 };
 
 #[test]
@@ -145,6 +145,34 @@ fn query_feds_reject_zero_width() {
 	]);
 
 	assert!(error.contains("invalid value '0'"), "a survey width must be nonzero");
+}
+
+#[test]
+fn integrity_repair_parse() {
+	let command = ["argv[0] doesn't matter", "integrity", "repair", "relation-index"];
+
+	for (flag, confirmed) in [(None, false), (Some("--yes-i-know-what-im-doing"), true)] {
+		let argv: Vec<_> = command.iter().copied().chain(flag).collect();
+		let AdminCommand::Integrity(IntegrityCommand::Repair { name, yes_i_know_what_im_doing }) =
+			parse_ok(&argv)
+		else {
+			panic!("{argv:?} must parse as an integrity repair command");
+		};
+
+		assert_eq!(name, "relation-index", "{argv:?} parsed the wrong check");
+		assert_eq!(yes_i_know_what_im_doing, confirmed, "{argv:?} parsed the wrong confirmation");
+	}
+
+	let argv: Vec<_> = command
+		.iter()
+		.copied()
+		.chain(["--yes-i-want-to-do-this"])
+		.collect();
+
+	assert!(
+		parse_err(&argv).contains("unexpected argument"),
+		"only the exact confirmation flag may confirm"
+	);
 }
 
 fn get_help_inner(input: &str) {

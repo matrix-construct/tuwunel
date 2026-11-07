@@ -1,7 +1,6 @@
 #![expect(refining_impl_trait)]
 
 mod manager;
-pub(crate) mod migrations;
 mod once_services;
 mod service;
 pub mod services;
@@ -23,6 +22,7 @@ pub mod key_backups;
 pub mod login_ratelimit;
 pub mod media;
 pub mod membership;
+pub mod migrations;
 pub mod oauth;
 pub mod presence;
 pub mod profile;
