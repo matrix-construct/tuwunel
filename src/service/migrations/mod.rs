@@ -38,7 +38,9 @@ use self::{
 	remove_remote_media_userid::remove_remote_media_userid,
 	retroactively_fix_bad_data_from_roomuserid_joined::retroactively_fix_bad_data_from_roomuserid_joined,
 	split_conduit_highlight_counts::split_conduit_highlight_counts,
-	token_expiry::{migrate_token_expiry, restore_token_expiry},
+	token_expiry::{
+		Restore, migrate as migrate_token_expiry, restore as restore_token_expiry, restore_due,
+	},
 	upgrade_legacy_mediaid_user::upgrade_legacy_mediaid_user,
 };
 use crate::{
@@ -90,6 +92,10 @@ const CLEAR_STATE_LOCAL_ERROR_MEMOS: &str = "clear_state_local_error_memos";
 
 const REBUILD_LIVE_THREAD_ACTIVITY: &str = "rebuild_live_thread_activity";
 
+pub(crate) const ADOPT_ACCOUNT_STATUS: &str = "adopt_foreign_account_status";
+
+pub(crate) const ADOPT_EMAIL_BINDINGS: &str = "adopt_foreign_email_bindings";
+
 /// A marker written by a sibling conduwuit-lineage server but never by tuwunel.
 /// Its presence identifies a foreign database at a higher schema number even
 /// after tuwunel has stamped its own `server_name`, so a database opened by
@@ -121,8 +127,8 @@ pub(crate) const MARKERS: [&str; 21] = [
 	"rebuild_thread_summaries",
 	"clear_servername_status",
 	CLEAR_STATE_LOCAL_ERROR_MEMOS,
-	"adopt_foreign_account_status",
-	"adopt_foreign_email_bindings",
+	ADOPT_ACCOUNT_STATUS,
+	ADOPT_EMAIL_BINDINGS,
 	token_expiry::RESTORE_MARKER,
 	token_expiry::ADOPT_MARKER,
 	redactions::MARKER,
@@ -411,20 +417,26 @@ pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Resul
 
 	migrate_moderation(services).await?;
 
-	if pending(services, "adopt_foreign_account_status").await? {
-		migrate_account_status(services).await?;
-
-		db["global"].insert("adopt_foreign_account_status", []);
-	}
-
-	if pending(services, "adopt_foreign_email_bindings").await? {
-		migrate_email_bindings(services).await?;
-
-		db["global"].insert("adopt_foreign_email_bindings", []);
-	}
+	run_once(services, ADOPT_ACCOUNT_STATUS, migrate_account_status).await?;
+	run_once(services, ADOPT_EMAIL_BINDINGS, migrate_email_bindings).await?;
 
 	// The restore hands adopted rows back to the adoption, so it runs first.
-	until_finished(services, token_expiry::RESTORE_MARKER, restore_token_expiry).await?;
+	until_finished(services, token_expiry::RESTORE_MARKER, async |services: &Services| {
+		let tokenexpires = match restore_due(services)? {
+			| Restore::Finished => return Ok(true),
+			| Restore::Waiting => return Ok(false),
+			| Restore::Due(tokenexpires) => tokenexpires,
+		};
+
+		// Handed back before the walk, so however it ends the restored rows are
+		// the adoption's to own.
+		services.db["global"].remove(token_expiry::ADOPT_MARKER);
+		restore_token_expiry(services, &tokenexpires).await?;
+
+		Ok(true)
+	})
+	.await?;
+
 	until_finished(services, token_expiry::ADOPT_MARKER, migrate_token_expiry).await?;
 
 	run_once(services, redactions::MARKER, restore_redactions).await?;

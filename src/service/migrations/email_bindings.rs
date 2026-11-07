@@ -1,9 +1,14 @@
-use futures::StreamExt;
-use ruma::{MilliSecondsSinceUnixEpoch, ServerName, thirdparty::Medium};
-use tuwunel_core::{Result, debug_warn, err, info, warn};
+use std::sync::Arc;
 
-use super::local_user_id;
-use crate::{Services, threepid::canonicalize_email};
+use futures::TryStreamExt;
+use ruma::{MilliSecondsSinceUnixEpoch, thirdparty::Medium};
+use tuwunel_core::{Err, Result, debug_warn, err, info, warn};
+use tuwunel_database::Map;
+
+use crate::{
+	Services,
+	integrity::email_bindings::{Bindable, Row, bindable, column, rows},
+};
 
 /// Adopts the email addresses a foreign database binds in a column of its own.
 ///
@@ -12,31 +17,31 @@ use crate::{Services, threepid::canonicalize_email};
 /// is invisible here and the address looks unclaimed. Adopting it keeps the
 /// address answering for its owner, which is what an account authenticated by
 /// an identity provider carries instead of a password.
+pub(super) async fn migrate_email_bindings(services: &Services) -> Result {
+	let Some(localpart_email) = column(services)? else {
+		return Ok(());
+	};
+
+	adopt_email_bindings(services, &localpart_email).await
+}
+
+/// Adopts every binding an opened foreign column holds.
 ///
 /// Addresses are taken one at a time because two foreign addresses can fold
 /// onto one canonical key, and a concurrent pass would clear both through the
 /// in-use check before either wrote the reverse row.
-pub(super) async fn migrate_email_bindings(services: &Services) -> Result {
-	let Some(localpart_email) = services.db.open_cf("localpart_email")? else {
-		return Ok(());
-	};
-
-	let server_name = services.globals.server_name();
+pub(super) async fn adopt_email_bindings(
+	services: &Services,
+	localpart_email: &Arc<Map>,
+) -> Result {
 	let bound_at = MilliSecondsSinceUnixEpoch::now();
 	let cork = services.db.cork_and_sync();
 
-	let (adopted, skipped, unreadable) = localpart_email
-		.stream()
-		.fold((0_usize, 0_usize, 0_usize), async |acc, binding: Result<(&str, &str)>| {
-			let adopted = match binding {
-				| Err(e) => Err(e),
-				| Ok((localpart, address)) =>
-					adopt_one(services, server_name, bound_at, localpart, address).await,
-			};
-
-			tally_adoption(acc, adopted)
+	let (adopted, skipped, unreadable) = rows(services, localpart_email)
+		.try_fold((0_usize, 0_usize, 0_usize), async |acc, row| {
+			Ok(tally_adoption(acc, adopt_one(services, bound_at, row).await))
 		})
-		.await;
+		.await?;
 
 	drop(cork);
 
@@ -66,28 +71,29 @@ pub(super) async fn migrate_email_bindings(services: &Services) -> Result {
 /// error is a read that failed and must not be mistaken for any of them.
 async fn adopt_one(
 	services: &Services,
-	server_name: &ServerName,
 	bound_at: MilliSecondsSinceUnixEpoch,
-	localpart: &str,
-	address: &str,
+	row: Row,
 ) -> Result<bool> {
-	let Some(user_id) = local_user_id(localpart, server_name) else {
-		debug_warn!(%localpart, "skipping an unusable localpart");
-		return Ok(false);
+	let (user_id, address) = match row {
+		| Row::Binding { user_id, address, .. } => (user_id, address),
+		| Row::UnusableLocalpart { localpart } => {
+			debug_warn!(%localpart, "skipping an unusable localpart");
+			return Ok(false);
+		},
+		| Row::Unparsable { key } => {
+			let key = key.escape_ascii();
+
+			return Err!(Database("email binding {key} is not text"));
+		},
 	};
 
-	// A deactivated account still reserves its address, since neither server
-	// unhooks a binding on deactivation.
-	match services.db["userid_password"].get(&user_id).await {
-		| Ok(_) if user_id != services.globals.server_user => (),
-		| Ok(_) => return Ok(false),
-		| Err(e) if e.is_not_found() => return Ok(false),
-		| Err(e) => return Err(e),
-	}
-
-	let Ok(email_canon) = canonicalize_email(address) else {
-		debug_warn!(%localpart, "skipping an unusable address");
-		return Ok(false);
+	let email_canon = match bindable(services, &user_id, &address).await? {
+		| Bindable::NoAccount => return Ok(false),
+		| Bindable::Canonical(email_canon) => email_canon,
+		| Bindable::UnusableAddress => {
+			debug_warn!(localpart = %user_id.localpart(), "skipping an unusable address");
+			return Ok(false);
+		},
 	};
 
 	services

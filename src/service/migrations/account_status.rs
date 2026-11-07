@@ -1,18 +1,16 @@
 use std::sync::Arc;
 
 use futures::TryStreamExt;
-use ruma::{OwnedUserId, UserId};
-use tuwunel_core::{
-	Result, err, info,
-	result::NotFound,
-	utils::{ReadyExt, option::OptionExt, stream::BroadbandExt},
-	warn,
-};
-use tuwunel_database::Map;
+use ruma::OwnedUserId;
+use tuwunel_core::{Error, Result, err, info, warn};
+use tuwunel_database::{KeyBuf, Map};
 
-use super::local_user_id;
 use crate::{
 	Services,
+	integrity::account_status::{
+		Columns, Named, Subject, columns, deactivations, hash_kept, subjects,
+		unmarked_passwordless,
+	},
 	users::{PASSWORD_DISABLED, PASSWORD_SENTINEL},
 };
 
@@ -26,9 +24,9 @@ use crate::{
 /// authenticated one reads as deactivated. Adoption happens once, because
 /// local administration writes the same column afterward and a second pass
 /// would undo it.
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn migrate_account_status(services: &Services) -> Result {
-	let deactivated = services.db.open_cf("userid_deactivated")?;
-	let subjects = services.db.open_cf("openidsubject_localpart")?;
+	let Columns { deactivated, subjects } = columns(services)?;
 
 	if let Some(deactivated) = deactivated.as_ref() {
 		adopt_deactivations(services, deactivated).await?;
@@ -47,29 +45,24 @@ pub(super) async fn migrate_account_status(services: &Services) -> Result {
 /// account, restoring a login the origin had already withdrawn. An empty
 /// password is the same state spelled locally, and costs the foreign hash,
 /// which decides nothing for an account deactivated on both sides.
-async fn adopt_deactivations(services: &Services, deactivated: &Arc<Map>) -> Result {
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn adopt_deactivations(services: &Services, deactivated: &Arc<Map>) -> Result {
 	let userid_password = &services.db["userid_password"];
 	let cork = services.db.cork_and_sync();
 
-	let (adopted, unreadable) = deactivated
-		.keys::<&UserId>()
-		.map_ok(ToOwned::to_owned)
-		.broad_filter_map(async |account: Result<OwnedUserId>| {
-			let user_id = match account {
-				| Ok(user_id) => user_id,
-				| Err(e) => return Some(Err(e)),
+	// One account at a time, each decided against its row as it is written.
+	let (adopted, unreadable) = deactivations(services, deactivated)
+		.try_fold((0_usize, 0_usize), async |counts, account| {
+			let adoptable = match account {
+				| Ok(Named { user_id, .. }) => hash_kept(services, &user_id)
+					.await
+					.map(|kept| kept.then_some(user_id)),
+				| Err(key) => Err(unparsable("deactivated account", &key)),
 			};
 
-			match hash_empty(userid_password, &user_id).await {
-				| Ok(Some(false)) => Some(Ok(user_id)),
-				| Ok(_) => None,
-				| Err(e) => Some(Err(e)),
-			}
+			Ok(write_password(userid_password, PASSWORD_DISABLED, counts, adoptable))
 		})
-		.ready_fold((0_usize, 0_usize), |counts, account| {
-			write_password(userid_password, PASSWORD_DISABLED, counts, account)
-		})
-		.await;
+		.await?;
 
 	drop(cork);
 
@@ -94,37 +87,30 @@ async fn adopt_deactivations(services: &Services, deactivated: &Arc<Map>) -> Res
 /// The sentinel carries that meaning locally, leaving the account active with
 /// no password to verify against, while an account the foreign column marks
 /// deactivated keeps its deactivation.
-async fn adopt_passwordless(
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn adopt_passwordless(
 	services: &Services,
-	subjects: &Arc<Map>,
+	subjects_column: &Arc<Map>,
 	deactivated: Option<&Arc<Map>>,
 ) -> Result {
 	let userid_password = &services.db["userid_password"];
-	let server_name = services.globals.server_name();
 	let cork = services.db.cork_and_sync();
 
-	let (adopted, unreadable) = subjects
-		.stream()
-		.ready_filter_map(|subject: Result<(&str, &str)>| match subject {
-			| Ok((_, localpart)) => local_user_id(localpart, server_name).map(Ok),
-			| Err(e) => Some(Err(e)),
-		})
-		.broad_filter_map(async |account: Result<OwnedUserId>| {
-			let user_id = match account {
-				| Ok(user_id) => user_id,
-				| Err(e) => return Some(Err(e)),
+	// One account at a time, each decided against its row as it is written.
+	let (adopted, unreadable) = subjects(services, subjects_column)
+		.try_fold((0_usize, 0_usize), async |counts, subject| {
+			let adoptable = match subject {
+				| Subject::UnusableLocalpart { .. } => Ok(None),
+				| Subject::Account(Named { user_id, .. }) =>
+					unmarked_passwordless(services, deactivated, &user_id)
+						.await
+						.map(|due| due.then_some(user_id)),
+				| Subject::Unparsable { key } => Err(unparsable("provider subject", &key)),
 			};
 
-			match restorable(services, deactivated, &user_id).await {
-				| Ok(false) => None,
-				| Ok(true) => Some(Ok(user_id)),
-				| Err(e) => Some(Err(e)),
-			}
+			Ok(write_password(userid_password, PASSWORD_SENTINEL, counts, adoptable))
 		})
-		.ready_fold((0_usize, 0_usize), |counts, account| {
-			write_password(userid_password, PASSWORD_SENTINEL, counts, account)
-		})
-		.await;
+		.await?;
 
 	drop(cork);
 
@@ -138,60 +124,20 @@ async fn adopt_passwordless(
 		.ok_or_else(|| err!(Database("{unreadable} accounts could not be read")))
 }
 
-/// Reports whether the account reads as deactivated here without the foreign
-/// column marking it so.
-///
-/// The empty password a foreign database gives an account authenticated
-/// elsewhere is the byte pattern this server writes for a deactivation, so the
-/// foreign marker is the only thing separating them. A row neither side can
-/// read is reported rather than guessed at.
-async fn restorable(
-	services: &Services,
-	deactivated: Option<&Arc<Map>>,
-	user_id: &UserId,
-) -> Result<bool> {
-	let userid_password = &services.db["userid_password"];
-	let passwordless = hash_empty(userid_password, user_id)
-		.await?
-		.is_some_and(|empty| empty);
-
-	let marked = match deactivated
-		.map_async(|deactivated| deactivated.exists(user_id))
-		.await
-	{
-		| None => false,
-		| Some(Ok(())) => true,
-		| Some(Err(e)) if e.is_not_found() => false,
-		| Some(Err(e)) => return Err(e),
-	};
-
-	Ok(passwordless && !marked)
-}
-
-/// Whether the account's stored password is empty, or `None` when it has no
-/// row at all.
-///
-/// Both folds need the three states kept apart: a read failure is neither an
-/// active account nor a deactivated one, and mistaking it for either is how a
-/// pass that runs once leaves an account in the wrong state for good.
-async fn hash_empty(userid_password: &Arc<Map>, user_id: &UserId) -> Result<Option<bool>> {
-	userid_password
-		.get(user_id)
-		.await
-		.map(|hash| hash.is_empty())
-		.optional()
-}
-
-/// Writes one adopted account, tallying it against the rows that could not be
+/// Writes one adoptable account, tallying it against the rows that could not be
 /// read.
+///
+/// An account the adoption leaves alone is not counted, while a row that could
+/// not be read is logged and withholds the marker.
 fn write_password(
 	userid_password: &Arc<Map>,
 	password: &str,
 	(adopted, unreadable): (usize, usize),
-	account: Result<OwnedUserId>,
+	account: Result<Option<OwnedUserId>>,
 ) -> (usize, usize) {
 	match account {
-		| Ok(user_id) => {
+		| Ok(None) => (adopted, unreadable),
+		| Ok(Some(user_id)) => {
 			userid_password.insert(&user_id, password);
 
 			(adopted.saturating_add(1), unreadable)
@@ -202,4 +148,10 @@ fn write_password(
 			(adopted, unreadable.saturating_add(1))
 		},
 	}
+}
+
+fn unparsable(row: &str, key: &KeyBuf) -> Error {
+	let key = key.escape_ascii();
+
+	err!(Database("{row} {key} could not be read"))
 }

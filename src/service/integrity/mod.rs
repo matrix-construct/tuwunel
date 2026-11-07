@@ -6,7 +6,9 @@
 //! are a caller like any other: they consume these streams and write what a
 //! finding calls for, re-deciding anything a write may have changed.
 
+pub mod account_status;
 pub mod columns;
+pub mod email_bindings;
 pub mod forbidden_names;
 pub mod joined_members;
 pub mod mediaid_user;
@@ -24,6 +26,7 @@ pub mod schema;
 mod tests;
 pub mod thread_summaries;
 pub mod threadrootid_latestcount;
+pub mod token_expiry;
 pub mod userid_password;
 pub mod useridprofilekey_value;
 pub mod userroomid_highlightcount;
@@ -66,6 +69,9 @@ static CHECKS: &[&Check] = &[
 	&forbidden_names::ALIASES,
 	&joined_members::CHECK,
 	&moderation::CHECK,
+	&account_status::CHECK,
+	&email_bindings::CHECK,
+	&token_expiry::CHECK,
 	&roomid_tscount_pducount::CHECK,
 	&relatesto_typed::CHECK,
 	&redactions::CHECK,

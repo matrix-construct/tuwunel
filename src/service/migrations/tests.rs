@@ -1,4 +1,4 @@
-use futures::TryStreamExt;
+use futures::{Stream, TryStreamExt};
 use ruma::{MilliSecondsSinceUnixEpoch, owned_user_id, server_name, uint, user_id};
 use serde_json::{Value, json};
 use tuwunel_core::{Result, config::Figment, itertools::Itertools, result::NotFound};
@@ -20,6 +20,8 @@ use crate::{
 	test_utils::{fixture, pdu_id},
 	users::Moderation,
 };
+
+mod adoption;
 
 #[test]
 fn localpart_becomes_a_local_user_id() {
@@ -108,7 +110,7 @@ async fn moderation_copy_clears_the_finding() -> Result {
 	suspended.raw_put("@dave:localhost", Json(json!({ "when": 2 })));
 	suspended.raw_put("@erin:localhost", Json(&copy));
 
-	assert_eq!(kinds(services, &source).await?, [
+	assert_eq!(kinds(moderation(services, &source)).await?, [
 		"uncopied-entry",
 		"uncopied-entry",
 		"unparsable-entry"
@@ -118,7 +120,7 @@ async fn moderation_copy_clears_the_finding() -> Result {
 
 	let copied = serde_json::to_vec(&copy)?;
 
-	assert_eq!(kinds(services, &source).await?, ["unparsable-entry"]);
+	assert_eq!(kinds(moderation(services, &source)).await?, ["unparsable-entry"]);
 	assert_eq!(&*suspended.get("@alice:localhost").await?, copied);
 	assert_eq!(&*suspended.get("@dave:localhost").await?, copied);
 	assert!(
@@ -131,11 +133,15 @@ async fn moderation_copy_clears_the_finding() -> Result {
 	Ok(())
 }
 
-/// The kinds of finding the moderation check reports for one column, sorted.
+/// The kinds of finding a check's stream yields, sorted.
 ///
-/// Its walk fans out, so the order it yields them in is arbitrary.
-async fn kinds(services: &Services, source: &Source) -> Result<Vec<&'static str>> {
-	moderation(services, source)
+/// A walk that fans out yields its findings in no fixed order.
+async fn kinds<S, F>(findings: S) -> Result<Vec<&'static str>>
+where
+	S: Stream<Item = Result<F>>,
+	F: Report,
+{
+	findings
 		.map_ok(|finding| finding.kind())
 		.try_collect()
 		.await

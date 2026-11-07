@@ -2,22 +2,27 @@
 //!
 //! Conduit leaves events without their room and last-read markers in the
 //! highlight-count column, and other origins leave redactions unrecorded and
-//! moderation in columns of their own.
+//! moderation and token expiries in columns of their own.
 
-use ruma::{EventId, RoomId, event_id, room_id, user_id};
+use ruma::{DeviceId, EventId, RoomId, UserId, device_id, event_id, room_id, user_id};
 use serde_json::{Value, json};
 use tuwunel_core::{Err, Result, config::Figment};
-use tuwunel_database::Json;
+use tuwunel_database::{Json, KeyBuf, deserialize_from_slice, serialize_key};
 
 use super::{count, present, room_pdu_id, run, seed_room_state, store, walk};
 use crate::{
 	integrity::{
 		Report,
 		moderation::{Finding as Moderation, entry as moderation_entry, finding as judge},
+		token_expiry::{Token, classify as classify_token},
 	},
 	migrations::{fresh, migrate},
 	test_utils::{fixture, pdu_id, pdu_json, with_field},
 };
+
+const EXPIRES: u64 = 1_700_000_000;
+
+type TokenValue<'a> = (&'a UserId, &'a DeviceId, Option<u64>);
 
 #[tokio::test]
 async fn pdu_room_ids_repair_clears_the_finding() -> Result {
@@ -295,6 +300,69 @@ fn moderation_entries_classify_against_their_copy() -> Result {
 	};
 
 	assert_eq!(moderation.by, fallback);
+
+	Ok(())
+}
+
+#[test]
+fn foreign_token_values_read_as_non_expiring() -> Result {
+	let (foreign, past) = (foreign_token()?, native_token(Some(1))?);
+	let (owner, device, carried): TokenValue<'_> = deserialize_from_slice(&foreign)?;
+
+	assert_eq!(owner, "@alice:localhost");
+	assert_eq!(device, "AAAAAAAAAA");
+	assert_eq!(carried, None, "a row without the tail must read as non-expiring");
+
+	let (.., carried): TokenValue<'_> = deserialize_from_slice(&past)?;
+
+	assert_eq!(carried, Some(1), "an expiry already past is carried, not clamped");
+
+	Ok(())
+}
+
+fn foreign_token() -> Result<KeyBuf> {
+	serialize_key((user_id!("@alice:localhost"), device_id!("AAAAAAAAAA")))
+}
+
+fn native_token(expires: Option<u64>) -> Result<KeyBuf> {
+	serialize_key((user_id!("@alice:localhost"), device_id!("AAAAAAAAAA"), expires))
+}
+
+#[test]
+fn token_values_classify_against_the_recorded_expiry() -> Result {
+	let classify = |stored: &[u8], expires: u64| classify_token("token", stored, expires);
+
+	let Token::Adoptable(held) = classify(&foreign_token()?, EXPIRES) else {
+		return Err!("a foreign value is adoptable");
+	};
+
+	assert_eq!((held.token.as_str(), held.user_id.as_str()), ("token", "@alice:localhost"));
+	assert_eq!(held.device_id, "AAAAAAAAAA");
+	assert!(matches!(classify(&native_token(Some(EXPIRES))?, EXPIRES), Token::Adopted(_)));
+
+	// A token issued after the import must never be given a stale expiry.
+	assert!(matches!(classify(&native_token(None)?, EXPIRES), Token::Kept));
+	assert!(matches!(classify(&native_token(Some(1))?, EXPIRES), Token::Kept));
+
+	// The expiry's own bytes can hold a separator.
+	let separated = 0x00FF_00FF_u64;
+
+	assert!(matches!(
+		classify(&native_token(Some(separated))?, separated),
+		Token::Adopted(_)
+	));
+
+	// A release build reads an expiry from its first eight bytes and a value with
+	// no separator as an empty device, so both passes do too.
+	let extra = [native_token(Some(EXPIRES))?.as_slice(), b"\xFFjunk"].concat();
+	let short = [native_token(None)?.as_slice(), b"\x01\x02"].concat();
+	let led = [native_token(None)?.as_slice(), b"\xFF\x01"].concat();
+
+	assert!(matches!(classify(&extra, EXPIRES), Token::Adopted(_)));
+	assert!(matches!(classify(&led, EXPIRES), Token::Kept));
+	assert!(matches!(classify(b"@alice:localhost", EXPIRES), Token::Kept));
+	assert!(matches!(classify(&short, EXPIRES), Token::UnparsableValue));
+	assert!(matches!(classify(b"not a user\xFFAAAAAAAAAA", EXPIRES), Token::UnparsableValue));
 
 	Ok(())
 }
