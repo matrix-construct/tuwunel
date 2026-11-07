@@ -45,7 +45,7 @@ use tuwunel_core::Result;
 pub use self::id::MapId;
 pub(crate) use self::options::{
 	cache_iter_options_default, cache_read_options_default, iter_options_default,
-	read_options_default, write_options_default,
+	read_options_default, scan_options_default, write_options_default,
 };
 use self::watch::Watch;
 /// Stream extensions for batched map reads.
@@ -60,7 +60,7 @@ use crate::{Engine, util::map_err};
 /// A map retains its column-family handle and the engine that owns it. Point
 /// operations reuse read and write options prepared when the map opens.
 pub struct Map {
-	name: &'static str,
+	name: Box<str>,
 	watch: Watch,
 	cf: Arc<ColumnFamily>,
 	engine: Arc<Engine>,
@@ -75,9 +75,9 @@ impl Map {
 	/// The returned map keeps the engine alive for at least as long as its
 	/// column-family handle. Its read and write options are initialized from
 	/// the engine configuration.
-	pub(crate) fn open(engine: &Arc<Engine>, name: &'static str) -> Result<Arc<Self>> {
+	pub(crate) fn open(engine: &Arc<Engine>, name: &str) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
-			name,
+			name: name.into(),
 			watch: Watch::default(),
 			cf: open::open(engine, name),
 			engine: engine.clone(),
@@ -141,10 +141,9 @@ impl Map {
 
 	/// Returns the column-family name of this map.
 	///
-	/// The name is fixed when the map opens and lives for the duration of the
-	/// process.
+	/// The name is fixed when the map opens.
 	#[inline]
-	pub fn name(&self) -> &str { self.name }
+	pub fn name(&self) -> &str { &self.name }
 
 	/// Returns the engine that owns this map.
 	///

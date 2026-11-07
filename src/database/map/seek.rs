@@ -5,10 +5,10 @@ use rocksdb::{Direction, ReadOptions};
 use tokio::task::consume_budget;
 use tuwunel_core::Result;
 
-use super::{Map, cache_iter_options_default, iter_options_default};
+use super::{Map, cache_iter_options_default, iter_options_default, scan_options_default};
 use crate::{
 	pool::{Seek, into_send_seek},
-	stream,
+	stream::State,
 };
 
 /// Builds a forward or reverse map stream from an optional raw seek key.
@@ -23,7 +23,7 @@ pub(super) fn seek_stream<'a, C, T>(
 	from: Option<&[u8]>,
 ) -> impl Stream<Item = Result<T>> + Send + use<'a, C, T>
 where
-	C: From<stream::State<'a>> + Stream<Item = Result<T>> + Send,
+	C: From<State<'a>> + Stream<Item = Result<T>> + Send,
 {
 	seek_stream_bounded::<C, T>(map, dir, from, None)
 }
@@ -39,10 +39,11 @@ pub(super) fn seek_stream_bounded<'a, C, T>(
 	to: Option<&[u8]>,
 ) -> impl Stream<Item = Result<T>> + Send + use<'a, C, T>
 where
-	C: From<stream::State<'a>> + Stream<Item = Result<T>> + Send,
+	C: From<State<'a>> + Stream<Item = Result<T>> + Send,
 {
 	let opts = bounded_options(iter_options_default(&map.engine), to);
-	let state = stream::State::new(map, opts);
+	let state = State::new(map, opts);
+
 	if is_cached(map, dir, from, to) {
 		let state = init(state, dir, from);
 		return consume_budget()
@@ -52,6 +53,31 @@ where
 			.left_stream();
 	}
 
+	pool_seek::<C, T>(map, state, dir, from).right_stream()
+}
+
+/// Builds a forward stream over a whole column for an integrity walk.
+///
+/// The walk reads storage rather than cache, so its seek always ships to the
+/// blocking pool.
+pub(super) fn scan_stream<'a, C, T>(map: &'a Arc<Map>) -> impl Stream<Item = Result<T>> + Send
+where
+	C: From<State<'a>> + Stream<Item = Result<T>> + Send,
+{
+	let state = State::new(map, scan_options_default(&map.engine));
+
+	pool_seek::<C, T>(map, state, Direction::Forward, None)
+}
+
+fn pool_seek<'a, C, T>(
+	map: &'a Arc<Map>,
+	state: State<'a>,
+	dir: Direction,
+	from: Option<&[u8]>,
+) -> impl Stream<Item = Result<T>> + Send + use<'a, C, T>
+where
+	C: From<State<'a>> + Stream<Item = Result<T>> + Send,
+{
 	let seek = Seek {
 		map: map.clone(),
 		state: into_send_seek(state),
@@ -66,7 +92,6 @@ where
 		.ok_into::<C>()
 		.into_stream()
 		.try_flatten()
-		.right_stream()
 }
 
 /// Tests whether an initial seek can complete from block cache.
@@ -81,7 +106,7 @@ where
 )]
 fn is_cached(map: &Arc<Map>, dir: Direction, from: Option<&[u8]>, to: Option<&[u8]>) -> bool {
 	let opts = bounded_options(cache_iter_options_default(&map.engine), to);
-	let state = init(stream::State::new(map, opts), dir, from);
+	let state = init(State::new(map, opts), dir, from);
 
 	!state.is_incomplete()
 }
@@ -98,7 +123,7 @@ fn bounded_options(mut opts: ReadOptions, to: Option<&[u8]>) -> ReadOptions {
 ///
 /// The optional raw key is interpreted as a lower bound when moving forward and
 /// an upper bound when moving backward.
-fn init<'a>(state: stream::State<'a>, dir: Direction, from: Option<&[u8]>) -> stream::State<'a> {
+fn init<'a>(state: State<'a>, dir: Direction, from: Option<&[u8]>) -> State<'a> {
 	match dir {
 		| Direction::Forward => state.init_fwd(from),
 		| Direction::Reverse => state.init_rev(from),

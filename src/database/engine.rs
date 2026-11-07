@@ -36,7 +36,7 @@ use rocksdb::{
 	AsColumnFamilyRef, BoundColumnFamily, DBCommon, DBWithThreadMode, FlushOptions,
 	MultiThreaded, WaitForCompactOptions, WriteOptions, checkpoint::Checkpoint,
 };
-use tuwunel_core::{Err, Result, debug, implement, info, warn};
+use tuwunel_core::{Err, Result, debug, err, implement, info, warn};
 
 use crate::{
 	Context, Map,
@@ -242,6 +242,27 @@ impl Engine {
 	#[inline]
 	#[must_use]
 	pub fn has_cf(&self, name: &str) -> bool { self.db.cf_handle(name).is_some() }
+
+	/// Lists every column family open on this database.
+	///
+	/// The order is unspecified. A family this build does not describe is
+	/// included, as is the unused `default` family.
+	#[inline]
+	pub fn column_names(&self) -> impl Iterator<Item = String> + Send + use<> {
+		self.db.cf_names().into_iter()
+	}
+
+	/// Reports the bytes a column family's table files occupy.
+	///
+	/// Rows still in memtables are not counted. An unknown family is an error.
+	pub fn column_size(&self, name: &str) -> Result<u64> {
+		let cf = self
+			.db
+			.cf_handle(name)
+			.ok_or_else(|| err!(Database("column family {name:?} is not open")))?;
+
+		self.property_integer(&cf, c"rocksdb.total-sst-files-size")
+	}
 
 	/// Returns the latest RocksDB sequence number.
 	///

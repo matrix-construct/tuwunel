@@ -5,7 +5,7 @@ use rocksdb::Direction;
 use serde::Deserialize;
 use tuwunel_core::{Result, implement};
 
-use super::seek::seek_stream;
+use super::seek::{scan_stream, seek_stream};
 use crate::{keyval, keyval::KeyVal, stream};
 
 /// Streams deserialized key-value entries in ascending database order.
@@ -32,4 +32,22 @@ where
 #[tracing::instrument(skip(self), fields(%self), level = "trace")]
 pub fn raw_stream(self: &Arc<Self>) -> impl Stream<Item = Result<KeyVal<'_>>> + Send {
 	seek_stream::<stream::Items<'_>, _>(self, Direction::Forward, None)
+}
+
+/// Streams raw key-value entries for a whole-column integrity walk.
+///
+/// Unlike [`Self::raw_stream`], every block read verifies its checksum and none
+/// enters the block cache, so a walk of a large column on a serving database
+/// evicts nothing. Yielded keys and values borrow cursor storage and must not be
+/// retained across another poll.
+#[implement(super::Map)]
+#[tracing::instrument(
+	level = "trace",
+	skip(self),
+	fields(
+		%self,
+	),
+)]
+pub fn raw_scan(self: &Arc<Self>) -> impl Stream<Item = Result<KeyVal<'_>>> + Send {
+	scan_stream::<stream::Items<'_>, _>(self)
 }

@@ -189,8 +189,12 @@ where
 	Ok((deserialize_key::<K>(kv.0)?, deserialize_val::<V>(kv.1)?))
 }
 
+/// Decodes one raw key into its structured form.
+///
+/// A caller walking raw rows uses this to tell a key it cannot read from a
+/// failed cursor, which a typed stream reports as the same error.
 #[inline]
-pub(crate) fn deserialize_key<'a, K>(key: Key<'a>) -> Result<Key<'a, K>>
+pub fn deserialize_key<'a, K>(key: Key<'a>) -> Result<Key<'a, K>>
 where
 	K: Deserialize<'a>,
 {

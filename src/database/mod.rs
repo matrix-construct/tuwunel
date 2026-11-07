@@ -39,7 +39,7 @@ pub use self::{
 	deserialized::Deserialized,
 	engine::Engine,
 	handle::Handle,
-	keyval::{KeyBuf, KeyVal, Slice, serialize_key, serialize_val},
+	keyval::{KeyBuf, KeyVal, Slice, deserialize_key, serialize_key, serialize_val},
 	map::{Get, Map, MapId, Qry, compact},
 	ser::{Cbor, Interfix, Json, SEP, Separator, serialize, serialize_to, serialize_to_vec},
 	txn::{Txn, TxnError},
@@ -106,9 +106,9 @@ impl Database {
 	/// Opens an existing column family outside the configured map catalog.
 	///
 	/// Migration readers use this for foreign database families that are not
-	/// described by `MAPS`. An absent family returns `None` without creating
-	/// it.
-	pub fn open_cf(&self, name: &'static str) -> Result<Option<Arc<Map>>> {
+	/// described by `MAPS`, and an integrity walk for every family at all. An
+	/// absent family returns `None` without creating it.
+	pub fn open_cf(&self, name: &str) -> Result<Option<Arc<Map>>> {
 		self.engine
 			.has_cf(name)
 			.then(|| Map::open(&self.engine, name))
@@ -130,6 +130,18 @@ impl Database {
 	/// Names follow the catalog's sorted map order. The iterator borrows this
 	/// database for the duration of the traversal.
 	pub fn keys(&self) -> impl Iterator<Item = &MapsKey> + Send + '_ { self.maps.keys() }
+
+	/// Iterates over the open column families this build's catalog omits.
+	///
+	/// Such a family holds data from another server or an older schema. The
+	/// iterator owns its names, in no particular order, and skips RocksDB's
+	/// unused `default` family.
+	pub fn undescribed(&self) -> impl Iterator<Item = String> + Send + '_ {
+		self.engine
+			.column_names()
+			.filter(|name| name != "default")
+			.filter(|name| !self.maps.contains_key(name.as_str()))
+	}
 
 	#[inline]
 	#[must_use]

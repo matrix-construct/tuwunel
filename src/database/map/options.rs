@@ -25,6 +25,19 @@ pub(crate) fn iter_options_default(engine: &Arc<Engine>) -> ReadOptions {
 	options
 }
 
+/// Builds the options for a whole-column integrity walk.
+///
+/// Checksums are verified whatever the engine setting, and the walk leaves the
+/// block cache as it found it.
+#[inline]
+pub(crate) fn scan_options_default(engine: &Arc<Engine>) -> ReadOptions {
+	let mut options = iter_options_default(engine);
+
+	options.set_verify_checksums(true);
+	options.fill_cache(false);
+	options
+}
+
 /// Builds point-read options restricted to block cache.
 ///
 /// The read neither fills cache nor falls through to storage.
