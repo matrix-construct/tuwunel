@@ -94,62 +94,53 @@ default = [
 	"systemd",
 	"url_preview",
 	"zstd_compression",
+	"tuwunel-admin/default",
+	"tuwunel-api/default",
+	"tuwunel-api-admin?/default",
+	"tuwunel-api-client/default",
+	"tuwunel-api-federation/default",
+	"tuwunel-api-mas?/default",
+	"tuwunel-api-oidc?/default",
+	"tuwunel-core/default",
+	"tuwunel-database/default",
+	"tuwunel-matrix/default",
+	"tuwunel-router/default",
+	"tuwunel-service/default",
 ]
 
 brotli_compression = [
-	"tuwunel-admin/brotli_compression",
 	"tuwunel-api/brotli_compression",
 	"tuwunel-core/brotli_compression",
 	"tuwunel-router/brotli_compression",
 	"tuwunel-service/brotli_compression",
 ]
 bzip2_compression = [
-	"tuwunel-admin/bzip2_compression",
-	"tuwunel-api/bzip2_compression",
 	"tuwunel-database/bzip2_compression",
-	"tuwunel-router/bzip2_compression",
-	"tuwunel-service/bzip2_compression",
 ]
 console = [
-	"tuwunel-core/console",
 	"tuwunel-service/console",
 ]
 direct_tls = [
     "tuwunel-router/direct_tls"
 ]
 element_hacks = [
-	"tuwunel-api/element_hacks",
 	"tuwunel-service/element_hacks",
 ]
 gzip_compression = [
-	"tuwunel-admin/gzip_compression",
 	"tuwunel-api/gzip_compression",
 	"tuwunel-core/gzip_compression",
 	"tuwunel-router/gzip_compression",
 	"tuwunel-service/gzip_compression",
 ]
 io_uring = [
-	"tuwunel-admin/io_uring",
-	"tuwunel-api/io_uring",
 	"tuwunel-database/io_uring",
-	"tuwunel-router/io_uring",
-	"tuwunel-service/io_uring",
 ]
 jemalloc = [
-	"tuwunel-admin/jemalloc",
-	"tuwunel-api/jemalloc",
 	"tuwunel-core/jemalloc",
 	"tuwunel-database/jemalloc",
-	"tuwunel-router/jemalloc",
-	"tuwunel-service/jemalloc",
 ]
 jemalloc_conf = [
-	"tuwunel-admin/jemalloc_conf",
-	"tuwunel-api/jemalloc_conf",
 	"tuwunel-core/jemalloc_conf",
-	"tuwunel-database/jemalloc_conf",
-	"tuwunel-router/jemalloc_conf",
-	"tuwunel-service/jemalloc_conf",
 ]
 jemalloc_prof = [
 	"tuwunel-core/jemalloc_prof",
@@ -163,11 +154,7 @@ ldap = [
 	"tuwunel-service/ldap",
 ]
 lz4_compression = [
-	"tuwunel-admin/lz4_compression",
-	"tuwunel-api/lz4_compression",
 	"tuwunel-database/lz4_compression",
-	"tuwunel-router/lz4_compression",
-	"tuwunel-service/lz4_compression",
 ]
 mas = [
 	"dep:tuwunel-api-mas",
@@ -186,8 +173,6 @@ perf_measurements = [
 	"dep:opentelemetry_sdk",
 	"dep:tracing-flame",
 	"dep:tracing-opentelemetry",
-	"tuwunel-core/perf_measurements",
-	"tuwunel-core/sentry_telemetry",
 ]
 # increases performance, reduces build times, and reduces binary size by not compiling or
 # genreating code for log level filters that users will generally not use (debug and trace)
@@ -208,7 +193,6 @@ sentry_telemetry = [
 	"dep:sentry",
 	"dep:sentry-tower",
 	"dep:sentry-tracing",
-	"tuwunel-core/sentry_telemetry",
 	"tuwunel-router/sentry_telemetry",
 ]
 synapse_admin = [
@@ -231,7 +215,6 @@ url_preview = [
 	"tuwunel-service/url_preview",
 ]
 zstd_compression = [
-	"tuwunel-admin/zstd_compression",
 	"tuwunel-api/zstd_compression",
 	"tuwunel-core/zstd_compression",
 	"tuwunel-database/zstd_compression",
@@ -308,6 +291,8 @@ rust-rocksdb.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
 similar.workspace = true
+tokio.workspace = true
+tokio.features = ["test-util"]
 
 [lints]
 workspace = true

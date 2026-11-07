@@ -5697,7 +5697,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tuwunel_core",
- "tuwunel_matrix",
 ]
 
 [[package]]

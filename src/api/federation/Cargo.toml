@@ -17,6 +17,15 @@ crate-type = [
 #	"dylib",
 ]
 
+[features]
+default = [
+	"tuwunel-api/default",
+	"tuwunel-api-client/default",
+	"tuwunel-core/default",
+	"tuwunel-matrix/default",
+	"tuwunel-service/default",
+]
+
 [dependencies]
 axum.workspace = true
 base64.workspace = true

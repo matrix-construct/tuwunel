@@ -885,6 +885,8 @@ debug = 0
 strip = "symbols"
 opt-level = 'z'
 incremental = false
+# no debuginfo to split; matches profile.test so builds and tests share artifacts
+split-debuginfo = "unpacked"
 #rustflags = [
 #	'--cfg', 'tuwunel_mods',
 #	'-Ztls-model=global-dynamic',
@@ -908,6 +910,8 @@ incremental = false
 debug = "limited"
 codegen-units = 1
 opt-level = 'z'
+# keep dependency debuginfo in the binary rather than inheriting dev's split
+split-debuginfo = "off"
 
 # primarily used for CI
 [profile.test]

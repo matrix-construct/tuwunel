@@ -63,7 +63,8 @@ pub mod events;
 mod fetch_event;
 mod fetch_state;
 mod resolve;
-#[cfg(any(test, feature = "test_utils"))]
+// Ungated: a feature for the benches would split every dependent's build.
+#[doc(hidden)]
 pub mod test_utils;
 pub mod topological_sort;
 

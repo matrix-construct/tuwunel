@@ -44,7 +44,12 @@ let
       manifest = lib.importTOML "${path}/Cargo.toml";
     in
     lib.remove "default" (lib.attrNames manifest.features);
-  crateDefaultFeatures = path: (lib.importTOML "${path}/Cargo.toml").features.default;
+  # Only the crate's own feature names; `dep/feature` forwards (such as each
+  # workspace crate's default) would re-enable what disable_features removes.
+  crateDefaultFeatures =
+    path:
+    lib.filter (feature: !lib.hasInfix "/" feature)
+      (lib.importTOML "${path}/Cargo.toml").features.default;
   allDefaultFeatures = crateDefaultFeatures "${inputs.self}/src/main";
   allFeatures = crateFeatures "${inputs.self}/src/main";
   features' = lib.unique (

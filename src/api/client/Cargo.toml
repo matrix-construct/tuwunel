@@ -18,6 +18,14 @@ crate-type = [
 ]
 
 [features]
+default = [
+	"ldap",
+	"tuwunel-api/default",
+	"tuwunel-core/default",
+	"tuwunel-matrix/default",
+	"tuwunel-service/default",
+]
+
 ldap = ["tuwunel-api/ldap", "tuwunel-service/ldap"]
 
 [dependencies]

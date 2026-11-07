@@ -18,6 +18,16 @@ crate-type = [
 ]
 
 [features]
+default = [
+	"bzip2_compression",
+	"io_uring",
+	"jemalloc",
+	"lz4_compression",
+	"release_max_log_level",
+	"zstd_compression",
+	"tuwunel-core/default",
+]
+
 bzip2_compression = [
 	"rust-rocksdb/bzip2",
 ]
@@ -27,15 +37,6 @@ io_uring = [
 jemalloc = [
 	"rust-rocksdb/jemalloc",
 	"tuwunel-core/jemalloc",
-]
-jemalloc_conf = [
-	"tuwunel-core/jemalloc_conf",
-]
-jemalloc_prof = [
-	"tuwunel-core/jemalloc_prof",
-]
-jemalloc_stats = [
-	"tuwunel-core/jemalloc_stats",
 ]
 lz4_compression = [
 	"rust-rocksdb/lz4",

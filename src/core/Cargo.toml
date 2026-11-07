@@ -18,10 +18,18 @@ crate-type = [
 ]
 
 [features]
+default = [
+	"brotli_compression",
+	"gzip_compression",
+	"jemalloc",
+	"jemalloc_conf",
+	"release_max_log_level",
+	"zstd_compression",
+]
+
 brotli_compression = [
 	"reqwest/brotli",
 ]
-console = []
 gzip_compression = [
 	"reqwest/gzip",
 ]
@@ -35,14 +43,12 @@ jemalloc_prof = [
 jemalloc_stats = [
 	"jevmalloc?/stats",
 ]
-perf_measurements = []
 release_max_log_level = [
 	"log/max_level_trace",
 	"log/release_max_level_info",
 	"tracing/max_level_trace",
 	"tracing/release_max_level_info",
 ]
-sentry_telemetry = []
 tuwunel_mods = [
     "dep:libloading"
 ]

@@ -18,7 +18,9 @@ crate-type = [
 ]
 
 [features]
-test_utils = []
+default = [
+	"tuwunel-core/default",
+]
 
 [dependencies]
 tuwunel-core.workspace = true
@@ -37,7 +39,6 @@ smallvec.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-tuwunel_matrix = { path = ".", features = ["test_utils"] }
 criterion.workspace = true
 insta.workspace = true
 maplit.workspace = true

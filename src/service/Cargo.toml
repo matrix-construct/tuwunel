@@ -18,12 +18,25 @@ crate-type = [
 ]
 
 [features]
+default = [
+	"brotli_compression",
+	"console",
+	"element_hacks",
+	"gzip_compression",
+	"ldap",
+	"media_thumbnail",
+	"release_max_log_level",
+	"systemd",
+	"url_preview",
+	"zstd_compression",
+	"tuwunel-core/default",
+	"tuwunel-database/default",
+	"tuwunel-matrix/default",
+]
+
 brotli_compression = [
 	"reqwest/brotli",
 	"tuwunel-core/brotli_compression",
-]
-bzip2_compression = [
-    "tuwunel-database/bzip2_compression",
 ]
 console = [
 	"dep:rustyline-async",
@@ -34,30 +47,8 @@ gzip_compression = [
 	"reqwest/gzip",
 	"tuwunel-core/gzip_compression",
 ]
-io_uring = [
-	"tuwunel-database/io_uring",
-]
-jemalloc = [
-	"tuwunel-core/jemalloc",
-	"tuwunel-database/jemalloc",
-]
-jemalloc_conf = [
-	"tuwunel-core/jemalloc_conf",
-	"tuwunel-database/jemalloc_conf",
-]
-jemalloc_prof = [
-	"tuwunel-core/jemalloc_prof",
-	"tuwunel-database/jemalloc_prof",
-]
-jemalloc_stats = [
-	"tuwunel-core/jemalloc_stats",
-	"tuwunel-database/jemalloc_stats",
-]
 ldap = [
 	"dep:ldap3",
-]
-lz4_compression = [
-	"tuwunel-database/lz4_compression",
 ]
 media_thumbnail = [
 	"dep:image",
