@@ -1,7 +1,7 @@
 use std::{
 	collections::HashSet,
 	ffi::{OsStr, OsString},
-	fs, io,
+	io,
 	path::{Path, PathBuf},
 	sync::Arc,
 	time::Instant,
@@ -16,7 +16,7 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Database, Map};
 
-use crate::Services;
+use crate::{Services, integrity::media_files::listing};
 
 struct MediaStorage<'a> {
 	database: &'a Arc<Database>,
@@ -25,8 +25,9 @@ struct MediaStorage<'a> {
 }
 
 /// Migrates a media directory from legacy base64 file names to sha2 file names.
-/// All errors are fatal. Upon success the database is keyed to not perform this
-/// again.
+///
+/// All errors are fatal. The caller stamps the database only once this
+/// succeeds, so a pass that fails runs again on the next boot.
 pub(crate) async fn migrate_sha256_media(services: &Services) -> Result {
 	let db = &services.db;
 	let config = &services.server.config;
@@ -57,7 +58,6 @@ pub(crate) async fn migrate_sha256_media(services: &Services) -> Result {
 		}
 	}
 
-	db["global"].insert(b"feat_sha256_media", []);
 	info!("Finished applying sha256_media");
 	Ok(())
 }
@@ -79,11 +79,11 @@ pub(crate) async fn checkup_sha256_media(services: &Services) -> Result {
 	let timer = Instant::now();
 
 	let dir = media.get_media_dir();
-	let files: HashSet<OsString> = fs::read_dir(dir)
+	let files: HashSet<OsString> = listing(&dir)
 		.inspect_err(inspect_debug_log)
 		.into_iter()
 		.flatten()
-		.filter_map(|ent| ent.map_or(None, |ent| Some(ent.path().into_os_string())))
+		.filter_map(Result::ok)
 		.collect();
 
 	for key in media.db.get_all_media_keys().await {

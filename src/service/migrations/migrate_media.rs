@@ -1,6 +1,6 @@
 use tuwunel_core::Result;
 
-use super::{conduit::migrate_conduit_media, marker_present};
+use super::{SHA256_MEDIA, conduit::migrate_conduit_media, marker_present};
 use crate::{
 	Services,
 	media::migrations::{checkup_sha256_media, migrate_sha256_media},
@@ -17,7 +17,7 @@ pub(super) async fn migrate_media(services: &Services) -> Result {
 	let config = &services.server.config;
 	let progress = &services.server.progress;
 
-	let sha256_done = marker_present(services, "feat_sha256_media").await?;
+	let sha256_done = marker_present(services, SHA256_MEDIA).await?;
 
 	// The foreign CF persists, so the marker (not its presence) is the latch.
 	if !sha256_done
@@ -27,7 +27,7 @@ pub(super) async fn migrate_media(services: &Services) -> Result {
 	{
 		progress.begin("migrate_conduit_media");
 		migrate_conduit_media(services).await?;
-		db["global"].insert("feat_sha256_media", []);
+		db["global"].insert(SHA256_MEDIA, []);
 		return Ok(());
 	}
 
@@ -35,6 +35,7 @@ pub(super) async fn migrate_media(services: &Services) -> Result {
 		| () if !sha256_done => {
 			progress.begin("migrate_sha256_media");
 			migrate_sha256_media(services).await?;
+			db["global"].insert(SHA256_MEDIA, []);
 		},
 		| () if config.media.startup_check => {
 			progress.begin("checkup_sha256_media");

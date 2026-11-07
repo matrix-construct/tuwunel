@@ -11,6 +11,7 @@ pub mod columns;
 pub mod email_bindings;
 pub mod forbidden_names;
 pub mod joined_members;
+pub mod media_files;
 pub mod mediaid_user;
 pub mod moderation;
 pub mod pdu_room_ids;
@@ -63,6 +64,8 @@ static CHECKS: &[&Check] = &[
 	&userroomid_highlightcount::CHECK,
 	&mediaid_user::LEGACY,
 	&mediaid_user::REMOTE,
+	&media_files::LEGACY,
+	&media_files::CHECK,
 	&useridprofilekey_value::CHECK,
 	&userid_password::CHECK,
 	&forbidden_names::USERNAMES,

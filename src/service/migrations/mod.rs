@@ -96,6 +96,12 @@ pub(crate) const ADOPT_ACCOUNT_STATUS: &str = "adopt_foreign_account_status";
 
 pub(crate) const ADOPT_EMAIL_BINDINGS: &str = "adopt_foreign_email_bindings";
 
+/// Stamped once the media directory names files by their sha256 names.
+///
+/// The rename from the legacy names and the Conduit media import both stamp it,
+/// and the startup media check runs only on a database carrying it.
+pub(crate) const SHA256_MEDIA: &str = "feat_sha256_media";
+
 /// A marker written by a sibling conduwuit-lineage server but never by tuwunel.
 /// Its presence identifies a foreign database at a higher schema number even
 /// after tuwunel has stamped its own `server_name`, so a database opened by
@@ -112,7 +118,7 @@ type UserIdBuf = SmallString<[u8; 48]>;
 /// check of the schema expects to find. A step gated on a foreign source has no
 /// place here, because a native database never runs it.
 pub(crate) const MARKERS: [&str; 21] = [
-	"feat_sha256_media",
+	SHA256_MEDIA,
 	"fix_pdu_missing_room_id",
 	"fix_bad_double_separator_in_state_cache",
 	"retroactively_fix_bad_data_from_roomuserid_joined",

@@ -28,6 +28,8 @@ use crate::{
 
 mod foreign;
 mod mappings;
+#[cfg(unix)]
+mod media;
 mod names;
 mod records;
 mod state;
