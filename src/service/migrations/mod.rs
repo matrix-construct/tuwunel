@@ -11,7 +11,6 @@ use ruma::{OwnedUserId, RoomId, ServerName, UserId};
 use tokio::time::sleep;
 use tuwunel_core::{
 	Err, Result, err, format_small_string, info,
-	itertools::Itertools,
 	result::NotFound,
 	smallstr::SmallString,
 	utils::{BoolExt, ReadyExt, TryReadyExt},
@@ -23,6 +22,7 @@ use self::{
 	account_status::migrate_account_status,
 	clear_servername_status::clear_servername_status,
 	clear_state_local_error_memos::clear_state_local_error_memos,
+	conduit::migrate_pdus,
 	email_bindings::migrate_email_bindings,
 	fix_bad_double_separator_in_state_cache::fix_bad_double_separator_in_state_cache,
 	fix_hashed_sentinel_passwords::fix_hashed_sentinel_passwords,
@@ -32,6 +32,7 @@ use self::{
 	injectivity::{fix as fix_injectivity, mark_clean as mark_clean_injectivity},
 	migrate_media::migrate_media,
 	migrate_profile_keys::migrate_profile_keys,
+	moderation::migrate as migrate_moderation,
 	rebuild_roomid_tscount_pducount::rebuild_roomid_tscount_pducount,
 	redactions::restore_redactions,
 	remove_remote_media_userid::remove_remote_media_userid,
@@ -40,7 +41,12 @@ use self::{
 	token_expiry::{migrate_token_expiry, restore_token_expiry},
 	upgrade_legacy_mediaid_user::upgrade_legacy_mediaid_user,
 };
-use crate::Services;
+use crate::{
+	Services,
+	integrity::forbidden_names::{
+		Username, matched as forbidden_patterns, usernames as forbidden_usernames,
+	},
+};
 
 mod account_status;
 mod clear_servername_status;
@@ -52,7 +58,7 @@ mod fix_hashed_sentinel_passwords;
 mod fix_readreceiptid_readreceipt_duplicates;
 mod fix_referencedevents_missing_sep;
 mod import_conduit_knocks;
-mod injectivity;
+pub(crate) mod injectivity;
 mod migrate_media;
 mod migrate_profile_keys;
 mod moderation;
@@ -319,13 +325,11 @@ pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Resul
 
 	migrate_media(services).await?;
 
-	if pending(services, "fix_pdu_missing_room_id").await? {
-		conduit::migrate_conduit_pdus(services).await?;
-		db["global"].insert("fix_pdu_missing_room_id", []);
-	}
+	run_once(services, "fix_pdu_missing_room_id", migrate_pdus).await?;
 
 	import_conduit_knocks(services).await?;
-	split_conduit_highlight_counts(services).await?;
+
+	run_once(services, "split_conduit_highlight", split_conduit_highlight_counts).await?;
 
 	// The next two repairs fix a conduwuit-era roomuserid_joined bug Conduit
 	// never had; record them done for a Conduit database instead of running.
@@ -404,7 +408,8 @@ pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Resul
 		.server
 		.progress
 		.begin("migrate_moderation");
-	moderation::migrate_moderation(services).await?;
+
+	migrate_moderation(services).await?;
 
 	if pending(services, "adopt_foreign_account_status").await? {
 		migrate_account_status(services).await?;
@@ -509,9 +514,13 @@ where
 /// Warns about existing names the configuration now forbids.
 ///
 /// The patterns are advisory rather than enforced retroactively, so a match
-/// only names the user or the alias in the log. Neither scan runs when its own
-/// pattern list is empty or once shutdown begins.
+/// only names the user or the alias in the log, as the forbidden name checks
+/// report them. The aliases are walked room by room, as listed in
+/// `roomid_shortroomid`, with no read for each alias. Neither walk runs when its
+/// own pattern list is empty or once shutdown begins.
 async fn warn_forbidden_names(services: &Services) -> Result {
+	let progress = &services.server.progress;
+
 	services.server.check_running()?;
 
 	if !services
@@ -520,41 +529,11 @@ async fn warn_forbidden_names(services: &Services) -> Result {
 		.forbidden_usernames
 		.is_empty()
 	{
-		services
-			.server
-			.progress
-			.begin("scan_forbidden_usernames");
+		progress.begin("scan_forbidden_usernames");
 
-		services
-			.users
-			.stream()
-			.map(|user_id| {
-				services
-					.server
-					.check_running()
-					.map(|()| user_id.to_owned())
-			})
-			.try_filter_map(async |user_id| {
-				Ok(services
-					.users
-					.is_active_local(&user_id)
-					.await
-					.then_some(user_id))
-			})
-			.ready_try_filter_map(|user_id| {
-				let patterns = &services.config.registration.forbidden_usernames;
-				let matches = patterns.matches(user_id.localpart());
-				let matched_patterns = matches
-					.iter()
-					.map(|pattern_index| &patterns.patterns()[pattern_index])
-					.join(", ");
-
-				Ok(matches
-					.matched_any()
-					.then_some((user_id, matched_patterns)))
-			})
-			.ready_try_for_each(|(user_id, matched_patterns)| {
-				warn!("User {user_id} matches forbidden username patterns: {matched_patterns}");
+		forbidden_usernames(services)
+			.ready_try_for_each(|Username { user_id, patterns }| {
+				warn!(%user_id, %patterns, "User matches forbidden username patterns");
 				Ok(())
 			})
 			.await?;
@@ -568,10 +547,7 @@ async fn warn_forbidden_names(services: &Services) -> Result {
 		.forbidden_alias_names
 		.is_empty()
 	{
-		services
-			.server
-			.progress
-			.begin("scan_forbidden_alias_names");
+		progress.begin("scan_forbidden_alias_names");
 
 		services
 			.metadata
@@ -590,27 +566,19 @@ async fn warn_forbidden_names(services: &Services) -> Result {
 }
 
 async fn scan_room_aliases(services: &Services, room_id: &RoomId) -> Result {
+	let patterns = &services.config.rooms.forbidden_alias_names;
+
 	services
 		.alias
 		.local_aliases_for_room(room_id)
-		.map(|room_alias| {
-			services
-				.server
-				.check_running()
-				.map(|()| room_alias)
-		})
-		.ready_try_for_each(|room_alias| {
-			let patterns = &services.config.rooms.forbidden_alias_names;
-			let matches = patterns.matches(room_alias.alias());
-			let matched_patterns = matches
-				.iter()
-				.map(|pattern_index| &patterns.patterns()[pattern_index])
-				.join(", ");
-
-			if matches.matched_any() {
+		.map(|alias| services.server.check_running().map(|()| alias))
+		.ready_try_for_each(|alias| {
+			if let Some(patterns) = forbidden_patterns(patterns, alias.alias()) {
 				warn!(
-					"Room {room_id} with alias {room_alias} matches the following forbidden \
-					 alias name patterns: {matched_patterns}"
+					%room_id,
+					%alias,
+					%patterns,
+					"Room alias matches the following forbidden alias name patterns"
 				);
 			}
 

@@ -7,6 +7,7 @@
 mod append;
 mod backfill;
 mod build;
+mod checked;
 mod create;
 mod pdus;
 mod purge;
@@ -49,11 +50,15 @@ use tuwunel_matrix::{
 	room::state::resolution::FetchEvent,
 };
 
-pub(crate) use self::append::Incoming;
 /// Re-exports the standard timeline item and count-key transformation.
 ///
 /// Timeline consumers use these alongside the service's directional streams.
 pub use self::pdus::{PdusIterItem, bias_count};
+pub(crate) use self::{
+	append::Incoming,
+	checked::{Mapped, Position},
+	redact::Restoration,
+};
 use crate::rooms::{
 	short::{ShortRoomId, ShortStateHash},
 	threads::RedactedRoot,

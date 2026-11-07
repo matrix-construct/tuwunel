@@ -230,8 +230,9 @@ pub fn relation_counts(
 ///
 /// It walks as [`Service::try_get_relations_limited`] does from the end `dir`
 /// leads away from, with no limit, except that a key under the target too short
-/// to hold a position comes back as `None` where that walk panics. Missing
-/// children are skipped, and other load errors are yielded.
+/// to hold a position comes back as `None` where that walk panics, and a child
+/// is decoded as a release build decodes it. Missing children are skipped, and
+/// other load errors are yielded.
 #[implement(Service)]
 pub fn try_get_relations_checked(
 	&self,
@@ -249,11 +250,36 @@ pub fn try_get_relations_checked(
 		.wide_and_then(move |count| match count {
 			| None => Left(ready(Ok(Some(None)))),
 			| Some(count) => Right(
-				self.related_pdu(None, shortroomid, count)
+				self.related_pdu_checked(shortroomid, count)
 					.map_ok(|related| related.map(Some)),
 			),
 		})
 		.ready_try_filter_map(Ok)
+}
+
+/// Loads a related event as `related_pdu` does for no user, decoding its row as
+/// a release build does.
+///
+/// A debug build of that function panics on a row holding a further record after
+/// the event's, beyond one trailing separator.
+#[implement(Service)]
+async fn related_pdu_checked(
+	&self,
+	shortroomid: ShortRoomId,
+	count: PduCount,
+) -> Result<Option<(PduCount, Pdu)>> {
+	let pdu_id: RawPduId = PduId { shortroomid, count }.into();
+
+	self.services
+		.timeline
+		.get_from_id_checked(&pdu_id)
+		.await
+		.optional()?
+		.map(|pdu: Pdu| {
+			pdu.without_transaction_id_unless_sender(None)
+				.map(|pdu| (count, pdu))
+		})
+		.transpose()
 }
 
 /// Walks the index keys of the events related to a target.

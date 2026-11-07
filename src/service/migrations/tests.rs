@@ -1,17 +1,24 @@
-use ruma::{server_name, user_id};
+use futures::TryStreamExt;
+use ruma::{MilliSecondsSinceUnixEpoch, owned_user_id, server_name, uint, user_id};
 use serde_json::{Value, json};
-use tuwunel_core::{Result, config::Figment, result::NotFound};
+use tuwunel_core::{Result, config::Figment, itertools::Itertools, result::NotFound};
 use tuwunel_database::{Json, serialize_key};
 use tuwunel_matrix::pdu::PduCount;
 
 use super::{
 	REBUILD_LIVE_THREAD_ACTIVITY, fresh, local_user_id, marker_present, migrate,
-	migrate_profile_keys::repair as repair_profile_value, tally::Outcome,
+	migrate_profile_keys::repair as repair_profile_value, moderation::copy as copy_moderation,
+	tally::Outcome,
 };
 use crate::{
 	Services,
-	integrity::useridprofilekey_value::Finding,
+	integrity::{
+		Report,
+		moderation::{Source, scan as moderation},
+		useridprofilekey_value::Finding,
+	},
 	test_utils::{fixture, pdu_id},
+	users::Moderation,
 };
 
 #[test]
@@ -62,6 +69,77 @@ async fn profile_value_repair_reads_the_row_again() -> Result {
 	assert!(values.get(&key).await.is_not_found());
 
 	Ok(())
+}
+
+#[tokio::test]
+async fn moderation_copy_clears_the_finding() -> Result {
+	let config = Figment::new().merge(("admin.room.create", false));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let suspended = &services.db["userid_suspended"];
+	let entry = |suspended: bool| {
+		let entry = json!({ "suspended": suspended, "suspended_at": 1, "suspended_by": "@mod:localhost" });
+
+		Json(entry)
+	};
+
+	let copy = Moderation {
+		when: MilliSecondsSinceUnixEpoch(uint!(1)),
+		by: owned_user_id!("@mod:localhost"),
+	};
+
+	// No service-level test can create a foreign column, so a native one stands in.
+	let foreign = &services.db["userid_blurhash"];
+	let source = Source {
+		name: "userid_suspension",
+		map: foreign.clone(),
+		target: "userid_suspended",
+	};
+
+	fresh(services).await?;
+	foreign.raw_put("@alice:localhost", entry(true));
+	foreign.raw_put("@bob:localhost", entry(false));
+	foreign.insert("@carol:localhost", "not json");
+	foreign.raw_put("@dave:localhost", entry(true));
+	foreign.raw_put("@erin:localhost", entry(true));
+	suspended.raw_put("@dave:localhost", Json(json!({ "when": 2 })));
+	suspended.raw_put("@erin:localhost", Json(&copy));
+
+	assert_eq!(kinds(services, &source).await?, [
+		"uncopied-entry",
+		"uncopied-entry",
+		"unparsable-entry"
+	]);
+
+	copy_moderation(services, &source).await?;
+
+	let copied = serde_json::to_vec(&copy)?;
+
+	assert_eq!(kinds(services, &source).await?, ["unparsable-entry"]);
+	assert_eq!(&*suspended.get("@alice:localhost").await?, copied);
+	assert_eq!(&*suspended.get("@dave:localhost").await?, copied);
+	assert!(
+		suspended
+			.get("@bob:localhost")
+			.await
+			.is_not_found()
+	);
+
+	Ok(())
+}
+
+/// The kinds of finding the moderation check reports for one column, sorted.
+///
+/// Its walk fans out, so the order it yields them in is arbitrary.
+async fn kinds(services: &Services, source: &Source) -> Result<Vec<&'static str>> {
+	moderation(services, source)
+		.map_ok(|finding| finding.kind())
+		.try_collect()
+		.await
+		.map(|kinds: Vec<_>| kinds.into_iter().sorted().collect())
 }
 
 #[tokio::test]

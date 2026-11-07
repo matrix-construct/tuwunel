@@ -6,7 +6,7 @@
 //! Legacy markers are kept present so older binaries skip their superseded
 //! repair.
 
-mod seen;
+pub(crate) mod seen;
 
 use tuwunel_core::result::NotFound;
 use tuwunel_database::Database;

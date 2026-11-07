@@ -31,8 +31,9 @@ pub(super) static CHECK: Check = Check {
 /// read.
 ///
 /// The summary rebuild rewrites a disagreeing summary, and leaves the rest. A
-/// root whose relation index holds a damaged key is reported for that alone,
-/// since its recount skipped the key and so is incomplete.
+/// root whose relation index holds a damaged key, or whose latest reply has a
+/// damaged timeline mapping, is reported for that alone, since its recount is
+/// incomplete.
 pub enum Finding {
 	/// The summary's count, or its latest reply, disagrees with the replies.
 	Stale {
@@ -58,6 +59,12 @@ pub enum Finding {
 		malformed: usize,
 	},
 
+	/// The summary's latest reply has a timeline mapping that is not a PDU id.
+	MalformedLatest {
+		/// The root.
+		root_id: RawPduId,
+	},
+
 	/// The root's row does not decode.
 	Unreadable {
 		/// The root.
@@ -75,8 +82,9 @@ pub enum Finding {
 ///
 /// A root no longer stored, or holding no summary, is skipped as the rebuild skips
 /// it. The rebuild re-reads each root under its room lock and decides through the
-/// same recount, so the two agree. A reply or latest reply that cannot be read
-/// ends the stream with its error.
+/// same recount, so the two agree. A reply or latest reply whose row cannot be
+/// read ends the stream with its error, while a latest reply's mapping that does
+/// not decode is a finding.
 #[tracing::instrument(level = "trace", skip_all)]
 pub fn scan(services: &Services) -> impl Stream<Item = Result<Finding>> + Send + '_ {
 	let pdus = &services.db["pduid_pdu"];
@@ -100,6 +108,7 @@ impl Report for Finding {
 		match self {
 			| Self::Stale { .. } => "stale-summary",
 			| Self::MalformedRelation { .. } => "malformed-relation",
+			| Self::MalformedLatest { .. } => "malformed-mapping",
 			| Self::Unreadable { .. } => "unreadable-root",
 			| Self::Unparsable { .. } => "unparsable-key",
 		}
@@ -115,6 +124,11 @@ impl fmt::Display for Finding {
 			| Self::Unparsable { key } => {
 				write!(f, "thread key is not a PDU id: {}", key.escape_ascii())
 			},
+			| Self::MalformedLatest { root_id } => write!(
+				f,
+				"latest reply of thread root {root_id:?} has a timeline mapping that is not a \
+				 PDU id"
+			),
 			| Self::MalformedRelation { root_id, malformed } => {
 				write!(
 					f,
@@ -169,10 +183,16 @@ async fn verify(
 
 fn finding(root_id: RawPduId, recount: &Recount) -> Option<Finding> {
 	let &Recount {
-		stored, counted, stale_latest, malformed, ..
+		stored,
+		counted,
+		stale_latest,
+		malformed,
+		malformed_latest,
+		..
 	} = recount;
 
 	match malformed {
+		| 0 if malformed_latest => Some(Finding::MalformedLatest { root_id }),
 		| 0 if recount.changed() => Some(Finding::Stale {
 			root_id,
 			stored,

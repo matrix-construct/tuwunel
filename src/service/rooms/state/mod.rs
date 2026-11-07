@@ -70,6 +70,7 @@ use tuwunel_matrix::{
 };
 
 use crate::{
+	integrity::undecodable,
 	rooms::{
 		short::{ShortEventId, ShortStateHash, ShortStateKey},
 		state_cache::{MembershipUpdate, StrippedRoomState},
@@ -77,6 +78,7 @@ use crate::{
 			CompressedState, CompressedStateEvent, ShortStateInfo, compress_state_event,
 			parse_compressed_state_event,
 		},
+		timeline::Mapped,
 	},
 	services::OnceServices,
 };
@@ -920,6 +922,48 @@ pub async fn get_room_version(&self, room_id: &RoomId) -> Result<RoomVersionId> 
 		})
 		.await
 }
+
+/// Returns the room version as [`Service::get_room_version`] does, resolving the
+/// room's state and the create event's timeline mapping untrusted.
+///
+/// Damage from the room's state pointer to the create event's timeline mapping is
+/// `Mapped::Damaged` where that function panics, fails or reads a prefix, and the
+/// state is rebuilt from storage alone. The accepted copy of the create event is
+/// read before the outlier, as there. Unlike that function, only a read finding
+/// no row or one that does not decode reports no create event, so any other
+/// failure, a database pool failure included, is returned as itself, the accepted
+/// copy's kept over the outlier's.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip(self))]
+pub(crate) async fn room_version_checked(
+	&self,
+	room_id: &RoomId,
+) -> Result<Mapped<RoomVersionId>> {
+	self.services
+		.state_accessor
+		.room_state_get_id_checked(room_id, &StateEventType::RoomCreate, "")
+		.and_then(async |create_id| match create_id {
+			| Mapped::Damaged => Ok(Mapped::Damaged),
+			| Mapped::Event(create_id) =>
+				self.services
+					.timeline
+					.get_checked_keeping(&create_id, |error| !version_absent(error))
+					.await,
+		})
+		.map_ok(|create: Mapped<CreateEvent>| create.map(|create| create.content.room_version))
+		.map_err(|error| match version_absent(&error) {
+			| true => err!(Request(NotFound("No create event found: {error:?}"))),
+			| false => error,
+		})
+		.await
+}
+
+/// Whether a failed read on the way to a room's version leaves a check with no
+/// version rather than with that failure.
+///
+/// Only a missing record or a row that does not decode does. Every other error,
+/// a storage fault or a database pool failure included, is the read's own.
+pub(crate) fn version_absent(error: &Error) -> bool { error.is_missing() || undecodable(error) }
 
 #[implement(Service)]
 #[tracing::instrument(

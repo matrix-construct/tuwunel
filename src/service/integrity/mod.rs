@@ -7,9 +7,13 @@
 //! finding calls for, re-deciding anything a write may have changed.
 
 pub mod columns;
+pub mod forbidden_names;
 pub mod joined_members;
 pub mod mediaid_user;
+pub mod moderation;
+pub mod pdu_room_ids;
 pub mod readreceiptid_readreceipt;
+pub mod redactions;
 pub mod referencedevents;
 pub mod relatesto_typed;
 pub mod roomid_tscount_pducount;
@@ -22,11 +26,12 @@ pub mod thread_summaries;
 pub mod threadrootid_latestcount;
 pub mod userid_password;
 pub mod useridprofilekey_value;
+pub mod userroomid_highlightcount;
 
 use std::{collections::BTreeMap, fmt::Display};
 
-use futures::{FutureExt, Stream, future::BoxFuture};
-use ruma::api::error::ErrorKind;
+use futures::{FutureExt, Stream, StreamExt, TryFutureExt, future::BoxFuture, stream::unfold};
+use ruma::{OwnedRoomId, RoomId, api::error::ErrorKind};
 use serde::Deserialize;
 use tuwunel_core::{Err, Error, Result, implement, utils::TryReadyExt};
 use tuwunel_database::SEP;
@@ -36,21 +41,34 @@ use crate::Services;
 
 type Walk = for<'a> fn(&'a Services, usize) -> BoxFuture<'a, Result<Summary>>;
 
+// The room `per_room` last answered for, and its answer.
+type Answered<V> = Option<(OwnedRoomId, V)>;
+
+// A row as `per_room` passes it: the outer result is the read, the inner one
+// whether the row names a room.
+type Row<A, B> = Result<Result<A, B>>;
+
 /// Every check, in the order a whole run takes them.
 static CHECKS: &[&Check] = &[
 	&schema::CHECK,
 	&columns::CHECK,
 	&columns::UNUSED,
+	&pdu_room_ids::CHECK,
 	&roomuserid_joined::CHECK,
 	&referencedevents::CHECK,
 	&readreceiptid_readreceipt::CHECK,
+	&userroomid_highlightcount::CHECK,
 	&mediaid_user::LEGACY,
 	&mediaid_user::REMOTE,
 	&useridprofilekey_value::CHECK,
 	&userid_password::CHECK,
+	&forbidden_names::USERNAMES,
+	&forbidden_names::ALIASES,
 	&joined_members::CHECK,
+	&moderation::CHECK,
 	&roomid_tscount_pducount::CHECK,
 	&relatesto_typed::CHECK,
+	&redactions::CHECK,
 	&thread_summaries::CHECK,
 	&threadrootid_latestcount::CHECK,
 ];
@@ -216,4 +234,69 @@ where
 /// storage fault never does.
 pub(crate) fn undecodable(error: &Error) -> bool {
 	matches!(error.kind(), ErrorKind::BadJson | ErrorKind::NotJson)
+}
+
+/// Pairs each row naming a room with what `resolve` answers for that room,
+/// asking once for each run of consecutive rows in one room.
+///
+/// A walk sorted by room asks once per room and holds only the latest answer,
+/// while a row naming no room passes through. A failed answer is yielded in
+/// place of the row that asked.
+fn per_room<'a, S, A, B, V, F, Fut>(
+	rows: S,
+	room: fn(&A) -> &RoomId,
+	resolve: F,
+) -> impl Stream<Item = Row<(A, V), B>> + Send + 'a
+where
+	S: Stream<Item = Row<A, B>> + Send + 'a,
+	A: Send + 'a,
+	B: Send + 'a,
+	V: Clone + Send + 'a,
+	F: Fn(OwnedRoomId) -> Fut + Send + Sync + 'a,
+	Fut: Future<Output = Result<V>> + Send + 'a,
+{
+	let rows = Box::pin(rows); // Unpin for StreamExt::next
+
+	unfold((rows, None, room, resolve), async |(mut rows, answered, room, resolve)| {
+		let row = rows.next().await?;
+		let (row, answered) = answer(row, answered, room, &resolve).await;
+
+		Some((row, (rows, answered, room, resolve)))
+	})
+}
+
+async fn answer<A, B, V, F, Fut>(
+	row: Row<A, B>,
+	answered: Answered<V>,
+	room: fn(&A) -> &RoomId,
+	resolve: &F,
+) -> (Row<(A, V), B>, Answered<V>)
+where
+	A: Send,
+	B: Send,
+	V: Clone + Send,
+	F: Fn(OwnedRoomId) -> Fut + Sync,
+	Fut: Future<Output = Result<V>> + Send,
+{
+	let row = match row {
+		| Ok(Ok(row)) => row,
+		| Ok(Err(other)) => return (Ok(Err(other)), answered),
+		| Err(error) => return (Err(error), answered),
+	};
+
+	let answered = match answered {
+		| Some((room_id, answer)) if &*room_id == room(&row) => Ok((room_id, answer)),
+		| _ => {
+			let room_id = room(&row).to_owned();
+
+			resolve(room_id.clone())
+				.map_ok(|answer| (room_id, answer))
+				.await
+		},
+	};
+
+	match answered {
+		| Ok((room_id, answer)) => (Ok(Ok((row, answer.clone()))), Some((room_id, answer))),
+		| Err(error) => (Err(error), None),
+	}
 }

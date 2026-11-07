@@ -27,7 +27,7 @@ use crate::{Services, integrity::ScanExt};
 mod identity;
 mod references;
 mod rooms;
-mod state;
+pub(crate) mod state;
 #[cfg(test)]
 mod tests;
 

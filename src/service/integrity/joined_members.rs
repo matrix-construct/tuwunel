@@ -4,20 +4,27 @@
 //! each room's current state says the same. A conduwuit-era bug could leave the
 //! two disagreeing.
 
-use std::{fmt, str::from_utf8};
+use std::{fmt, str::from_utf8, sync::Arc};
 
-use futures::Stream;
+use futures::{Stream, TryFutureExt};
 use ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId, events::room::member::MembershipState};
 use tuwunel_core::{
 	Result,
+	result::NotFound,
 	utils::{TryReadyExt, stream::TryBroadbandExt},
 };
 use tuwunel_database::{KeyBuf, SEP};
 
-use super::{Check, Report, ScanExt, tally, undecodable};
-use crate::Services;
+use super::{Check, Report, ScanExt, per_room, tally, undecodable};
+use crate::{
+	Services,
+	rooms::{state_compressor::CompressedState, timeline::Mapped},
+};
 
 type Member = (OwnedRoomId, OwnedUserId);
+
+// A room's current state, rebuilt once for its members; none when it has none.
+type State = Option<Mapped<Arc<CompressedState>>>;
 
 pub(super) static CHECK: Check = Check {
 	name: "joined-members",
@@ -52,6 +59,16 @@ pub enum Finding {
 		user_id: OwnedUserId,
 	},
 
+	/// A row leading from the room's current state to the member event is
+	/// damaged, the event's timeline mapping included.
+	MalformedMapping {
+		/// The room.
+		room_id: OwnedRoomId,
+
+		/// The member.
+		user_id: OwnedUserId,
+	},
+
 	/// The member event in the current state does not decode.
 	Unreadable {
 		/// The room.
@@ -71,20 +88,26 @@ pub enum Finding {
 /// Streams each joined member the current state does not show joined.
 ///
 /// Every row of `roomuserid_joined` is read and its member looked up in the
-/// room's current state, as the membership repair walks them. A key whose first
-/// separator is missing or doubled is skipped, as the joined keys check reports
-/// it.
+/// room's current state, as the membership repair walks them, the state rebuilt
+/// once for each run of rows in one room. A key whose first separator is missing
+/// or doubled is skipped, as the joined keys check reports it.
 #[tracing::instrument(level = "trace", skip_all)]
 pub fn scan(services: &Services) -> impl Stream<Item = Result<Finding>> + Send + '_ {
-	services.db["roomuserid_joined"]
+	let members = services.db["roomuserid_joined"]
 		.raw_scan()
 		.scanned(&services.server)
-		.ready_try_filter_map(|(key, _)| Ok(split(key)))
-		.broad_and_then(async |member| match member {
-			| Ok(member) => verify(services, member).await,
-			| Err(key) => Ok(Some(Finding::Unparsable { key })),
-		})
-		.ready_try_filter_map(Ok)
+		.ready_try_filter_map(|(key, _)| Ok(split(key)));
+
+	per_room(
+		members,
+		|(room_id, _): &Member| room_id,
+		move |room_id| state(services, room_id),
+	)
+	.broad_and_then(async |member| match member {
+		| Ok((member, state)) => verify(services, member, state).await,
+		| Err(key) => Ok(Some(Finding::Unparsable { key })),
+	})
+	.ready_try_filter_map(Ok)
 }
 
 impl Report for Finding {
@@ -92,6 +115,7 @@ impl Report for Finding {
 		match self {
 			| Self::Contradicted { .. } => "contradicted-join",
 			| Self::Unbacked { .. } => "unbacked-join",
+			| Self::MalformedMapping { .. } => "malformed-mapping",
 			| Self::Unreadable { .. } => "unreadable-member",
 			| Self::Unparsable { .. } => "unparsable-key",
 		}
@@ -112,6 +136,9 @@ impl fmt::Display for Finding {
 					f,
 					"{user_id} is listed joined to {room_id}, whose state has no member event"
 				)
+			},
+			| Self::MalformedMapping { room_id, user_id } => {
+				write!(f, "a row resolving the member event of {user_id} in {room_id} is damaged")
 			},
 			| Self::Unreadable { room_id, user_id } => {
 				write!(f, "member event of {user_id} in {room_id} does not decode")
@@ -144,22 +171,44 @@ fn member(room_id: &[u8], user_id: &[u8]) -> Option<Member> {
 	Some((room_id.to_owned(), user_id.to_owned()))
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
-async fn verify(services: &Services, (room_id, user_id): Member) -> Result<Option<Finding>> {
-	let member = services
+#[tracing::instrument(level = "debug", skip(services))]
+async fn state(services: &Services, room_id: OwnedRoomId) -> Result<State> {
+	services
 		.state_accessor
-		.get_member(&room_id, &user_id)
-		.await;
+		.room_state_checked(&room_id)
+		.map_ok(|state| state.map(Arc::new))
+		.await
+		.present()
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn verify(
+	services: &Services,
+	(room_id, user_id): Member,
+	state: State,
+) -> Result<Option<Finding>> {
+	let member = match state {
+		| None => return Ok(Some(Finding::Unbacked { room_id, user_id })),
+		| Some(Mapped::Damaged) => {
+			return Ok(Some(Finding::MalformedMapping { room_id, user_id }));
+		},
+		| Some(Mapped::Event(state)) =>
+			services
+				.state_accessor
+				.get_member_checked(&state, &user_id)
+				.await,
+	};
 
 	let finding: Option<Finding> = match member {
-		| Ok(member) if member.membership == MembershipState::Join => None,
-		| Ok(member) => Finding::Contradicted {
+		| Ok(Mapped::Event(member)) if member.membership == MembershipState::Join => None,
+		| Ok(Mapped::Damaged) => Some(Finding::MalformedMapping { room_id, user_id }),
+		| Ok(Mapped::Event(member)) => Finding::Contradicted {
 			room_id,
 			user_id,
 			membership: member.membership,
 		}
 		.into(),
-		| Err(error) if error.is_not_found() => Some(Finding::Unbacked { room_id, user_id }),
+		| Err(error) if error.is_missing() => Some(Finding::Unbacked { room_id, user_id }),
 		| Err(error) if undecodable(&error) => Some(Finding::Unreadable { room_id, user_id }),
 		| Err(error) => return Err(error),
 	};

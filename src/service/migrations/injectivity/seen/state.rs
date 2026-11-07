@@ -114,8 +114,8 @@ enum Publication {
 	Restored,
 }
 
-struct Diff {
-	parent: Option<u64>,
+pub(crate) struct Diff {
+	pub(crate) parent: Option<u64>,
 	added: CompressedState,
 	removed: CompressedState,
 }
@@ -639,18 +639,18 @@ async fn materialize(services: &Services, id: u64) -> Result<Materialized> {
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn layer(db: &Database, id: u64) -> Result<Option<Diff>> {
+pub(crate) async fn layer(db: &Database, id: u64) -> Result<Option<Diff>> {
 	fetch(db, "shortstatehash_statediff", &id.to_be_bytes(), decode)
 		.map_ok(Option::flatten)
 		.await
 }
 
-fn visit(mut visited: BTreeSet<u64>, id: u64) -> BTreeSet<u64> {
+pub(crate) fn visit(mut visited: BTreeSet<u64>, id: u64) -> BTreeSet<u64> {
 	visited.insert(id);
 	visited
 }
 
-fn apply(state: CompressedState, diff: Diff) -> CompressedState {
+pub(crate) fn apply(state: CompressedState, diff: Diff) -> CompressedState {
 	let Diff { parent, added, removed } = diff;
 
 	// Extend the larger set, so a root layer is adopted rather than rebuilt.

@@ -1,11 +1,16 @@
-use std::{array::from_fn, sync::Arc};
+use std::{
+	array::from_fn,
+	io::{Error as IoError, ErrorKind as IoErrorKind},
+	sync::Arc,
+};
 
 use futures::StreamExt;
 use ruma::{EventId, RoomId, UserId, event_id, events::StateEventType, room_id, user_id};
 use serde_json::{Value, json};
 use tuwunel_core::{
-	Result,
+	Error, Result,
 	config::Figment,
+	err,
 	itertools::Itertools,
 	utils::{IterStream, hash::password},
 };
@@ -16,10 +21,16 @@ use super::{Summary, checks, find};
 use crate::{
 	Services,
 	migrations::{DATABASE_VERSION, MARKERS, fresh, marker_present, migrate},
-	rooms::{short::ShortRoomId, timeline::bias_count},
+	rooms::{short::ShortRoomId, state::version_absent, timeline::bias_count},
 	test_utils::{compress_state, fixture, pdu_id, pdu_json, save_room_state, with_state_key},
 	users::PASSWORD_SENTINEL,
 };
+
+mod foreign;
+mod mappings;
+mod names;
+mod records;
+mod state;
 
 type StateEvent<'a> = (u64, &'a EventId, &'a str, &'a str, Value);
 
@@ -28,6 +39,18 @@ fn check_names_are_unique() {
 	let names = checks().map(|check| check.name);
 
 	assert_eq!(names.clone().count(), names.sorted_unstable().dedup().count());
+}
+
+#[test]
+fn room_version_absence_keeps_read_failures() {
+	let decode = serde_json::from_str::<Value>("{").expect_err("truncated JSON");
+	let corrupt = IoError::new(IoErrorKind::InvalidData, "corrupt block");
+
+	assert!(version_absent(&err!(Request(NotFound("no row")))));
+	assert!(version_absent(&Error::from(decode)));
+	assert!(!version_absent(&err!("recv failed")));
+	assert!(!version_absent(&Error::from(corrupt)));
+	assert!(!version_absent(&Error::from(IoError::from(IoErrorKind::NotFound))));
 }
 
 #[tokio::test]
@@ -657,14 +680,18 @@ fn relation_key(tag: u8, child: u64) -> Vec<u8> {
 }
 
 fn store(services: &Services, shortroomid: ShortRoomId, count: u64, id: &EventId, pdu: &Value) {
-	let pdu_id: RawPduId = PduId {
-		shortroomid,
-		count: PduCount::Normal(count),
-	}
-	.into();
+	let pdu_id = room_pdu_id(shortroomid, count);
 
 	services.db["eventid_pduid"].insert(id.as_bytes(), pdu_id.as_bytes());
 	services.db["pduid_pdu"].raw_put(pdu_id, Json(pdu));
+}
+
+fn room_pdu_id(shortroomid: ShortRoomId, count: u64) -> RawPduId {
+	PduId {
+		shortroomid,
+		count: PduCount::Normal(count),
+	}
+	.into()
 }
 
 #[tokio::test]

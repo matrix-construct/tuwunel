@@ -1,6 +1,4 @@
-use futures::{TryFutureExt, future::ready};
-use ruma::events::TimelineEventType;
-use serde::Deserialize;
+use futures::TryFutureExt;
 use tuwunel_core::{
 	Err, Result, err, info,
 	utils::{TryReadyExt, stream::TryBroadbandExt},
@@ -8,29 +6,15 @@ use tuwunel_core::{
 };
 use tuwunel_matrix::{event::Event, pdu::PduEvent, room_version::rules as room_rules};
 
-use super::{marker_present, rebuild_thread_summaries};
-use crate::{Services, integrity::ScanExt};
+use super::rebuild_thread_summaries;
+use crate::{
+	Services,
+	integrity::redactions::{Redaction, Unparsable, records_by_reference, redactions},
+};
 
 /// Stamped once the timeline has been checked for redactions applied without
 /// being recorded.
 pub(super) const MARKER: &str = "restore_foreign_redactions";
-
-/// Stamped by the origin when its rewrite of the stored redactions completes.
-const ORIGIN_MARKER: &str = "unembed_unsigned_info";
-
-/// Created on every open by an origin release that records redactions by
-/// reference.
-const ORIGIN_COLUMN: &str = "servernamekeyid_response";
-
-/// The event type of a stored row, read without the rest of the event.
-///
-/// The walk reads every timeline row, so only a row this shows to be a
-/// redaction pays for the full parse.
-#[derive(Deserialize)]
-struct Kind {
-	#[serde(rename = "type")]
-	kind: TimelineEventType,
-}
 
 /// Counts of what one walk of the timeline did.
 ///
@@ -58,23 +42,16 @@ struct Tally {
 /// so a redacted reply leaves its root's summary.
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn restore_redactions(services: &Services) -> Result {
-	if !origin_records_by_reference(services).await? {
+	if !records_by_reference(services).await? {
 		return Ok(());
 	}
 
 	let cork = services.db.cork_and_sync();
 
-	let Tally { restored, skipped, failed, unreadable } = services.db["pduid_pdu"]
-		.raw_stream()
-		.scanned(&services.server)
-		.ready_try_filter_map(|(_, value)| Ok(redaction(value)))
-		.broad_and_then(async move |redaction| {
-			let outcome = ready(redaction)
-				.and_then(|redaction| restore(services, redaction))
-				.await;
-
-			Ok(outcome)
-		})
+	// Redactions of one target can race, but each restore takes the room's lock
+	// and decides again under it.
+	let Tally { restored, skipped, failed, unreadable } = redactions(services)
+		.broad_and_then(async |redaction| Ok(restore(services, redaction).await))
 		.ready_try_fold(Tally::default(), |tally, outcome| Ok(tally.record(&outcome)))
 		.await?;
 
@@ -111,41 +88,22 @@ impl Tally {
 	}
 }
 
-/// Whether the origin ever opened the database with a release that records
-/// redactions by reference.
-///
-/// The stamp lands only when the origin finishes rewriting the stored rows,
-/// while its redactions take the new form from the first open, so the column
-/// that release creates on every open answers for a rewrite never finished.
-async fn origin_records_by_reference(services: &Services) -> Result<bool> {
-	if services.db.open_cf(ORIGIN_COLUMN)?.is_some() {
-		return Ok(true);
-	}
-
-	marker_present(services, ORIGIN_MARKER).await
-}
-
-/// The redaction event a timeline row holds.
-///
-/// Any other row is `None`, as is one whose type cannot be read, since nothing
-/// can be restored from it; a redaction that cannot be parsed is an error the
-/// walk counts.
-fn redaction(value: &[u8]) -> Option<Result<PduEvent>> {
-	serde_json::from_slice(value)
-		.is_ok_and(|probe: Kind| probe.kind == TimelineEventType::RoomRedaction)
-		.then(|| {
-			serde_json::from_slice(value)
-				.map_err(|e| err!(Database("unparsable redaction event: {e}")))
-				.inspect_err(|error| warn!(%error, "A stored redaction event could not be read"))
-		})
-}
-
 /// Records one redaction on its target, reporting whether the target was
 /// rewritten.
 ///
-/// A failure is logged with the redaction's event id and returned for the walk
-/// to count.
-async fn restore(services: &Services, redaction: PduEvent) -> Result<bool> {
+/// A failure, including a redaction that does not parse, is logged and returned
+/// for the walk to count.
+async fn restore(services: &Services, redaction: Redaction) -> Result<bool> {
+	let redaction = match redaction {
+		| Ok(redaction) => redaction,
+		| Err(Unparsable { error, .. }) => {
+			let error = err!(Database("unparsable redaction event: {error}"));
+
+			warn!(%error, "A stored redaction event could not be read");
+			return Err(error);
+		},
+	};
+
 	restore_target(services, &redaction)
 		.inspect_err(|error| {
 			warn!(event_id = %redaction.event_id(), %error, "A redaction could not be restored");

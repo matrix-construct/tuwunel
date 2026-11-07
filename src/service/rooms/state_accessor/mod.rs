@@ -3,6 +3,7 @@
 //! The service resolves current and historical state into typed events. It also
 //! centralizes visibility, redaction, erasure, invite, and tombstone decisions.
 
+mod checked;
 mod erased;
 mod room_state;
 mod server_can;
@@ -37,7 +38,11 @@ use tuwunel_core::{
 	Result, err, implement,
 	utils::{BoolExt, OptionExt},
 };
-use tuwunel_matrix::{Pdu, room::state::resolution::events::RoomCreateEvent, room_version};
+use tuwunel_matrix::{
+	Event, Pdu, room::state::resolution::events::RoomCreateEvent, room_version,
+};
+
+use crate::rooms::{state_compressor::CompressedState, timeline::Mapped};
 
 /// Resolves room state and answers state-based authorization questions.
 ///
@@ -228,6 +233,41 @@ impl Service {
 		self.room_state_get(room_id, &StateEventType::RoomEncryption, "")
 			.await
 			.is_ok()
+	}
+}
+
+/// Returns a user's membership content in a room's current state, as
+/// [`Service::get_member`] does, given that state rebuilt by
+/// `room_state_checked`.
+///
+/// Every outcome is the one that function gives, except that damage from the
+/// member's short ids to the event's timeline mapping is `Mapped::Damaged` where
+/// that function panics, fails or reads a prefix, and a failed read keeps its own
+/// error. Integrity checks read members through here, rebuilding a room's state
+/// once for all of its members.
+#[implement(Service)]
+pub(crate) async fn get_member_checked(
+	&self,
+	state: &CompressedState,
+	user_id: &UserId,
+) -> Result<Mapped<RoomMemberEventContent>> {
+	let event_id = self
+		.state_get_id_checked(state, &StateEventType::RoomMember, user_id.as_str())
+		.await?;
+
+	let Mapped::Event(event_id) = event_id else {
+		return Ok(Mapped::Damaged);
+	};
+
+	let member: Mapped<Pdu> = self
+		.services
+		.timeline
+		.get_checked(&event_id)
+		.await?;
+
+	match member {
+		| Mapped::Event(member) => member.get_content().map(Mapped::Event),
+		| Mapped::Damaged => Ok(Mapped::Damaged),
 	}
 }
 

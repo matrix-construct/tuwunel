@@ -1,37 +1,36 @@
 use std::{
-	collections::BTreeMap,
 	iter::from_fn,
 	path::{Path, PathBuf},
-	pin::pin,
 	sync::Arc,
 	time::Duration,
 };
 
 use bytes::Bytes;
-use futures::{StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use object_store::Error as ObjectStoreError;
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, Mxc, OwnedRoomId, OwnedUserId, RoomId,
-	ServerName, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, Mxc, OwnedUserId, RoomId, ServerName, UserId,
 };
-use serde::{Deserialize, de::IgnoredAny};
 use tokio::time::sleep;
 use tuwunel_core::{
 	Err, Error, Result, debug_warn, err, error, info,
 	itertools::Itertools,
-	utils,
-	utils::{ReadyExt, content_disposition::make_content_disposition, stream::TryIgnore},
+	result::NotFound,
+	utils::{
+		ReadyExt, TryReadyExt,
+		content_disposition::make_content_disposition,
+		stream::{TryBroadbandExt, TryIgnore},
+	},
 	warn,
 };
 use tuwunel_database::{Map, SEP};
 
-use crate::{Services, storage::Provider};
-
-/// Presence probe: `room_id` parses to `Some` when the stored PDU carries it.
-#[derive(Deserialize)]
-struct HasRoomId {
-	room_id: Option<IgnoredAny>,
-}
+use super::tally::{Outcome, Tally};
+use crate::{
+	Services,
+	integrity::pdu_room_ids::{Finding, classify, outliers, timeline},
+	storage::Provider,
+};
 
 /// Selects the source of a Conduit database's original media files.
 ///
@@ -408,140 +407,102 @@ fn sha256_hex(digest: &[u8]) -> String {
 	out
 }
 
-/// Injects `room_id` into stored PDUs that lack it. Runs once on every database
-/// (marker-gated by the caller); a native tuwunel DB always serializes the
-/// field, so it no-ops there. Only a room v12 (`hydra`) create event imported
-/// from Conduit omits it, deriving its room from the event's own id per
-/// MSC4291. Scans the `pduid_pdu` timeline (room from the key's leading short
-/// room id) and `eventid_outlierpdu` (room from the create event's own id, the
-/// outlier key).
-pub(super) async fn migrate_conduit_pdus(services: &Services) -> Result {
+/// Writes its room into each stored event lacking its `room_id`.
+///
+/// Runs once on every database, where a native one finds nothing: only a room
+/// version 12 create event imported from Conduit omits the field. The timeline is
+/// walked, then the outliers, and an event whose room nothing names is left as
+/// it is and counted.
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn migrate_pdus(services: &Services) -> Result {
 	let db = &services.db;
 	let progress = &services.server.progress;
 
-	// shortroomid -> room_id, inverted once so resolving each timeline PDU's
-	// room is a lookup rather than a scan of roomid_shortroomid.
-	let rooms: BTreeMap<u64, OwnedRoomId> = db["roomid_shortroomid"]
-		.stream()
-		.ignore_err()
-		.map(|(room_id, short): (&RoomId, u64)| (short, room_id.to_owned()))
-		.collect()
-		.await;
-
-	warn!("Ensuring stored PDUs carry their room_id field...");
+	info!("Ensuring stored PDUs carry their room_id field...");
 	let cork = db.cork_and_sync();
 
-	let pduid_pdu = &db["pduid_pdu"];
-
 	progress.enter("timeline rows");
-	let timeline = pduid_pdu
-		.raw_stream()
-		.ignore_err()
-		.ready_fold((0_usize, 0_usize), |acc, (key, value)| {
-			progress.advance();
-
-			tally(acc, inject_room_id(pduid_pdu, key, value, |_| pduid_room(&rooms, key)))
-		})
-		.await;
-
-	let outlier = &db["eventid_outlierpdu"];
+	let tally = repair_all(services, timeline(services), Tally::default()).await?;
 
 	progress.enter("outlier rows");
-	let outliers = outlier
-		.raw_stream()
-		.ignore_err()
-		.ready_fold((0_usize, 0_usize), |acc, (key, value)| {
-			progress.advance();
-
-			tally(acc, inject_room_id(outlier, key, value, |pdu| outlier_room(key, pdu)))
-		})
-		.await;
+	let tally = repair_all(services, outliers(services), tally).await?;
 
 	drop(cork);
 
-	let fixed = timeline.0.saturating_add(outliers.0);
-	let skipped = timeline.1.saturating_add(outliers.1);
-	if skipped > 0 {
-		warn!(%fixed, %skipped, "Injected room_id into stored PDUs; some were skipped");
+	if tally.skipped > 0 {
+		warn!(
+			fixed = %tally.repaired,
+			skipped = %tally.skipped,
+			stale = %tally.stale,
+			"Injected room_id into stored PDUs; some were skipped"
+		);
 	} else {
-		info!(%fixed, "Ensured stored PDUs carry room_id");
+		info!(fixed = %tally.repaired, stale = %tally.stale, "Ensured stored PDUs carry room_id");
 	}
 
 	Ok(())
 }
 
-fn tally((fixed, skipped): (usize, usize), result: Result<bool>) -> (usize, usize) {
-	match result {
-		| Ok(true) => (fixed.saturating_add(1), skipped),
-		| Ok(false) => (fixed, skipped),
-		| Err(e) => {
-			debug_warn!(error = %e, "skipping unreconcilable Conduit PDU");
-			(fixed, skipped.saturating_add(1))
+#[tracing::instrument(level = "debug", skip_all)]
+async fn repair_all<S>(services: &Services, findings: S, tally: Tally) -> Result<Tally>
+where
+	S: Stream<Item = Result<Finding>> + Send,
+{
+	// Each finding names its own row, so the repairs cannot interfere.
+	findings
+		.broad_and_then(async |finding| repair(services, &finding).await)
+		.ready_try_fold(tally, |tally, outcome| Ok(tally.record(outcome)))
+		.await
+}
+
+/// Writes the room into the event a finding names, as it stands now.
+///
+/// The row is read again and classified as the check does, taking a timeline
+/// event's room from the finding, since the short id leading its key never
+/// changes. An event whose room is unknown or that cannot be parsed is skipped,
+/// and one changed or removed since the scan is counted stale.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn repair(services: &Services, finding: &Finding) -> Result<Outcome> {
+	let Finding::Missing { column, key, room_id, .. } = finding else {
+		debug_warn!(%finding, "skipping unreconcilable Conduit PDU");
+
+		return Ok(Outcome::Skipped);
+	};
+
+	let map = &services.db[column.name()];
+	let current = map.get(key).await.optional()?;
+	let outcome = match current
+		.as_deref()
+		.and_then(|value| classify(*column, key, value, || Some(room_id.clone())))
+	{
+		| Some(Finding::Missing { key, room_id, pdu, .. }) => write(map, &key, pdu, &room_id),
+		| _ => Outcome::Stale,
+	};
+
+	Ok(outcome)
+}
+
+/// Writes an event back with its room.
+///
+/// An event whose rooted form fails to serialize is skipped.
+fn write(map: &Map, key: &[u8], pdu: CanonicalJsonObject, room_id: &RoomId) -> Outcome {
+	match serde_json::to_vec(&rooted(pdu, room_id)) {
+		| Ok(bytes) => {
+			map.insert(key, bytes);
+
+			Outcome::Repaired
+		},
+		| Err(error) => {
+			debug_warn!(%error, "skipping unreconcilable Conduit PDU");
+
+			Outcome::Skipped
 		},
 	}
 }
 
-/// Injects `room_id` into one PDU value that lacks it, sourcing the room from
-/// `resolve`. Returns whether the value was rewritten; `false` means it already
-/// carried a `room_id`. A cheap `HasRoomId` probe short-circuits that common
-/// case, so only the rewritten PDUs pay the full parse and re-serialize.
-fn inject_room_id(
-	map: &Arc<Map>,
-	key: &[u8],
-	value: &[u8],
-	resolve: impl FnOnce(&CanonicalJsonObject) -> Result<OwnedRoomId>,
-) -> Result<bool> {
-	let probe: HasRoomId = serde_json::from_slice(value)
-		.map_err(|e| err!(Database("Conduit PDU is not canonical JSON: {e}")))?;
-
-	if probe.room_id.is_some() {
-		return Ok(false);
-	}
-
-	let mut pdu: CanonicalJsonObject = serde_json::from_slice(value)
-		.map_err(|e| err!(Database("Conduit PDU is not canonical JSON: {e}")))?;
-
-	let room_id = resolve(&pdu)?;
+fn rooted(mut pdu: CanonicalJsonObject, room_id: &RoomId) -> CanonicalJsonObject {
 	pdu.insert("room_id".into(), CanonicalJsonValue::String(room_id.as_str().into()));
-
-	let bytes = serde_json::to_vec(&pdu)
-		.map_err(|e| err!(Database("re-serializing reconciled Conduit PDU: {e}")))?;
-
-	map.insert(key, bytes);
-
-	Ok(true)
-}
-
-/// The room of a `pduid_pdu` entry, from the short room id leading its key.
-fn pduid_room(rooms: &BTreeMap<u64, OwnedRoomId>, key: &[u8]) -> Result<OwnedRoomId> {
-	let short = key
-		.get(..8)
-		.ok_or_else(|| err!(Database("Conduit pduid is shorter than a short room id")))?;
-
-	rooms
-		.get(&utils::u64_from_u8(short))
-		.cloned()
-		.ok_or_else(|| err!(Database("Conduit pduid short room id maps to no room")))
-}
-
-/// The room of an `eventid_outlierpdu` entry that lacks `room_id`. Only a v12
-/// create event omits it, and its room id derives from the create event's own
-/// id, which is this outlier's key.
-fn outlier_room(key: &[u8], pdu: &CanonicalJsonObject) -> Result<OwnedRoomId> {
-	let is_create = matches!(
-		pdu.get("type"),
-		Some(CanonicalJsonValue::String(kind)) if kind == "m.room.create"
-	);
-
-	if !is_create {
-		return Err!(Database("Conduit outlier lacks room_id and is not a create event"));
-	}
-
-	let event_id = <&EventId>::try_from(str::from_utf8(key)?)
-		.map_err(|_| err!(Database("Conduit outlier key is not a valid event id")))?;
-
-	RoomId::new_v2(event_id.localpart())
-		.map_err(|e| err!(Database("deriving room id from create event id: {e}")))
+	pdu
 }
 
 /// Imports Conduit's pending knocks. Conduit names the columns
@@ -561,57 +522,10 @@ pub(super) async fn migrate_conduit_knocks(services: &Services) -> Result {
 	Ok(())
 }
 
-/// Splits Conduit's conflated highlight-count column. Conduit opens
-/// `roomuserid_lastnotificationread` against the `userroomid_highlightcount`
-/// tree (a copy-paste in its schema), so one column holds both stores:
-/// highlight counts keyed `user_id 0xff room_id` and last-notification-read
-/// tokens keyed `room_id 0xff user_id`. tuwunel keeps the two in separate
-/// columns with those same byte layouts, so every room-keyed (last-read) row
-/// moves verbatim into `roomuserid_lastnotificationread`, leaving the
-/// user-keyed highlight rows in place. The orderings never collide: a user id
-/// leads with `@`, a room id with `!`. Absent any room-keyed row the column is
-/// not aliased, so this returns early and is safe to run on a native database.
-pub(super) async fn migrate_conduit_highlight_split(services: &Services) -> Result {
-	let db = &services.db;
-	let highlight = db["userroomid_highlightcount"].clone();
-
-	// A room-keyed (last-read) row leads with '!'; without one the column is a
-	// plain highlight column needing no split.
-	if pin!(highlight.raw_keys_prefix(b"!"))
-		.next()
-		.await
-		.is_none()
-	{
-		return Ok(());
-	}
-
-	let lastread = db["roomuserid_lastnotificationread"].clone();
-	let cork = db.cork_and_sync();
-	let moved = highlight
-		.raw_stream()
-		.ignore_err()
-		.ready_fold(0_usize, |moved, (key, value)| {
-			if key.first() == Some(&b'!') {
-				lastread.insert(key, value);
-				highlight.remove(key);
-				moved.saturating_add(1)
-			} else {
-				moved
-			}
-		})
-		.await;
-
-	drop(cork);
-
-	if moved > 0 {
-		warn!(%moved, "Split Conduit last-notification-read rows out of the highlight-count column");
-	}
-
-	Ok(())
-}
-
-/// Copies every row of one column verbatim into another whose key and value
-/// share the same byte layout, so neither needs reserialization.
+/// Copies every row of one column verbatim into another.
+///
+/// The two columns share the byte layout of their keys and values, so neither
+/// needs reserializing. Returns how many rows were copied.
 async fn copy_cf(
 	services: &Services,
 	source_name: &'static str,
@@ -642,12 +556,10 @@ async fn copy_cf(
 mod tests {
 	use std::path::Path;
 
-	use super::{
-		HasRoomId, conduit_media_key, conduit_media_path, parse_conduit_media_value, sha256_hex,
-	};
+	use super::{conduit_media_key, conduit_media_path, parse_conduit_media_value, sha256_hex};
 
 	#[test]
-	fn conduit_media_path_deep_matches_conduit_default() {
+	fn media_path_deep_matches_conduit_default() {
 		// Conduit default Deep { length: 2, depth: 2 }: two 2-char segments of the
 		// 64-char digest, then the remaining 60 characters.
 		let hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -714,17 +626,5 @@ mod tests {
 
 		assert_eq!(filename, None);
 		assert_eq!(content_type, Some("image/png"));
-	}
-
-	#[test]
-	fn has_room_id_probe_detects_presence() {
-		let with_room_id = br#"{"room_id":"!r:server","type":"m.room.message"}"#;
-		let without_room_id = br#"{"type":"m.room.create","sender":"@u:server"}"#;
-
-		let present: HasRoomId = serde_json::from_slice(with_room_id).unwrap();
-		let absent: HasRoomId = serde_json::from_slice(without_room_id).unwrap();
-
-		assert!(present.room_id.is_some());
-		assert!(absent.room_id.is_none());
 	}
 }

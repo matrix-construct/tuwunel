@@ -19,11 +19,35 @@ use tuwunel_core::{
 };
 use tuwunel_matrix::event::Event;
 
-use crate::rooms::{
-	short::ShortRoomId,
-	threads::{thread_bundle_mut, thread_root},
-	timeline::RoomMutexGuard,
+use super::Position;
+use crate::{
+	integrity::leading_json,
+	rooms::{
+		short::ShortRoomId,
+		threads::{thread_bundle_mut, thread_root},
+		timeline::RoomMutexGuard,
+	},
 };
+
+/// What recording a redaction on the event it redacts would do.
+///
+/// The unrecorded redactions check decides each redaction through this without
+/// writing, where `restore_redaction` decides and writes under the room's lock.
+pub(crate) enum Restoration {
+	/// Recording it would rewrite the event's row.
+	Due,
+
+	/// Recording it would leave the event as it is.
+	Moot,
+
+	/// A timeline mapping the decision reads does not decode as a PDU id.
+	Malformed,
+
+	/// The event's row is missing or does not decode as the repair reads it, the
+	/// event does not take the redaction, or the redaction does not convert to
+	/// canonical JSON.
+	Unreadable,
+}
 
 /// Replaces an accepted PDU with its room-version redacted form.
 ///
@@ -177,12 +201,7 @@ async fn redaction_precedes(
 	recorded: &CanonicalJsonValue,
 	later: &EventId,
 ) -> Result<bool> {
-	let Some(recorded) = recorded
-		.as_object()
-		.and_then(|recorded| recorded.get("event_id"))
-		.and_then(CanonicalJsonValue::as_str)
-		.and_then(|id| <&EventId>::try_from(id).ok())
-	else {
+	let Some(recorded) = recorded_event_id(recorded) else {
 		return Ok(false);
 	};
 
@@ -191,6 +210,97 @@ async fn redaction_precedes(
 		.optional()?
 		.zip(later.optional()?)
 		.is_some_and(|(recorded, later)| recorded < later);
+
+	Ok(precedes)
+}
+
+/// Decides as [`Service::restore_redaction`] does, writing nothing.
+///
+/// No lock is taken, so the answer describes the rows as they stand. Each
+/// timeline mapping is decoded without trusting it, and the event's row is parsed
+/// as a release build of the stored-event decoder parses it, without a debug
+/// build's assertion that no further record follows the event's. So a mapping
+/// the primitive panics on reads as malformed and a row that decoder fails on as
+/// unreadable; only a failed read is an error.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(crate) async fn redaction_restoration<Pdu: Event + Send + Sync>(
+	&self,
+	event_id: &EventId,
+	reason: &Pdu,
+	rules: &RedactionRules,
+) -> Result<Restoration> {
+	let pdu_id = match self.pdu_position(event_id).await? {
+		| Position::Absent => return Ok(Restoration::Moot),
+		| Position::Damaged => return Ok(Restoration::Malformed),
+		| Position::At(pdu_id) => pdu_id,
+	};
+
+	let pdu = self
+		.db
+		.pduid_pdu
+		.get(&pdu_id)
+		.await
+		.optional()?
+		.and_then(|pdu| leading_json::<CanonicalJsonObject>(&pdu).ok());
+
+	let Some(pdu) = pdu else {
+		return Ok(Restoration::Unreadable);
+	};
+
+	if !restorable(&pdu, reason.room_id()) {
+		return Ok(Restoration::Moot);
+	}
+
+	if let Some(recorded) = recorded_redaction(&pdu) {
+		let Some(precedes) = self
+			.precedes_checked(recorded, reason.event_id())
+			.await?
+		else {
+			return Ok(Restoration::Malformed);
+		};
+
+		if !precedes {
+			return Ok(Restoration::Moot);
+		}
+	}
+
+	let Ok(because) = to_canonical_object(reason.as_pdu()).map(redacted_because) else {
+		return Ok(Restoration::Unreadable);
+	};
+
+	let restoration = match already_redacted(pdu, rules, because) {
+		| Ok(Some(_)) => Restoration::Due,
+		| Ok(None) => Restoration::Moot,
+		| Err(_) => Restoration::Unreadable,
+	};
+
+	Ok(restoration)
+}
+
+/// Whether the redaction a row records comes before `later`, as
+/// `redaction_precedes` decides it.
+///
+/// Each timeline mapping is decoded untrusted, and `None` means one does not
+/// decode, where that would panic.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn precedes_checked(
+	&self,
+	recorded: &CanonicalJsonValue,
+	later: &EventId,
+) -> Result<Option<bool>> {
+	let Some(recorded) = recorded_event_id(recorded) else {
+		return Ok(Some(false));
+	};
+
+	let (recorded, later) = join(self.pdu_position(recorded), self.pdu_position(later)).await;
+	let precedes = match (recorded?, later?) {
+		| (Position::Damaged, _) | (_, Position::Damaged) => None,
+		| (Position::At(recorded), Position::At(later)) =>
+			Some(recorded.pdu_count() < later.pdu_count()),
+		| _ => Some(false),
+	};
 
 	Ok(precedes)
 }
@@ -221,6 +331,14 @@ fn recorded_redaction(pdu: &CanonicalJsonObject) -> Option<&CanonicalJsonValue> 
 	pdu.get("unsigned")
 		.and_then(CanonicalJsonValue::as_object)
 		.and_then(|unsigned| unsigned.get("redacted_because"))
+}
+
+fn recorded_event_id(recorded: &CanonicalJsonValue) -> Option<&EventId> {
+	recorded
+		.as_object()
+		.and_then(|recorded| recorded.get("event_id"))
+		.and_then(CanonicalJsonValue::as_str)
+		.and_then(|id| <&EventId>::try_from(id).ok())
 }
 
 /// The redacted form of an event whose content the redaction already removed.
