@@ -71,6 +71,17 @@ pub struct Rooms {
 	#[serde(default)]
 	pub forget_forced_upon_leave: bool,
 
+	/// Requires local departures to be forgotten before pruning a room.
+	///
+	/// Disabling this lets `prune-empty` delete rooms local users left without
+	/// forgetting. Its force option bypasses this protection; local joins,
+	/// invites, and pending knocks always prevent pruning.
+	///
+	/// reloadable: yes
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub prune_require_forgotten: bool,
+
 	/// Allows standard users to create rooms.
 	///
 	/// Appservices and admins can always create rooms.
@@ -603,6 +614,7 @@ impl Default for Rooms {
 		Self {
 			federate_by_default: true_fn(),
 			forget_forced_upon_leave: Default::default(),
+			prune_require_forgotten: true_fn(),
 			allow_creation: true_fn(),
 			allow_alias_creation: true_fn(),
 			allow_unstable_versions: true_fn(),

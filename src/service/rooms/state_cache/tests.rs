@@ -31,16 +31,29 @@ async fn forgotten_state_requires_the_exact_marker() -> Result {
 	let room = room_id!("!forgotten:localhost");
 	let cache = &services.state_cache;
 
+	let config = &services.server.config.rooms;
+
+	assert!(config.prune_require_forgotten);
+	services.db["roomuserid_leftcount"].put((room, user), 1_u64);
+
 	for state in [FORGOTTEN_STATE, b"\xCA\xF6\0", b"\xCA\xF6\xFF", b"null", b"[]"] {
 		services.db["userroomid_leftstate"].put_raw((user, room), state);
 		let forgotten = state == FORGOTTEN_STATE;
 
+		assert_eq!(cache.can_prune_room(room, true).await?, forgotten);
+		assert!(cache.can_prune_room(room, false).await?);
 		assert_eq!(cache.is_forgotten(user, room).await?, forgotten);
 		assert_eq!(cache.is_left(user, room).await, !forgotten);
 		assert_eq!(cache.rooms_left(user).count().await, usize::from(!forgotten));
 		assert_eq!(cache.rooms_departed(user).count().await, 1);
 	}
 
+	services.db["roomuserid_knockedcount"].put((room, user), 2_u64);
+	assert!(!cache.can_prune_room(room, true).await?);
+	assert!(!cache.can_prune_room(room, false).await?);
+	services.db["roomuserid_knockedcount"].del((room, user));
+
+	services.db["roomuserid_leftcount"].del((room, user));
 	cache.forget(room, user).await?;
 	cache.forget(room, user).await?;
 	assert_eq!(cache.rooms_departed(user).count().await, 0);

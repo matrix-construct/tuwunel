@@ -1,49 +1,39 @@
-use futures::{FutureExt, StreamExt};
-use tuwunel_core::{Result, utils::FutureBoolExt};
+use futures::{StreamExt, TryStreamExt};
+use tuwunel_core::Result;
 
 use crate::admin_command;
 
 #[admin_command]
 pub(super) async fn room_prune_empty(&self, force: bool) -> Result {
-	let rooms = self
+	let config = &self.services.server.config.rooms;
+	let require_forgotten = config.prune_require_forgotten && !force;
+	let rooms_len = self
 		.services
 		.metadata
 		.iter_ids()
-		.filter(|room_id| {
-			let has_no_local_users = self
-				.services
-				.state_cache
-				.local_users_in_room(room_id)
-				.boxed()
-				.into_future()
-				.map(|(next, ..)| next.is_none())
-				.boxed();
-
-			let has_no_local_invites = self
-				.services
-				.state_cache
-				.local_users_invited_to_room(room_id)
-				.boxed()
-				.into_future()
-				.map(|(next, ..)| next.is_none())
-				.boxed();
-
-			has_no_local_users.and(has_no_local_invites)
-		})
 		.map(ToOwned::to_owned)
-		.collect::<Vec<_>>()
-		.await;
+		.map(Ok)
+		// An eligibility failure must not cancel another room midway through its purge.
+		.try_fold(0_usize, async |count, room_id| -> Result<usize> {
+			let state_lock = self.services.state.mutex.lock(&room_id).await;
 
-	for room_id in &rooms {
-		let state_lock = self.services.state.mutex.lock(room_id).await;
+			if !self
+				.services
+				.state_cache
+				.can_prune_room(&room_id, require_forgotten)
+				.await?
+			{
+				return Ok(count);
+			}
 
-		self.services
-			.delete
-			.delete_room(room_id, force, state_lock)
-			.await?;
-	}
+			self.services
+				.delete
+				.delete_room(&room_id, force, state_lock)
+				.await?;
 
-	let rooms_len = rooms.len();
+			Ok(count.saturating_add(1))
+		})
+		.await?;
 
 	write!(self, "Successfully deleted {rooms_len} rooms from our database.").await?;
 

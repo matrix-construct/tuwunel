@@ -18,7 +18,7 @@ use std::{
 
 use futures::{
 	Stream, StreamExt, TryStreamExt,
-	future::join5,
+	future::{join5, ready},
 	pin_mut,
 	stream::{empty, select},
 };
@@ -486,6 +486,41 @@ pub fn local_users_invited_to_room<'a>(
 ) -> impl Stream<Item = &UserId> + Send + 'a {
 	self.room_members_invited(room_id)
 		.ready_filter(|user| self.services.globals.user_is_local(user))
+}
+
+/// Tests whether local memberships permit pruning a room.
+///
+/// Joins, invites, and knocks always protect the room. When required,
+/// departures protect it until forgotten; read failures propagate.
+/// Callers must hold the room state lock through this check and deletion.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub async fn can_prune_room(&self, room_id: &RoomId, require_forgotten: bool) -> Result<bool> {
+	let prefix = (room_id, Interfix);
+	let occupied = [
+		&self.db.roomuserid_joinedcount,
+		&self.db.roomuserid_invitecount,
+		&self.db.roomuserid_knockedcount,
+	]
+	.into_iter()
+	.stream()
+	.flat_map(|map| map.keys_prefix(&prefix))
+	.try_any(|(_, user): (Ignore, &UserId)| ready(self.services.globals.user_is_local(user)))
+	.await?;
+
+	if occupied || !require_forgotten {
+		return Ok(!occupied);
+	}
+
+	self.db
+		.roomuserid_leftcount
+		.keys_prefix(&prefix)
+		.try_filter(|(_, user): &(Ignore, &UserId)| {
+			ready(self.services.globals.user_is_local(user))
+		})
+		.and_then(async |(_, user)| self.is_forgotten(user, room_id).await)
+		.try_all(ready)
+		.await
 }
 
 /// Streams user identifiers from the once-joined index under a room prefix.

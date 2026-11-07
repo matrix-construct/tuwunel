@@ -4770,6 +4770,16 @@
 #
 #forget_forced_upon_leave = false
 
+# Requires local departures to be forgotten before pruning a room.
+#
+# Disabling this lets `prune-empty` delete rooms local users left without
+# forgetting. Its force option bypasses this protection; local joins,
+# invites, and pending knocks always prevent pruning.
+#
+# reloadable: yes
+#
+#prune_require_forgotten = true
+
 # Allows standard users to create rooms.
 #
 # Appservices and admins can always create rooms.
