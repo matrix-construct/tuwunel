@@ -1,53 +1,81 @@
+use std::sync::Arc;
+
 use tuwunel_core::{
 	Result, debug, info,
-	utils::{ReadyExt, hash::verify_password, stream::TryExpect},
+	result::NotFound,
+	utils::{TryReadyExt, stream::TryBroadbandExt},
 	warn,
 };
+use tuwunel_database::Map;
 
-use crate::Services;
+use super::tally::{Outcome, Tally};
+use crate::{
+	Services,
+	integrity::userid_password::{Finding, classify, scan},
+	users::PASSWORD_SENTINEL,
+};
 
-pub(super) async fn fix_hashed_sentinel_passwords(services: &Services) -> Result {
-	const PASSWORD_SENTINEL: &str = "*";
-
+/// Rewrites each hashed sentinel back to the sentinel.
+///
+/// With no identity provider configured the pass waits and reports unfinished, so
+/// a provider added later still gets it.
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn fix_hashed_sentinel_passwords(services: &Services) -> Result<bool> {
 	if services.config.identity_provider.is_empty() {
 		debug!("Skipping sentinel password migration since no SSO IdP configured.");
-		return Ok(());
+		return Ok(false);
 	}
 
 	let db = &services.db;
 	let cork = db.cork_and_sync();
-	let userid_password = db["userid_password"].clone();
+	let userid_password = &db["userid_password"];
 
 	warn!(sentinel = %PASSWORD_SENTINEL, "Fixing occurrences of hashed sentinel passwords");
 
-	let (checked, good, bad) = userid_password
-		.stream()
-		.expect_ok()
-		.ready_fold(
-			(0, 0, 0),
-			|(mut checked, mut good, mut bad): (usize, usize, usize),
-			 (key, val): (&str, &str)| {
-				let good_sentinel = val == PASSWORD_SENTINEL;
-				let bad_sentinel = !val.is_empty()
-					&& !good_sentinel
-					&& verify_password(PASSWORD_SENTINEL, val).is_ok();
-
-				checked = checked.saturating_add(usize::from(true));
-				good = good.saturating_add(usize::from(good_sentinel));
-				bad = bad.saturating_add(usize::from(bad_sentinel));
-
-				if bad_sentinel {
-					userid_password.insert(key, PASSWORD_SENTINEL);
-				}
-
-				(checked, good, bad)
-			},
-		)
-		.await;
+	// Each finding names its own row, so the repairs cannot interfere.
+	let tally = scan(services)
+		.broad_and_then(async |finding| repair(userid_password, &finding).await)
+		.ready_try_fold(Tally::default(), |tally, outcome| Ok(tally.record(outcome)))
+		.await?;
 
 	drop(cork);
-	info!(?checked, ?good, ?bad, "Fixed any occurrences of hashed sentinel passwords");
+	info!(
+		bad = %tally.repaired,
+		stale = %tally.stale,
+		unparsable = %tally.skipped,
+		"Fixed any occurrences of hashed sentinel passwords"
+	);
 
-	db["global"].insert(b"fix_hashed_sentinel_passwords", []);
-	userid_password.sort()
+	userid_password.sort()?;
+
+	Ok(true)
+}
+
+/// Rewrites the password a finding names, if it still hashes the sentinel.
+///
+/// The row is read again and classified as the check does, so a row changed or
+/// removed since the scan is counted stale and left alone.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn repair(userid_password: &Arc<Map>, finding: &Finding) -> Result<Outcome> {
+	let Finding::Hashed { user_id } = finding else {
+		return Ok(Outcome::Skipped);
+	};
+
+	let current = userid_password
+		.get(user_id.as_str())
+		.await
+		.optional()?;
+
+	let hashed = current
+		.as_deref()
+		.and_then(|value| classify(user_id.as_bytes(), value))
+		.is_some_and(|finding| matches!(finding, Finding::Hashed { .. }));
+
+	if !hashed {
+		return Ok(Outcome::Stale);
+	}
+
+	userid_password.insert(user_id.as_str(), PASSWORD_SENTINEL);
+
+	Ok(Outcome::Repaired)
 }

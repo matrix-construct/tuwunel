@@ -7,11 +7,16 @@
 //! finding calls for, re-deciding anything a write may have changed.
 
 pub mod columns;
+pub mod mediaid_user;
+pub mod readreceiptid_readreceipt;
 pub mod referencedevents;
+pub mod roomuserid_joined;
 mod scan;
 pub mod schema;
 #[cfg(test)]
 mod tests;
+pub mod userid_password;
+pub mod useridprofilekey_value;
 
 use std::{collections::BTreeMap, fmt::Display};
 
@@ -24,8 +29,18 @@ use crate::Services;
 type Walk = for<'a> fn(&'a Services, usize) -> BoxFuture<'a, Result<Summary>>;
 
 /// Every check, in the order a whole run takes them.
-static CHECKS: &[&Check] =
-	&[&schema::CHECK, &columns::CHECK, &columns::UNUSED, &referencedevents::CHECK];
+static CHECKS: &[&Check] = &[
+	&schema::CHECK,
+	&columns::CHECK,
+	&columns::UNUSED,
+	&roomuserid_joined::CHECK,
+	&referencedevents::CHECK,
+	&readreceiptid_readreceipt::CHECK,
+	&mediaid_user::LEGACY,
+	&mediaid_user::REMOTE,
+	&useridprofilekey_value::CHECK,
+	&userid_password::CHECK,
+];
 
 /// A finding of any check.
 ///

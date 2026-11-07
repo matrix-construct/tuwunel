@@ -61,6 +61,7 @@ mod redactions;
 mod remove_remote_media_userid;
 mod retroactively_fix_bad_data_from_roomuserid_joined;
 mod split_conduit_highlight_counts;
+mod tally;
 mod token_expiry;
 mod upgrade_legacy_mediaid_user;
 
@@ -336,9 +337,12 @@ pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Resul
 		db["global"].insert("retroactively_fix_bad_data_from_roomuserid_joined", []);
 	}
 
-	if pending(services, "fix_bad_double_separator_in_state_cache").await? {
-		fix_bad_double_separator_in_state_cache(services).await?;
-	}
+	run_once(
+		services,
+		"fix_bad_double_separator_in_state_cache",
+		fix_bad_double_separator_in_state_cache,
+	)
+	.await?;
 
 	if pending(services, "retroactively_fix_bad_data_from_roomuserid_joined").await? {
 		retroactively_fix_bad_data_from_roomuserid_joined(services).await?;
@@ -347,21 +351,18 @@ pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Resul
 	run_once(services, "fix_referencedevents_missing_sep", fix_referencedevents_missing_sep)
 		.await?;
 
-	if pending(services, "fix_readreceiptid_readreceipt_duplicates").await? {
-		fix_readreceiptid_readreceipt_duplicates(services).await?;
-	}
+	run_once(
+		services,
+		"fix_readreceiptid_readreceipt_duplicates",
+		fix_readreceiptid_readreceipt_duplicates,
+	)
+	.await?;
 
-	if pending(services, "fix_hashed_sentinel_passwords").await? {
-		fix_hashed_sentinel_passwords(services).await?;
-	}
+	until_finished(services, "fix_hashed_sentinel_passwords", fix_hashed_sentinel_passwords)
+		.await?;
 
-	if pending(services, "upgrade_legacy_mediaid_user").await? {
-		upgrade_legacy_mediaid_user(services).await?;
-	}
-
-	if pending(services, "remove_remote_media_userid").await? {
-		remove_remote_media_userid(services).await?;
-	}
+	run_once(services, "upgrade_legacy_mediaid_user", upgrade_legacy_mediaid_user).await?;
+	run_once(services, "remove_remote_media_userid", remove_remote_media_userid).await?;
 
 	if pending(services, "rebuild_roomid_tscount_pducount").await? {
 		rebuild_roomid_tscount_pducount(services).await?;
@@ -376,9 +377,7 @@ pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Resul
 		db["global"].insert("rebuild_relatesto_typed", []);
 	}
 
-	if pending(services, "migrate_profile_keys_to_useridprofilekey").await? {
-		migrate_profile_keys(services).await?;
-	}
+	run_once(services, "migrate_profile_keys_to_useridprofilekey", migrate_profile_keys).await?;
 
 	if pending(services, "rebuild_thread_summaries").await? {
 		rebuild_thread_summaries(services).await;

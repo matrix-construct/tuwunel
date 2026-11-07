@@ -1,20 +1,30 @@
+use std::sync::Arc;
+
 use ruma::{UserId, profile::ProfileFieldName};
-use serde::de::IgnoredAny;
 use tuwunel_core::{
 	Result, info,
-	utils::{ReadyExt, stream::TryExpect},
+	result::NotFound,
+	utils::{
+		ReadyExt, TryReadyExt,
+		stream::{TryBroadbandExt, TryExpect},
+	},
 	warn,
 };
-use tuwunel_database::Json;
+use tuwunel_database::{Json, Map};
 
-use crate::Services;
+use super::tally::{Outcome, Tally};
+use crate::{
+	Services,
+	integrity::useridprofilekey_value::{Finding, classify, scan},
+};
 
 /// Relocates the per-user displayname and avatar_url out of their dedicated
 /// columns into the unified useridprofilekey_value store keyed by MSC4133 field
 /// name, where the profile service now reads them.
 ///
 /// The dedicated columns are left intact, so an older binary opening the same
-/// database still resolves.
+/// database still resolves. The relocation has no check, as those columns go
+/// stale, but the values already in the store are then repaired from theirs.
 pub(super) async fn migrate_profile_keys(services: &Services) -> Result {
 	let db = &services.db;
 	let cork = db.cork_and_sync();
@@ -67,27 +77,55 @@ pub(super) async fn migrate_profile_keys(services: &Services) -> Result {
 		})
 		.await;
 
-	let fixed_strings = useridprofilekey_value
-		.raw_stream()
-		.expect_ok()
-		.ready_fold(0_usize, |count, (key, value)| {
-			if serde_json::from_slice::<IgnoredAny>(value).is_err() {
-				let Ok(string) = str::from_utf8(value) else {
-					warn!("Non-UTF8 data in profile value: {key:?} => {value:?}");
-					useridprofilekey_value.remove(key);
-					return count;
-				};
-				useridprofilekey_value.raw_put(key, Json(string));
-				return count.saturating_add(1);
-			}
-
-			count
-		})
-		.await;
+	// Each finding names its own row, so the repairs cannot interfere.
+	let tally = scan(services)
+		.broad_and_then(async |finding| repair(&useridprofilekey_value, &finding).await)
+		.ready_try_fold(Tally::default(), |tally, outcome| Ok(tally.record(outcome)))
+		.await?;
 
 	drop(cork);
-	info!(%displaynames, %avatar_urls, %blurhashes, %fixed_strings, "Relocated profile keys into useridprofilekey_value");
+	info!(
+		%displaynames,
+		%avatar_urls,
+		%blurhashes,
+		fixed_strings = %tally.repaired,
+		removed = %tally.removed,
+		stale = %tally.stale,
+		"Relocated profile keys into useridprofilekey_value"
+	);
 
-	db["global"].insert(b"migrate_profile_keys_to_useridprofilekey", []);
 	useridprofilekey_value.sort()
+}
+
+/// Re-encodes or removes the value a finding names, as it stands now.
+///
+/// The row is read again and classified as the check does, so the text written is
+/// the current text. A row removed since the scan, or no longer needing repair, is
+/// counted stale.
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn repair(
+	useridprofilekey_value: &Arc<Map>,
+	finding: &Finding,
+) -> Result<Outcome> {
+	let (Finding::Bare { key, .. } | Finding::Opaque { key, .. }) = finding;
+	let current = useridprofilekey_value.get(key).await.optional()?;
+	let outcome = match current
+		.as_deref()
+		.and_then(|value| classify(key, value))
+	{
+		| None => Outcome::Stale,
+		| Some(Finding::Opaque { key, value }) => {
+			warn!(?key, ?value, "Non-UTF8 data in profile value");
+			useridprofilekey_value.remove(&key);
+
+			Outcome::Removed
+		},
+		| Some(Finding::Bare { key, text }) => {
+			useridprofilekey_value.raw_put(&key, Json(text.as_str()));
+
+			Outcome::Repaired
+		},
+	};
+
+	Ok(outcome)
 }

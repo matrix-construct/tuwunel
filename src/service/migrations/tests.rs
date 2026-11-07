@@ -1,12 +1,16 @@
-use ruma::server_name;
+use ruma::{server_name, user_id};
 use serde_json::{Value, json};
-use tuwunel_core::{Result, config::Figment};
-use tuwunel_database::Json;
+use tuwunel_core::{Result, config::Figment, result::NotFound};
+use tuwunel_database::{Json, serialize_key};
 use tuwunel_matrix::pdu::PduCount;
 
-use super::{REBUILD_LIVE_THREAD_ACTIVITY, fresh, local_user_id, marker_present, migrate};
+use super::{
+	REBUILD_LIVE_THREAD_ACTIVITY, fresh, local_user_id, marker_present, migrate,
+	migrate_profile_keys::repair as repair_profile_value, tally::Outcome,
+};
 use crate::{
 	Services,
+	integrity::useridprofilekey_value::Finding,
 	test_utils::{fixture, pdu_id},
 };
 
@@ -30,6 +34,34 @@ fn localpart_past_the_inline_budget_survives() {
 #[test]
 fn unusable_localpart_is_skipped() {
 	assert!(local_user_id("alice\0bob", server_name!("example.org")).is_none());
+}
+
+#[tokio::test]
+async fn profile_value_repair_reads_the_row_again() -> Result {
+	let config = Figment::new().merge(("admin.room.create", false));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let values = &services.db["useridprofilekey_value"];
+	let key = serialize_key((user_id!("@alice:localhost"), "field"))?;
+	let stale = Finding::Bare { key: key.clone(), text: "stale".into() };
+
+	// The value was fixed after the scan reported it bare.
+	fresh(services).await?;
+	values.raw_put(&key, Json("current"));
+
+	assert_eq!(repair_profile_value(values, &stale).await?, Outcome::Stale);
+	assert_eq!(&*values.get(&key).await?, br#""current""#);
+
+	// The row was removed after the scan reported it.
+	values.remove(&key);
+
+	assert_eq!(repair_profile_value(values, &stale).await?, Outcome::Stale);
+	assert!(values.get(&key).await.is_not_found());
+
+	Ok(())
 }
 
 #[tokio::test]

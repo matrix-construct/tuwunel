@@ -1,62 +1,43 @@
-use ruma::{RoomId, UserId, identifiers_validation::ID_MAX_BYTES};
-use tuwunel_core::{
-	Result,
-	arrayvec::ArrayString,
-	info,
-	utils::{ReadyExt, stream::TryExpect},
-	warn,
+use tuwunel_core::{Result, debug, info, utils::TryReadyExt, warn};
+use tuwunel_database::Map;
+
+use crate::{
+	Services,
+	integrity::readreceiptid_readreceipt::{Finding, scan},
 };
-
-use crate::Services;
-
-type ArrayId = ArrayString<ID_MAX_BYTES>;
-type Key<'a> = (&'a RoomId, u64, &'a UserId);
 
 pub(super) async fn fix_readreceiptid_readreceipt_duplicates(services: &Services) -> Result {
 	warn!("Fixing undeleted entries in readreceiptid_readreceipt...");
 
 	let db = &services.db;
+	let readreceiptid_readreceipt = &db["readreceiptid_readreceipt"];
 	let cork = db.cork_and_sync();
-	let readreceiptid_readreceipt = db["readreceiptid_readreceipt"].clone();
 
-	let mut cur_room: Option<ArrayId> = None;
-	let mut cur_user: Option<ArrayId> = None;
-	let (mut total, mut fixed): (usize, usize) = (0, 0);
-
-	readreceiptid_readreceipt
-		.keys()
-		.expect_ok()
-		.ready_for_each(|key: Key<'_>| {
-			services.server.progress.advance();
-
-			let (room_id, _, user_id) = key;
-			let last_room = cur_room.replace(
-				room_id
-					.as_str()
-					.try_into()
-					.expect("invalid room_id in database"),
-			);
-
-			let last_user = cur_user.replace(
-				user_id
-					.as_str()
-					.try_into()
-					.expect("invalid user_id in database"),
-			);
-
-			let is_dup = cur_room == last_room && cur_user == last_user;
-			if is_dup {
-				readreceiptid_readreceipt.del(key);
-			}
-
-			fixed = fixed.saturating_add(is_dup.into());
-			total = total.saturating_add(1);
+	let (fixed, unparsable) = scan(services)
+		.ready_try_fold((0_usize, 0_usize), |totals, finding| {
+			Ok(repair(readreceiptid_readreceipt, totals, &finding))
 		})
-		.await;
+		.await?;
 
 	drop(cork);
-	info!(?total, ?fixed, "Fixed undeleted entries in readreceiptid_readreceipt.");
+	info!(%fixed, %unparsable, "Fixed undeleted entries in readreceiptid_readreceipt.");
 
-	db["global"].insert(b"fix_readreceiptid_readreceipt_duplicates", []);
 	readreceiptid_readreceipt.sort()
+}
+
+fn repair(
+	readreceiptid_readreceipt: &Map,
+	(fixed, unparsable): (usize, usize),
+	finding: &Finding,
+) -> (usize, usize) {
+	match finding {
+		| Finding::Unparsable { .. } => (fixed, unparsable.saturating_add(1)),
+		| Finding::Repeated { key, room_id, user_id } => {
+			debug!(%room_id, %user_id, "removing");
+
+			readreceiptid_readreceipt.remove(key);
+
+			(fixed.saturating_add(1), unparsable)
+		},
+	}
 }
