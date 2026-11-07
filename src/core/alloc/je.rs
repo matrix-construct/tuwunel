@@ -107,8 +107,7 @@ const MALLOC_CONF_METADATA_THP: &str = cfg_select! {
 
 #[cfg(feature = "jemalloc_conf")]
 const _MALLOC_CONF_PROF: &str = cfg_select! {
-	all(feature = "jemalloc_prof", target_arch = "x86_64") =>
-		",prof_active:false",
+	all(feature = "jemalloc_prof", target_arch = "x86_64") => ",prof_active:false",
 	_ => "",
 };
 
