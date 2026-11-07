@@ -10,15 +10,20 @@ use tuwunel_database::Database;
 use tuwunel_matrix::room::state::resolution::AuthCheckOutcome;
 
 use super::{
-	super::identity::{census as census_identities, repair as repair_identities},
-	Absences, Census, CompressedState, Mapping, Parents, Projection, Scanned, States, apply,
-	census, decode, depth, digests,
-	history::{allowed, read_error, references as history_references},
-	index, mapping, materialize, presence, publish, repair, scan, target,
+	super::identity::repair as repair_identities, States, digests, publish, repair, target,
 };
 use crate::{
 	Services,
-	rooms::state_compressor::ShortStateInfo,
+	integrity::short_ids::{
+		identity::census as census_identities,
+		state::{
+			Absences, Census, Mapping, Parents, Projection, Scanned, apply, census, decode,
+			depth,
+			history::{allowed, read_error, references as history_references},
+			index, mapping, materialize, presence, scan,
+		},
+	},
+	rooms::state_compressor::{CompressedState, ShortStateInfo},
 	test_utils::{fixture, pdu_id},
 };
 

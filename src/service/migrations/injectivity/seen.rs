@@ -1,32 +1,32 @@
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
-	Err, Result, async_noinline, debug_warn, err, implement, info,
-	result::NotFound,
-	smallvec::SmallVec,
-	utils::{TryReadyExt, u64_from_bytes},
-	warn,
+	Err, Result, async_noinline, debug_warn, err, implement, info, result::NotFound,
+	smallvec::SmallVec, utils::TryReadyExt, warn,
 };
 use tuwunel_database::{Database, Json, Txn, keyval::ValBuf, serialize_key, serialize_val};
 
 use self::{
-	check::{Finding, Subject, scan},
-	identity::{cleanup, consistent, repair as repair_identities},
-	references::References,
+	identity::{cleanup, repair as repair_identities},
 	rooms::repair as repair_rooms,
 	state::{gc::collect, repair as repair_states},
 };
-use crate::{Services, integrity::ScanExt};
+use crate::{
+	Services,
+	integrity::short_ids::{
+		Identity, Reason, Shape,
+		check::{Finding, Subject, scan},
+		identity::consistent,
+		references::References,
+	},
+};
 
-pub(super) mod check;
 mod identity;
-mod references;
 mod rooms;
-pub(crate) mod state;
+mod state;
 #[cfg(test)]
 mod tests;
 
 type Samples = SmallVec<[Sample; 1]>;
-type Identity = SmallVec<[u8; 48]>;
 type Observed = (Outcome, Uncertain);
 
 pub(super) const MARKER: &str = "repair_short_injectivity_seen";
@@ -79,74 +79,12 @@ enum Status {
 	Superseded,
 }
 
-/// Residue a completed repair leaves behind, as its outcome records it.
-///
-/// Each discriminant is the code a stored sample carries. The position in
-/// `SHAPES` is the slot its count occupies.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(into = "u8", try_from = "u8")]
-enum Shape {
-	/// Alias, ambiguous or malformed event short-id rows.
-	EventAlias = 1,
-
-	/// Alias, ambiguous or malformed state-key short-id rows.
-	StatekeyAlias = 2,
-
-	/// A forward row whose short has no reverse row.
-	DanglingWinner = 3,
-
-	/// A reverse row whose identity has no forward row.
-	PromotableReverse = 4,
-
-	/// A state entry naming an alias or refused event short.
-	EventAliasEntry = 12,
-
-	/// A state entry naming an alias or refused state-key short.
-	StatekeyAliasEntry = 13,
-
-	/// A state whose history could not be verified or rebuilt.
-	AffectedState = 15,
-
-	/// A state diff that adds and removes the same entry.
-	DiffCollision = 19,
-
-	/// A state entry naming an event short without a reverse row.
-	EventOrphanEntry = 23,
-
-	/// A state entry naming a state-key short without a reverse row.
-	StatekeyOrphanEntry = 24,
-
-	/// A cached auth chain derived from a damaged short mapping.
-	AuthChainCache = 27,
-
-	/// An unreachable state the collector could not remove.
-	UnreachableState = 29,
-
-	/// A short room id left behind by a purged room.
-	PurgeResidue = 32,
-
-	/// A second short room id of a live room.
-	LiveRoomAlias = 33,
-
-	/// A legacy marker that declined the repair.
-	DeclinedMarker = 37,
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Sample {
 	shape: Shape,
 	identity: Identity,
 	reason: Reason,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum Reason {
-	Identity,
-	HistoricalState,
-	References,
-	Ownership,
 }
 
 struct Boundary<'a> {
@@ -565,19 +503,3 @@ fn valid(&self) -> bool {
 				self.counts == [0; SHAPES.len()] && self.samples.is_empty() && !self.truncated,
 		}
 }
-
-#[tracing::instrument(level = "debug", skip(services, init, step))]
-async fn sweep<T: Send>(
-	services: &Services,
-	column: &str,
-	init: T,
-	step: impl Fn(T, &[u8], &[u8]) -> T + Sync,
-) -> Result<T> {
-	services.db[column]
-		.raw_stream()
-		.scanned(&services.server)
-		.ready_try_fold(init, |acc, (key, value)| Ok(step(acc, key, value)))
-		.await
-}
-
-fn short_of(bytes: &[u8]) -> Option<u64> { u64_from_bytes(bytes).ok() }

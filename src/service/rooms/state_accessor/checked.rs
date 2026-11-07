@@ -13,7 +13,7 @@ use tuwunel_core::{Err, Result, implement, result::NotFound, utils::u64_from_byt
 
 use super::Service;
 use crate::{
-	migrations::injectivity::seen::state::{apply, layer, visit},
+	integrity::short_ids::state::{apply, layer, visit},
 	rooms::{
 		short::ShortStateHash,
 		state_compressor::{CompressedState, compress_state_event, parse_compressed_state_event},

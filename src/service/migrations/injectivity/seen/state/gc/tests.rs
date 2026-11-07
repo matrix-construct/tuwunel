@@ -1,8 +1,11 @@
 use tuwunel_core::{Result, config::Figment};
 use tuwunel_database::Database;
 
-use super::{ROOTS, collect, inspect, row};
-use crate::test_utils::fixture;
+use super::{collect, row};
+use crate::{
+	integrity::short_ids::gc::{ROOTS, inspect},
+	test_utils::fixture,
+};
 
 #[tokio::test]
 async fn fresh_roots_protect_ancestors_and_unreachable_children_are_collected() -> Result {

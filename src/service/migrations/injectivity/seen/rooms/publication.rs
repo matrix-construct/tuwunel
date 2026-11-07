@@ -6,11 +6,13 @@ use tuwunel_core::{
 use tuwunel_database::{Database, Txn};
 
 use self::Operation::{Publish, Restore};
-use super::{
-	Action, Row, lookup,
-	rows::{COLUMNS, decode, rewrite},
+use crate::{
+	Services,
+	integrity::short_ids::rooms::{
+		Action, Row, lookup,
+		rows::{COLUMNS, decode, rewrite},
+	},
 };
-use crate::Services;
 
 pub(super) type Writes = Vec<Write>;
 

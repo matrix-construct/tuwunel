@@ -11,8 +11,8 @@ use tuwunel_core::{
 use tuwunel_database::{Database, KeyBuf, SEP, serialize_key, serialize_val};
 use tuwunel_matrix::{PduCount, PduEvent, PduId, RawPduId};
 
-use super::{inspect, repair};
-use crate::{Services, test_utils::fixture};
+use super::repair;
+use crate::{Services, integrity::short_ids::rooms::inspect, test_utils::fixture};
 
 type Record = (&'static str, Vec<u8>, Vec<u8>);
 type Records = Vec<Record>;

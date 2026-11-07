@@ -6,12 +6,11 @@
 //! Legacy markers are kept present so older binaries skip their superseded
 //! repair.
 
-pub(crate) mod seen;
+mod seen;
 
 use tuwunel_core::result::NotFound;
 use tuwunel_database::Database;
 
-pub(crate) use self::seen::check::check;
 use self::seen::{MARKER, repair, run, settle, stamp};
 use crate::Services;
 

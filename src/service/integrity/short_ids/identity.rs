@@ -1,0 +1,414 @@
+use std::{
+	collections::BTreeMap,
+	hash::{BuildHasher, RandomState},
+	str::from_utf8,
+	sync::Arc,
+};
+
+use futures::{FutureExt, StreamExt, TryStreamExt, future::lazy};
+use ruma::EventId;
+use tuwunel_core::{
+	Result, err,
+	utils::{TryReadyExt, result::NotFound, stream::TryWidebandExt},
+};
+use tuwunel_database::{Database, Map, SEP};
+
+use super::{Identity, short_of};
+use crate::{Services, integrity::ScanExt};
+
+pub(crate) struct Identities {
+	pub(crate) events: Family,
+	pub(crate) statekeys: Family,
+}
+
+pub(crate) struct Family {
+	pub(crate) candidates: Vec<Candidate>,
+	pub(crate) malformed: u64,
+	pub(crate) forward: &'static str,
+	pub(crate) reverse: &'static str,
+
+	/// Number of forward rows claiming each candidate short or alias winner.
+	claims: BTreeMap<u64, u64>,
+
+	/// Number of reverse rows naming each identity whose forward row is absent.
+	reverse_claims: BTreeMap<Identity, u64>,
+}
+
+pub(crate) struct Candidate {
+	pub(crate) short: u64,
+	pub(crate) identity: Identity,
+	pub(crate) kind: Kind,
+}
+
+/// How a candidate row departs from a consistent identity pair.
+///
+/// Healing writes the missing row of an admitted `Reverse` or `Forward`
+/// candidate, and cleanup deletes the reverse row of an admitted `Alias`.
+/// Nothing writes an `Unresolved` row.
+#[derive(Clone, Copy)]
+pub(crate) enum Kind {
+	/// The forward row names a short that has no reverse row.
+	Reverse,
+
+	/// The reverse row names an identity that has no forward row.
+	Forward,
+
+	/// The reverse row names an identity whose forward row names a different
+	/// short, carried here as the winner.
+	Alias(u64),
+
+	/// The row is malformed or contradicts its counterpart.
+	Unresolved,
+}
+
+/// The forward and reverse columns of one short-id family.
+///
+/// The forward column maps each identity to its short id, and the reverse column
+/// maps the short id back.
+#[derive(Clone, Copy)]
+struct Columns {
+	forward: &'static str,
+	reverse: &'static str,
+}
+
+/// Row count, malformed count and order-free digest of one column's pairs.
+///
+/// The digest sums a hash of each `(short, identity)` pair, so row order does
+/// not change it.
+#[derive(Default, Eq, PartialEq)]
+struct Tally {
+	rows: u64,
+	malformed: u64,
+	digest: u64,
+}
+
+const EVENTS: Columns = Columns {
+	forward: "eventid_shorteventid",
+	reverse: "shorteventid_eventid",
+};
+
+const STATEKEYS: Columns = Columns {
+	forward: "statekey_shortstatekey",
+	reverse: "shortstatekey_statekey",
+};
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub(crate) async fn census(services: &Services) -> Result<Identities> {
+	let events = family(services, EVENTS).await?;
+	let statekeys = family(services, STATEKEYS).await?;
+
+	Ok(Identities { events, statekeys })
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn family(services: &Services, Columns { forward, reverse }: Columns) -> Result<Family> {
+	let db = &services.db;
+	let dangling = db[forward]
+		.raw_stream()
+		.scanned(&services.server)
+		.map_ok(|(identity, short)| decode(short, identity))
+		.wide_and_then(async |(short, identity)| {
+			let kind = match malformed(forward, short, &identity) {
+				| true => Some(Kind::Unresolved),
+				| false => reverse_kind(&db[reverse], short, &identity).await?,
+			};
+
+			Ok(kind.map(|kind| Candidate { short, identity, kind }))
+		});
+
+	// Construction opens a cursor, so the reverse one is deferred until the forward scan ends.
+	let unpointed = lazy(|_| db[reverse].raw_stream())
+		.flatten_stream()
+		.scanned(&services.server)
+		.map_ok(|(short, identity)| decode(short, identity))
+		.wide_and_then(async |(short, identity)| {
+			let kind = match malformed(forward, short, &identity) {
+				| true => Some(Kind::Unresolved),
+				| false => forward_kind(&db[forward], short, &identity).await?,
+			};
+
+			Ok(kind.map(|kind| Candidate { short, identity, kind }))
+		});
+
+	let candidates: Vec<_> = dangling
+		.chain(unpointed)
+		.ready_try_filter_map(Ok)
+		.try_collect()
+		.await?;
+
+	let claims: BTreeMap<u64, u64> = candidates
+		.iter()
+		.flat_map(|candidate| {
+			let winner = match candidate.kind {
+				| Kind::Alias(winner) => Some(winner),
+				| _ => None,
+			};
+
+			[Some(candidate.short), winner]
+				.into_iter()
+				.flatten()
+				.map(|short| (short, 0_u64))
+		})
+		.collect();
+
+	let claims = count_claims(services, forward, claims).await?;
+
+	let reverse_claims: BTreeMap<Identity, u64> = candidates
+		.iter()
+		.filter(|candidate| matches!(candidate.kind, Kind::Forward))
+		.map(|candidate| (candidate.identity.clone(), 0_u64))
+		.collect();
+
+	let reverse_claims = count_reverse_claims(services, reverse, reverse_claims).await?;
+
+	let malformed_rows = candidates
+		.iter()
+		.filter(|candidate| malformed(forward, candidate.short, &candidate.identity))
+		.count()
+		.try_into()
+		.map_err(|_| err!("candidate count exceeds integer width"))?;
+
+	Ok(Family {
+		candidates,
+		malformed: malformed_rows,
+		forward,
+		reverse,
+		claims,
+		reverse_claims,
+	})
+}
+
+fn decode(short: &[u8], identity: &[u8]) -> (u64, Identity) {
+	(short_of(short).unwrap_or_default(), Identity::from_slice(identity))
+}
+
+fn malformed(forward: &str, short: u64, identity: &[u8]) -> bool {
+	short == 0 || !valid(identity, forward == EVENTS.forward)
+}
+
+fn valid(identity: &[u8], event: bool) -> bool {
+	if event {
+		return from_utf8(identity).is_ok_and(|event_id| <&EventId>::try_from(event_id).is_ok());
+	}
+
+	let Some(separator) = identity.iter().position(|byte| *byte == SEP) else {
+		return false;
+	};
+
+	let (event_type, key) = identity.split_at(separator);
+
+	// The spec bounds only an event type's length, so an empty type is well formed.
+	from_utf8(event_type).is_ok() && from_utf8(&key[1..]).is_ok()
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn reverse_kind(map: &Arc<Map>, short: u64, identity: &[u8]) -> Result<Option<Kind>> {
+	map.get(&short.to_be_bytes())
+		.map(NotFound::present)
+		.await
+		.map(|value| match value.as_deref() {
+			| Some(stored) if stored == identity => None,
+			| Some(_) => Some(Kind::Unresolved),
+			| None => Some(Kind::Reverse),
+		})
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn forward_kind(map: &Arc<Map>, short: u64, identity: &[u8]) -> Result<Option<Kind>> {
+	map.get(identity)
+		.map(NotFound::present)
+		.await
+		.map(|value| match value.as_deref().map(short_of) {
+			| None => Some(Kind::Forward),
+			| Some(Some(winner)) if winner == short => None,
+			| Some(Some(winner)) => Some(Kind::Alias(winner)),
+			| Some(None) => Some(Kind::Unresolved),
+		})
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn count_claims(
+	services: &Services,
+	forward: &str,
+	claims: BTreeMap<u64, u64>,
+) -> Result<BTreeMap<u64, u64>> {
+	// Only claims on candidate shorts are counted, so no candidates means no scan.
+	if claims.is_empty() {
+		return Ok(claims);
+	}
+
+	services.db[forward]
+		.raw_stream()
+		.scanned(&services.server)
+		.ready_try_fold(claims, |mut claims: BTreeMap<u64, u64>, (_, value)| {
+			// Prefix width counts an overlong value as a claim, which can only block a repair.
+			if let Some(count) = value
+				.get(..8)
+				.and_then(short_of)
+				.and_then(|short| claims.get_mut(&short))
+			{
+				*count = count.saturating_add(1);
+			}
+
+			Ok(claims)
+		})
+		.await
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn count_reverse_claims(
+	services: &Services,
+	reverse: &str,
+	claims: BTreeMap<Identity, u64>,
+) -> Result<BTreeMap<Identity, u64>> {
+	if claims.is_empty() {
+		return Ok(claims);
+	}
+
+	services.db[reverse]
+		.raw_stream()
+		.scanned(&services.server)
+		.ready_try_fold(claims, |mut claims: BTreeMap<Identity, u64>, (_, identity)| {
+			if let Some(count) = claims.get_mut(identity) {
+				*count = count.saturating_add(1);
+			}
+
+			Ok(claims)
+		})
+		.await
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+pub(crate) async fn admitted(
+	db: &Database,
+	family: &Family,
+	candidate: &Candidate,
+) -> Result<bool> {
+	let Candidate { short, identity, kind } = candidate;
+
+	if malformed(family.forward, *short, identity) {
+		return Ok(false);
+	}
+
+	let claims = |short| {
+		family
+			.claims
+			.get(&short)
+			.copied()
+			.unwrap_or_default()
+	};
+
+	let (forward, reverse) = (&db[family.forward], &db[family.reverse]);
+	let accepted = match *kind {
+		| Kind::Unresolved => false,
+		| Kind::Reverse =>
+			claims(*short) == 1
+				&& points_to(forward, identity, *short).await?
+				&& absent(reverse, &short.to_be_bytes()).await?,
+		| Kind::Forward =>
+			claims(*short) == 0
+				&& family.reverse_claims.get(identity) == Some(&1)
+				&& names(reverse, *short, identity).await?
+				&& absent(forward, identity).await?,
+		| Kind::Alias(winner) =>
+			winner != 0
+				&& winner != *short
+				&& claims(*short) == 0
+				&& claims(winner) == 1
+				&& points_to(forward, identity, winner).await?
+				&& names(reverse, *short, identity).await?
+				&& names(reverse, winner, identity).await?,
+	};
+
+	Ok(accepted)
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn points_to(map: &Arc<Map>, identity: &[u8], short: u64) -> Result<bool> {
+	map.get(identity)
+		.map(NotFound::present)
+		.await
+		.map(|value| value.as_deref().and_then(short_of) == Some(short))
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn absent(map: &Arc<Map>, key: &[u8]) -> Result<bool> {
+	map.get(key)
+		.map(NotFound::present)
+		.await
+		.map(|value| value.is_none())
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn names(map: &Arc<Map>, short: u64, identity: &[u8]) -> Result<bool> {
+	map.get(&short.to_be_bytes())
+		.map(NotFound::present)
+		.await
+		.map(|value| value.as_deref() == Some(identity))
+}
+
+/// Whether each short-id family pairs its forward and reverse rows one to one.
+///
+/// It agrees with a census that finds no candidates, reading every row once in
+/// key order and never looking up its counterpart. Columns holding the same
+/// pairs tally equal row counts and digests. Only forward rows are validated,
+/// since a reverse column holding the same pairs holds no others.
+#[tracing::instrument(level = "debug", skip_all)]
+pub(crate) async fn consistent(services: &Services) -> Result<bool> {
+	let hasher = RandomState::new();
+
+	Ok(paired(services, &hasher, EVENTS).await? && paired(services, &hasher, STATEKEYS).await?)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn paired(services: &Services, hasher: &RandomState, columns: Columns) -> Result<bool> {
+	let forward = tally(services, hasher, columns, columns.forward).await?;
+	let agree = forward.malformed == 0
+		&& tally(services, hasher, columns, columns.reverse).await? == forward;
+
+	Ok(agree)
+}
+
+#[tracing::instrument(
+	level = "debug",
+	skip_all,
+	fields(
+		%column,
+	),
+)]
+async fn tally(
+	services: &Services,
+	hasher: &RandomState,
+	columns: Columns,
+	column: &str,
+) -> Result<Tally> {
+	let forward = column == columns.forward;
+
+	services.db[column]
+		.raw_stream()
+		.scanned(&services.server)
+		.ready_try_fold(Tally::default(), |tally, (key, value)| {
+			let (short, identity) = match forward {
+				| true => (value, key),
+				| false => (key, value),
+			};
+
+			let short = short_of(short).unwrap_or_default();
+			let invalid = forward && malformed(columns.forward, short, identity);
+
+			Ok(tally.add(hasher, short, identity, invalid))
+		})
+		.await
+}
+
+impl Tally {
+	fn add(self, hasher: &RandomState, short: u64, identity: &[u8], invalid: bool) -> Self {
+		let digest = hasher.hash_one((short, identity));
+
+		Self {
+			rows: self.rows.saturating_add(1),
+			malformed: self.malformed.saturating_add(invalid.into()),
+			digest: self.digest.wrapping_add(digest),
+		}
+	}
+}

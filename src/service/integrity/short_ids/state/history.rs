@@ -50,8 +50,8 @@ const STATEKEYS: (&str, &str) = ("statekey_shortstatekey", "shortstatekey_statek
 #[derive(Clone, Copy)]
 struct Accepted<'a>(&'a Services);
 
-pub(super) struct References {
-	pub(super) affected: BTreeSet<u64>,
+pub(crate) struct References {
+	pub(crate) affected: BTreeSet<u64>,
 	anchors: Anchors,
 	held: BTreeSet<u64>,
 	unreadable: Vec<(&'static str, KeyBuf)>,
@@ -87,7 +87,7 @@ impl FetchEvent for Accepted<'_> {
 }
 
 // Rewrap storage failures so auth cannot read them as missing or invalid evidence.
-pub(super) fn read_error(error: Error) -> Error {
+pub(crate) fn read_error(error: Error) -> Error {
 	match error {
 		| error @ Error::Err(..) => IoError::other(error).into(),
 		| error @ Error::Io(..) if error.is_not_found() => IoError::other(error).into(),
@@ -96,7 +96,7 @@ pub(super) fn read_error(error: Error) -> Error {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) async fn references(
+pub(crate) async fn references(
 	services: &Services,
 	affected: BTreeSet<u64>,
 ) -> Result<References> {
@@ -249,7 +249,7 @@ fn incomplete(references: References) -> References {
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-pub(super) async fn target(
+pub(crate) async fn target(
 	services: &Services,
 	projection: &Projection,
 	references: &References,
@@ -604,7 +604,7 @@ async fn permits(
 		.await
 }
 
-pub(super) fn allowed(result: Result<AuthCheckOutcome>) -> Result<bool> {
+pub(crate) fn allowed(result: Result<AuthCheckOutcome>) -> Result<bool> {
 	match result {
 		| Ok(outcome) => Ok(matches!(outcome, AuthCheckOutcome::Allow)),
 		| Err(

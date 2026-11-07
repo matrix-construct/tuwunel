@@ -9,11 +9,16 @@ use tuwunel_core::{
 use tuwunel_database::{Database, Txn};
 use tuwunel_matrix::PduEvent;
 
-use super::{
-	Aliases, Census, Identity, Mapping, Services, claim, identity, lookup, present, short_of,
-	statekey,
+use crate::{
+	Services,
+	integrity::{
+		ScanExt,
+		short_ids::{
+			Identity, short_of,
+			state::{Aliases, Census, Mapping, claim, identity, lookup, present, statekey},
+		},
+	},
 };
-use crate::integrity::ScanExt;
 
 type Alias = (u64, (u64, Identity));
 

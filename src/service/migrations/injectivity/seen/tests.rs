@@ -15,15 +15,18 @@ use tuwunel_database::{Database, Txn, TxnError};
 
 use super::{
 	Boundary, IDENTITY_LIMIT, Identity, MARKER, Outcome, Reason, SAMPLE_LIMIT, SHAPES, Sample,
-	Shape, Status, Uncertain,
-	check::{Finding, Subject, check, scan},
-	identity::{Kind, census as identity_census, consistent, repair as repair_identities},
-	references::{References, entries},
-	run, stamp, stands, verify,
+	Shape, Status, Uncertain, identity::repair as repair_identities, run, stamp, stands, verify,
 };
 use crate::{
 	Services,
-	integrity::find,
+	integrity::{
+		find,
+		short_ids::{
+			check::{Finding, Subject, check, scan},
+			identity::{Kind, census as identity_census, consistent},
+			references::{References, entries},
+		},
+	},
 	migrations::{
 		injectivity::{CACHE_CLEARED, SUPERSEDED, fix},
 		migrations,

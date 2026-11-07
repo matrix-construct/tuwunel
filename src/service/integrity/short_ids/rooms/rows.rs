@@ -13,7 +13,7 @@ type Spot = Option<(Part, usize)>;
 
 type Record = (Box<[u8]>, Box<[u8]>);
 
-pub(super) const COLUMNS: [&str; 11] = [
+pub(crate) const COLUMNS: [&str; 11] = [
 	"pduid_pdu",
 	"eventid_pduid",
 	"tokenids",
@@ -31,7 +31,7 @@ pub(super) const COLUMNS: [&str; 11] = [
 pub(super) const SCANNED: [usize; 6] = [0, 2, 3, 4, 5, 6];
 
 #[derive(Clone, Copy)]
-pub(super) struct Decoded {
+pub(crate) struct Decoded {
 	pub(super) rooms: [u64; 2],
 	spots: [Spot; 2],
 }
@@ -47,7 +47,7 @@ struct NotifiedRoom {
 	sroomid: u64,
 }
 
-pub(super) fn decode(column: usize, key: &[u8], value: &[u8]) -> Option<Decoded> {
+pub(crate) fn decode(column: usize, key: &[u8], value: &[u8]) -> Option<Decoded> {
 	let spots = match column {
 		| 0 => {
 			raw(key)?;
@@ -155,7 +155,7 @@ pub(super) fn hints(column: usize, key: &[u8], value: &[u8]) -> [Option<u64>; 2]
 	}
 }
 
-pub(super) fn rewrite(
+pub(crate) fn rewrite(
 	decoded: Decoded,
 	column: usize,
 	key: &[u8],

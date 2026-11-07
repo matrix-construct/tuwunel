@@ -23,7 +23,7 @@ pub mod roomid_tscount_pducount;
 pub mod roomuserid_joined;
 mod scan;
 pub mod schema;
-mod short_ids;
+pub(crate) mod short_ids;
 #[cfg(test)]
 mod tests;
 pub mod thread_summaries;

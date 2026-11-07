@@ -11,13 +11,10 @@ use tuwunel_core::{Result, implement, utils::IterStream};
 
 use super::{
 	Identity, Reason, Shape,
+	gc::{Collected, inspect as inspect_gc},
 	identity::{Family, Identities, Kind, census as census_identities},
 	rooms::{Rooms, inspect as inspect_rooms},
-	state::{
-		findings as state_findings,
-		gc::{Collected, inspect as inspect_gc},
-		survey,
-	},
+	state::{findings as state_findings, survey},
 };
 use crate::{Services, integrity::Report};
 
@@ -27,13 +24,13 @@ use crate::{Services, integrity::Report};
 /// number of times, and keeps the first few as samples.
 pub(crate) struct Finding {
 	/// The class of residue, which names the outcome slot it counts in.
-	pub(super) shape: Shape,
+	pub(crate) shape: Shape,
 
 	/// Where the census found it.
-	pub(super) subject: Subject,
+	pub(crate) subject: Subject,
 
 	/// What kept the repair from resolving it.
-	pub(super) reason: Reason,
+	pub(crate) reason: Reason,
 }
 
 /// Where a finding lies.
@@ -41,7 +38,7 @@ pub(crate) struct Finding {
 /// Most subjects name one row, id or state, and verification samples its bytes.
 /// The rest stand for findings no single row carries: a total, an incomplete
 /// census, or residue a census could not rule out.
-pub(super) enum Subject {
+pub(crate) enum Subject {
 	/// An identity row, by the event id or state key it names.
 	Identity(Identity),
 

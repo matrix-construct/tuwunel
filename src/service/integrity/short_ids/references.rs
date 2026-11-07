@@ -8,16 +8,16 @@ use super::{
 };
 use crate::{Services, integrity::ScanExt};
 
-pub(super) struct References {
-	pub(super) events: BTreeSet<u64>,
-	pub(super) statekeys: BTreeSet<u64>,
-	pub(super) event_complete: bool,
-	pub(super) statekey_complete: bool,
+pub(crate) struct References {
+	pub(crate) events: BTreeSet<u64>,
+	pub(crate) statekeys: BTreeSet<u64>,
+	pub(crate) event_complete: bool,
+	pub(crate) statekey_complete: bool,
 }
 
 #[implement(References)]
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) async fn census(services: &Services, identities: &Identities) -> Result<Self> {
+pub(crate) async fn census(services: &Services, identities: &Identities) -> Result<Self> {
 	let db = &services.db;
 	let aliases = |family: &Family| {
 		family
@@ -113,7 +113,7 @@ fn retain_statediff(
 	self.statekey_complete &= valid;
 }
 
-pub(super) fn entries(value: &[u8]) -> impl Iterator<Item = Result<(u64, u64)>> + '_ {
+pub(crate) fn entries(value: &[u8]) -> impl Iterator<Item = Result<(u64, u64)>> + '_ {
 	repeat(()).scan((value.get(8..), false), |state, ()| {
 		let (Some(tail), removed) = state else {
 			*state = (Some(&[]), false);
