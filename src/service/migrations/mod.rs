@@ -344,9 +344,8 @@ pub(crate) async fn migrate(services: &Services, foreign_lineage: bool) -> Resul
 		retroactively_fix_bad_data_from_roomuserid_joined(services).await?;
 	}
 
-	if pending(services, "fix_referencedevents_missing_sep").await? {
-		fix_referencedevents_missing_sep(services).await?;
-	}
+	run_once(services, "fix_referencedevents_missing_sep", fix_referencedevents_missing_sep)
+		.await?;
 
 	if pending(services, "fix_readreceiptid_readreceipt_duplicates").await? {
 		fix_readreceiptid_readreceipt_duplicates(services).await?;

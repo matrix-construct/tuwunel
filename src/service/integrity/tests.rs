@@ -5,7 +5,7 @@ use tuwunel_core::{Result, config::Figment, itertools::Itertools};
 use super::{Summary, checks, find};
 use crate::{
 	Services,
-	migrations::{DATABASE_VERSION, MARKERS, fresh},
+	migrations::{DATABASE_VERSION, MARKERS, fresh, migrate},
 	test_utils::fixture,
 };
 
@@ -135,4 +135,34 @@ fn overlong(id: u64) -> [u8; 9] {
 	let bytes = id.to_be_bytes();
 
 	from_fn(|index| bytes.get(index).copied().unwrap_or(0))
+}
+
+#[tokio::test]
+async fn referencedevents_repair_clears_the_finding() -> Result {
+	let config = Figment::new().merge(("admin.room.create", false));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let referencedevents = &services.db["referencedevents"];
+
+	fresh(services).await?;
+	referencedevents.insert("!room:localhost$event", []);
+	referencedevents.insert("no-sigil", []);
+
+	let summary = run(services, "referenced-events").await?;
+
+	assert_eq!(summary.counts.get("missing-separator"), Some(&1));
+	assert_eq!(summary.counts.get("unparsable-key"), Some(&1));
+
+	services.db["global"].remove("fix_referencedevents_missing_sep");
+	migrate(services, false).await?;
+
+	assert_eq!(count(services, "referenced-events").await?, 1);
+	referencedevents
+		.exists(b"!room:localhost\xFF$event".as_slice())
+		.await?;
+
+	Ok(())
 }
