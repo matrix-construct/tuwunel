@@ -396,6 +396,58 @@ forbidden_usernames = [\"bad_user.name\"]
 	assert!(!logs.contains("host name"), "localparts are not host names: {logs}");
 }
 
+#[test]
+fn turn_provider_conflicts_refuse_the_config() {
+	let both = concat!(
+		"[global.turn.endpoint]\n",
+		"url = \"http://127.0.0.1:8088/\"\n",
+		"[global.turn.cloudflare]\n",
+		"key_id = \"0123456789abcdef\"\n",
+		"token = \"secret\"\n",
+	);
+
+	let no_lifetime = concat!(
+		"[global.turn]\n",
+		"ttl = 0\n",
+		"[global.turn.endpoint]\n",
+		"url = \"http://127.0.0.1:8088/\"\n",
+	);
+
+	assert_refused(both, "turn.cloudflare.key_id");
+	assert_refused(no_lifetime, "turn.ttl");
+}
+
+fn assert_refused(toml: &str, field: &str) {
+	let (result, _) = check_toml(toml);
+	let error = result
+		.expect_err("the config is refused")
+		.to_string();
+
+	assert!(error.contains(field), "{error}");
+}
+
+#[test]
+fn turn_provider_warnings_name_what_is_wrong() {
+	let tokenless = concat!("[global.turn.cloudflare]\n", "key_id = \"0123456789abcdef\"\n");
+	let overridden = concat!(
+		"[global.turn]\n",
+		"uris = [\"turn:turn.example.com\"]\n",
+		"secret = \"secret\"\n",
+		"[global.turn.endpoint]\n",
+		"url = \"http://127.0.0.1:8088/\"\n",
+	);
+
+	assert_warns(tokenless, "turn.cloudflare.token");
+	assert_warns(overridden, "are ignored");
+}
+
+fn assert_warns(toml: &str, needle: &str) {
+	let (result, logs) = check_toml(toml);
+
+	result.expect("a warning rather than a refusal");
+	assert!(logs.contains(needle), "{logs}");
+}
+
 // A pattern of bare dots is the any-character idiom, not a name typed by mistake.
 #[test]
 fn an_any_character_pattern_is_left_alone() {

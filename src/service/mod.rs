@@ -38,6 +38,7 @@ pub mod sync;
 pub mod tasks;
 pub mod threepid;
 pub mod transaction_ids;
+pub mod turn;
 pub mod uiaa;
 pub mod users;
 

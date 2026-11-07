@@ -18,7 +18,10 @@ use itertools::Itertools;
 use regex::RegexSet;
 use url::Url;
 
-use super::{DEPRECATED_KEYS, IdentityProvider, KNOWN_KEYS};
+use super::{
+	DEPRECATED_KEYS, IdentityProvider, KNOWN_KEYS,
+	turn::{Provider, Turn},
+};
 use crate::{
 	Config, Err, Result, debug, debug_info, err, error,
 	utils::{
@@ -587,18 +590,7 @@ fn check_jwt(config: &Config) -> Result {
 }
 
 fn check_turn_and_media_misc(config: &Config) -> Result {
-	// A blank secret resolves to none at all, so it is checked the same way here.
-	if !config.turn.uris.is_empty()
-		&& !is_secret_set(config.turn.secret_file.as_deref(), config.turn.secret.as_deref())
-		&& config.turn.username.is_empty()
-		&& config.turn.password.is_empty()
-	{
-		warn!(
-			"turn.uris is configured but no credential source is set; the endpoint \
-			 /_matrix/client/v3/voip/turnServer will return empty username and password. Set \
-			 turn.secret, turn.secret_file, or both turn.username and turn.password."
-		);
-	}
+	check_turn(&config.turn)?;
 
 	if config.http.max_request_size < 10_000_000 {
 		return Err!(Config(
@@ -625,6 +617,53 @@ fn check_turn_and_media_misc(config: &Config) -> Result {
 
 	check_thumbnails(config)?;
 	check_video_thumbnails(config)
+}
+
+fn check_turn(turn: &Turn) -> Result {
+	if turn.providers().count() > 1 {
+		return Err!(Config(
+			"turn.cloudflare.key_id",
+			"turn.endpoint.url is set as well; configure one TURN credential provider."
+		));
+	}
+
+	let provider = turn.provider();
+
+	if provider.is_some() && turn.ttl == 0 {
+		return Err!(Config(
+			"turn.ttl",
+			"Needs to be greater than zero while turn.endpoint or turn.cloudflare is set."
+		));
+	}
+
+	// A blank secret resolves to none at all, so it is checked the same way here.
+	let local = is_secret_set(turn.secret_file.as_deref(), turn.secret.as_deref())
+		|| !turn.username.is_empty()
+		|| !turn.password.is_empty();
+
+	if let Some(Provider::Cloudflare(cloudflare, _)) = provider
+		&& !is_secret_set(cloudflare.token_file.as_deref(), cloudflare.token.as_deref())
+	{
+		warn!(
+			"turn.cloudflare.key_id is set without turn.cloudflare.token or \
+			 turn.cloudflare.token_file; every request for TURN credentials will fail."
+		);
+	}
+
+	match provider {
+		| Some(_) if local || !turn.uris.is_empty() => warn!(
+			"turn.uris, the shared TURN secret and the static TURN credentials are ignored \
+			 while turn.endpoint or turn.cloudflare provides TURN credentials."
+		),
+		| None if !local && !turn.uris.is_empty() => warn!(
+			"turn.uris is configured but no credential source is set; the endpoint \
+			 /_matrix/client/v3/voip/turnServer will return empty username and password. Set \
+			 turn.secret, turn.secret_file, or both turn.username and turn.password."
+		),
+		| _ => {},
+	}
+
+	Ok(())
 }
 
 fn check_thumbnails(config: &Config) -> Result {

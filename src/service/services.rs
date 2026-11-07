@@ -17,7 +17,7 @@ use crate::{
 	rooms::{self, retention},
 	sending, sendmail, server_keys,
 	service::{Args, Service},
-	storage, sync, tasks, threepid, transaction_ids, uiaa, users,
+	storage, sync, tasks, threepid, transaction_ids, turn, uiaa, users,
 };
 
 pub struct Services {
@@ -72,6 +72,8 @@ pub struct Services {
 	pub sendmail: Arc<sendmail::Service>,
 	pub threepid: Arc<threepid::Service>,
 	pub profile: Arc<profile::Service>,
+	/// TURN credentials from an external provider, shared by all users.
+	pub turn: Arc<turn::Service>,
 
 	manager: Mutex<Option<Arc<Manager>>>,
 	pub server: Arc<Server>,
@@ -140,6 +142,7 @@ pub async fn build(server: Arc<Server>) -> Result<Arc<Self>> {
 		sendmail: sendmail::Service::build(&args)?,
 		threepid: threepid::Service::build(&args)?,
 		profile: profile::Service::build(&args)?,
+		turn: turn::Service::build(&args)?,
 
 		manager: Mutex::new(None),
 		server,
@@ -206,6 +209,7 @@ pub(crate) fn services(&self) -> impl Iterator<Item = Arc<dyn Service>> + Send {
 		cast!(self.registration_tokens),
 		cast!(self.rendezvous),
 		cast!(self.profile),
+		cast!(self.turn),
 	]
 	.into_iter()
 }

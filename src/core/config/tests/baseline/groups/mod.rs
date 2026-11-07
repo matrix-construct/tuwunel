@@ -23,7 +23,7 @@ fn grouping_sections_preserve_omitted_and_partial_defaults() {
 	let probes: Vec<Probe> =
 		from_str(include_str!("probes.json")).expect("independent grouping probes parse");
 
-	assert_eq!(probes.len(), 65);
+	assert_eq!(probes.len(), 67);
 	assert_defaults(&config_from_toml("[global]\n").expect("omitted groups parse"));
 	assert_group_coverage(probes.iter().map(|probe| probe.section.as_str()));
 

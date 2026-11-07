@@ -576,6 +576,24 @@
     "runtime_path": "turn.runtime_extra"
   },
   {
+    "section": "global.turn.cloudflare",
+    "field": "turn.cloudflare.key_id",
+    "empty": "[global]\n[global.turn.cloudflare]\n",
+    "partial": "[global]\n[global.turn.cloudflare]\nkey_id = \"0123456789abcdef\"\n",
+    "unknown_input": "[global.turn.cloudflare]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "turn.cloudflare.future_setting",
+    "runtime_path": "turn.cloudflare.runtime_extra"
+  },
+  {
+    "section": "global.turn.endpoint",
+    "field": "turn.endpoint.url",
+    "empty": "[global]\n[global.turn.endpoint]\n",
+    "partial": "[global]\n[global.turn.endpoint]\nurl = \"http://127.0.0.1:8088/\"\n",
+    "unknown_input": "[global.turn.endpoint]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "turn.endpoint.future_setting",
+    "runtime_path": "turn.endpoint.runtime_extra"
+  },
+  {
     "section": "global.typing",
     "field": "allow_incoming_typing",
     "empty": "[global]\n[global.typing]\n",

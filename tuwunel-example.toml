@@ -5949,18 +5949,23 @@
 # Tells clients which TURN servers relay their legacy Matrix calls, and
 # with what credentials, through `/_matrix/client/v3/voip/turnServer`.
 # No TURN server is built in; the guide at
-# <https://tuwunel.chat/calls/turn.html> uses coturn. With `uris` empty,
-# the default, that endpoint answers 404.
+# <https://tuwunel.chat/calls/turn.html> uses coturn. With `uris` empty
+# and no provider configured (the default), `turnServer` answers 404.
 #
 # Pick one credential source:
 #
-# - Shared secret (recommended): `secret` or `secret_file`, equal to
-#   coturn's `static-auth-secret`. Each request gets a fresh username
-#   `<expiry>:<user_id>` and HMAC-SHA1 password, valid for `ttl` seconds.
+# - Shared secret (recommended for your own TURN server): `secret` or
+#   `secret_file`, equal to coturn's `static-auth-secret`. Each request
+#   gets a fresh username `<expiry>:<user_id>` and HMAC-SHA1 password,
+#   valid for `ttl` seconds.
 # - Static: `username` and `password`, sent to every client as they are;
 #   ignored while a secret is set.
+# - Provider: `[global.turn.cloudflare]` for Cloudflare's hosted TURN, or
+#   `[global.turn.endpoint]` for any HTTP endpoint that issues expiring
+#   credentials. The server URIs come from the provider too, so `uris`,
+#   the secret and the static credentials are ignored.
 #
-# With `uris` set and neither source, startup logs a warning and clients
+# With `uris` set and no source, startup logs a warning and clients
 # receive an empty username and password.
 #
 # Minimal example:
@@ -5972,7 +5977,7 @@
 # Tips:
 # - `secret_file` is read on every request, so rotating the secret needs
 #   no reload or restart.
-# - Guests get 403 from the endpoint unless `allow_guests` is on.
+# - Guests get 403 from `turnServer` unless `allow_guests` is on.
 #
 #[global.turn]
 
@@ -6036,6 +6041,122 @@
 # reloadable: yes
 #
 #ttl = 86400
+
+
+################################################################################
+# Cloudflare Realtime TURN
+#
+# Fetches expiring TURN credentials and server URIs from Cloudflare's
+# hosted TURN service. Create a TURN key in the Cloudflare dashboard and
+# set its key ID and API token here. Cloudflare credentials live at most
+# 48 hours, so a longer `turn.ttl` is shortened to that. Only its TURN
+# URIs reach clients, without the port 53 ones browsers block.
+#
+# While `key_id` is set, `turn.uris`, the shared secret and the static
+# credentials are ignored. Set this section or `[global.turn.endpoint]`,
+# not both.
+#
+#     [global.turn.cloudflare]
+#     key_id = "0123456789abcdef0123456789abcdef"
+#     token_file = "/etc/tuwunel/.cloudflare_turn_token"
+#
+# Tips:
+# - One set of credentials is shared by every user and renewed after
+#   half its lifetime, so Cloudflare sees about two requests per
+#   credential lifetime however many clients ask. No Matrix user ID is
+#   sent.
+# - `token_file` is read at each renewal, so rotating the token needs no
+#   reload or restart.
+# - After a failed request Cloudflare is not asked again for a minute;
+#   meanwhile clients get whatever credentials are still unexpired, or
+#   502.
+#
+#[global.turn.cloudflare]
+
+# ID of the Cloudflare TURN key; setting it selects this provider.
+#
+# reloadable: yes
+#
+#key_id = ""
+
+# API token of the Cloudflare TURN key.
+#
+# reloadable: yes
+#
+#token =
+
+# Reads the API token from a file.
+#
+# This takes precedence over `token` and falls back to it when the file
+# cannot be opened. Surrounding whitespace is trimmed.
+#
+# reloadable: yes
+# example: "/etc/tuwunel/.cloudflare_turn_token"
+#
+#token_file =
+
+
+################################################################################
+# TURN credentials from an HTTP endpoint
+#
+# Fetches TURN credentials and server URIs from an HTTP endpoint, for a
+# TURN service that issues expiring credentials through an API rather
+# than sharing a secret. Tuwunel sends `GET <url>` with `service=turn`
+# and `ttl=<turn.ttl>` added to the query, and accepts either answer:
+#
+# - TURN REST API: `{"username", "password", "ttl", "uris"}`, as the
+#   STUNner auth service returns from `/`.
+# - WebRTC ICE servers: `{"iceServers": [...]}` or a bare list, each
+#   entry holding `urls`, `username` and `credential`, as STUNner's
+#   `/ice` returns. Clients take one username and password, so entries
+#   whose credentials differ from the first entry's are dropped.
+#
+# Only `turn:` and `turns:` URIs reach clients, as the Matrix spec
+# requires; any `stun:` URIs in the answer are left out.
+#
+# A service with another request or answer shape needs a small adapter
+# in front of it. While `url` is set, `turn.uris`, the shared secret and
+# the static credentials are ignored.
+#
+#     [global.turn.endpoint]
+#     url = "http://127.0.0.1:8088/"
+#     token_file = "/etc/tuwunel/.turn_endpoint_token"
+#
+# Tips:
+# - Query parameters already in `url` are kept, for a service that takes
+#   its API key in the query.
+# - One set of credentials is shared by every user and renewed after
+#   half its lifetime, so the endpoint sees about two requests per
+#   credential lifetime however many clients ask. No Matrix user ID is
+#   sent.
+# - After a failed request the endpoint is not asked again for a minute;
+#   meanwhile clients get whatever credentials are still unexpired, or
+#   502.
+#
+#[global.turn.endpoint]
+
+# URL of the credential endpoint.
+#
+# reloadable: yes
+# example: "http://127.0.0.1:8088/"
+#
+#url =
+
+# Supplies a bearer token sent in the `Authorization` header.
+#
+# reloadable: yes
+#
+#token =
+
+# Reads the bearer token from a file.
+#
+# This takes precedence over `token` and falls back to it when the file
+# cannot be opened. Surrounding whitespace is trimmed.
+#
+# reloadable: yes
+# example: "/etc/tuwunel/.turn_endpoint_token"
+#
+#token_file =
 
 
 ################################################################################

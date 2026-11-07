@@ -1,6 +1,7 @@
 [default]
 # "mis-seeded" and similar: typos splits on the hyphen and flags the "mis" prefix.
-extend-ignore-re = ["mis-[a-z]+"]
+# "STUNner" (a TURN server): typos splits on the case change and flags "Nner".
+extend-ignore-re = ["mis-[a-z]+", "STUNner"]
 
 [default.extend-words]
 "HELO" = "HELO"

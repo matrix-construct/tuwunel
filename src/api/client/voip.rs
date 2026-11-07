@@ -18,8 +18,11 @@ pub(crate) async fn turn_server_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_turn_server_info::v3::Request>,
 ) -> Result<get_turn_server_info::v3::Response> {
-	// MSC4166: return M_NOT_FOUND 404 if no TURN URIs are specified in any way
-	if services.server.config.turn.uris.is_empty() {
+	let provided = services.config.turn.provider().is_some();
+
+	// MSC4166: return M_NOT_FOUND 404 if no TURN URIs are specified in any way.
+	// A configured provider that cannot be reached answers 502, as that is transient.
+	if !provided && services.server.config.turn.uris.is_empty() {
 		return Err!(Request(NotFound("Not Found")));
 	}
 
@@ -27,6 +30,10 @@ pub(crate) async fn turn_server_route(
 
 	if !services.config.turn.allow_guests && sender_is_guest(&services, &body).await {
 		return Err!(Request(Forbidden("Guest users are not allowed to get TURN credentials")));
+	}
+
+	if provided {
+		return services.turn.credentials().await;
 	}
 
 	let (username, password) = services
