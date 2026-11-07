@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use ruma::{
 	EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, TransactionId, UserId,
-	api::client::filter::FilterDefinition, thirdparty::Medium,
+	api::client::filter::FilterDefinition, profile::ProfileFieldName, thirdparty::Medium,
 };
 use serde_json::Value as JsonValue;
 use tokio::time::Instant;
@@ -67,23 +67,28 @@ pub(crate) fn txnid_event_id(response: &[u8]) -> Result<OwnedEventId> {
 		.ok_or_else(|| err!(Database("Invalid event_id in txn_id data: {response:?}.")))
 }
 
-/// Whether the caller may change display names under
-/// `profile.enable_set_displayname`.
+/// Whether the caller may change a profile field under
+/// `profile.enable_set_displayname` and `profile.enable_set_avatar_url`.
 ///
-/// Appservices and server admins are exempt, matching Synapse's exemption for
-/// admins. `is_admin` is awaited only when the option is off and the caller
-/// is not an appservice.
-pub(crate) async fn may_set_displayname<T>(
+/// Fields without an option are always allowed. Appservices and server admins
+/// are exempt, matching Synapse's exemption for admins. `is_admin` is awaited
+/// only when the field's option is off and the caller is not an appservice.
+pub(crate) async fn may_set_profile_field<T>(
 	services: &Services,
 	body: &Ruma<T>,
+	field: &ProfileFieldName,
 	is_admin: impl AsyncFnOnce() -> bool,
 ) -> bool
 where
 	T: Sync,
 {
-	services.config.profile.enable_set_displayname
-		|| body.appservice_info.is_some()
-		|| is_admin().await
+	let enabled = match field {
+		| ProfileFieldName::DisplayName => services.config.profile.enable_set_displayname,
+		| ProfileFieldName::AvatarUrl => services.config.profile.enable_set_avatar_url,
+		| _ => true,
+	};
+
+	enabled || body.appservice_info.is_some() || is_admin().await
 }
 
 /// Whether the sender of a request is a guest.

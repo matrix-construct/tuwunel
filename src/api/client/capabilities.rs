@@ -17,7 +17,7 @@ use serde_json::json;
 use tuwunel_core::{Result, utils::BoolExt};
 use tuwunel_service::Services;
 
-use crate::{Ruma, utils::may_set_displayname};
+use crate::{Ruma, utils::may_set_profile_field};
 
 /// # `GET /_matrix/client/v3/capabilities`
 ///
@@ -34,16 +34,22 @@ pub(crate) async fn get_capabilities_route(
 		.user_is_admin(body.sender_user())
 		.await;
 
-	let set_displayname =
-		may_set_displayname(&services, &body, || ready(account_moderation)).await;
+	let may_set = async |field| {
+		may_set_profile_field(&services, &body, &field, || ready(account_moderation)).await
+	};
 
-	capabilities(&services, set_displayname, account_moderation).map(Response::new)
+	let set_displayname = may_set(ProfileFieldName::DisplayName).await;
+	let set_avatar_url = may_set(ProfileFieldName::AvatarUrl).await;
+
+	capabilities(&services, set_displayname, set_avatar_url, account_moderation)
+		.map(Response::new)
 }
 
 #[expect(deprecated)]
 fn capabilities(
 	services: &Services,
 	set_displayname: bool,
+	set_avatar_url: bool,
 	account_moderation: bool,
 ) -> Result<Capabilities> {
 	let available = services
@@ -58,10 +64,19 @@ fn capabilities(
 		.default_version
 		.clone();
 
-	// Matrix 1.16 clients read the display name policy from m.profile_fields.
-	let disallowed = set_displayname
+	// Matrix 1.16 clients read the profile field policy from m.profile_fields.
+	let disallowed: Vec<_> = [
+		(set_displayname, ProfileFieldName::DisplayName),
+		(set_avatar_url, ProfileFieldName::AvatarUrl),
+	]
+	.into_iter()
+	.filter_map(|(allowed, field)| allowed.is_false().then_some(field))
+	.collect();
+
+	let disallowed = disallowed
+		.is_empty()
 		.is_false()
-		.then(|| vec![ProfileFieldName::DisplayName]);
+		.then_some(disallowed);
 
 	let mut capabilities = Capabilities::default(); // non_exhaustive: no struct literal
 
@@ -69,7 +84,7 @@ fn capabilities(
 
 	// MSC3283: deprecated displayname/avatar capabilities for pre-1.16 clients.
 	capabilities.set_displayname = SetDisplayNameCapability::new(set_displayname);
-	capabilities.set_avatar_url = SetAvatarUrlCapability::new(true);
+	capabilities.set_avatar_url = SetAvatarUrlCapability::new(set_avatar_url);
 
 	// 3PID add/remove is available only when the email subsystem can send.
 	capabilities.thirdparty_id_changes =

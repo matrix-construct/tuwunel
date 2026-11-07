@@ -11,10 +11,10 @@ use super::true_fn;
 /// User profiles
 ///
 /// Controls who can read profiles, whether users can change their own
-/// display name, and how much of a remote profile is cached. By default the
-/// client profile endpoints answer without an access token, other servers
-/// can look up local profiles, and device names are not shared over
-/// federation.
+/// display name and avatar, and how much of a remote profile is cached. By
+/// default the client profile endpoints answer without an access token,
+/// other servers can look up local profiles, and device names are not
+/// shared over federation.
 ///
 /// Tips:
 /// - To hide profiles from people outside a user's rooms, set
@@ -77,6 +77,18 @@ pub struct Profile {
 	/// legacy: enable_set_displayname
 	#[serde(default = "true_fn")]
 	pub enable_set_displayname: bool,
+
+	/// Allows standard users to set or clear avatars through the client
+	/// profile API.
+	///
+	/// Server admins and appservices can always change avatars. Unlike
+	/// Synapse's option of the same name, disabling this also stops users
+	/// without an avatar from setting their first one.
+	///
+	/// reloadable: yes
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub enable_set_avatar_url: bool,
 
 	/// Restricts client profile retrieval to the user themselves or users
 	/// sharing a currently joined room.
@@ -146,6 +158,7 @@ impl Default for Profile {
 			max_remote_fields: default_max_remote_fields(),
 			max_fields_per_request: default_max_fields_per_request(),
 			enable_set_displayname: true_fn(),
+			enable_set_avatar_url: true_fn(),
 			limit_requests_to_users_who_share_rooms: Default::default(),
 			preserve_room_overrides: true_fn(),
 			allow_device_name_federation: Default::default(),

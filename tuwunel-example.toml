@@ -3742,10 +3742,10 @@
 # User profiles
 #
 # Controls who can read profiles, whether users can change their own
-# display name, and how much of a remote profile is cached. By default the
-# client profile endpoints answer without an access token, other servers
-# can look up local profiles, and device names are not shared over
-# federation.
+# display name and avatar, and how much of a remote profile is cached. By
+# default the client profile endpoints answer without an access token,
+# other servers can look up local profiles, and device names are not
+# shared over federation.
 #
 # Tips:
 # - To hide profiles from people outside a user's rooms, set
@@ -3796,6 +3796,17 @@
 # reloadable: yes
 #
 #enable_set_displayname = true
+
+# Allows standard users to set or clear avatars through the client
+# profile API.
+#
+# Server admins and appservices can always change avatars. Unlike
+# Synapse's option of the same name, disabling this also stops users
+# without an avatar from setting their first one.
+#
+# reloadable: yes
+#
+#enable_set_avatar_url = true
 
 # Restricts client profile retrieval to the user themselves or users
 # sharing a currently joined room.

@@ -12,7 +12,7 @@ use ruma::{
 use tuwunel_core::{Err, Result, err, utils::BoolExt};
 use tuwunel_service::{Services, presence::Ping, profile::Propagation};
 
-use crate::{ClientIp, Ruma, utils::may_set_displayname};
+use crate::{ClientIp, Ruma, utils::may_set_profile_field};
 
 /// Resolve a `PropagateTo` request value against the server default.
 ///
@@ -128,7 +128,7 @@ pub(crate) async fn set_profile_field_route(
 	let sender_user = body.sender_user();
 	let field = body.value.field_name();
 
-	displayname_check(&services, &body, &field).await?;
+	field_check(&services, &body, &field).await?;
 
 	if *sender_user != body.user_id
 		&& !body
@@ -178,7 +178,7 @@ pub(crate) async fn delete_profile_field_route(
 ) -> Result<delete_profile_field::v3::Response> {
 	let sender_user = body.sender_user();
 
-	displayname_check(&services, &body, &body.field).await?;
+	field_check(&services, &body, &body.field).await?;
 
 	if *sender_user != body.user_id
 		&& !body
@@ -246,25 +246,19 @@ where
 		.ok_or_else(|| err!(Request(Forbidden("Profile isn't available."))))
 }
 
-/// Refuses a display name change withheld by `profile.enable_set_displayname`.
+/// Refuses a profile field change withheld by `profile.enable_set_displayname`
+/// or `profile.enable_set_avatar_url`.
 ///
-/// Only display name writes are gated; `may_set_displayname` decides who is
-/// exempt.
-async fn displayname_check<T>(
-	services: &Services,
-	body: &Ruma<T>,
-	field: &ProfileFieldName,
-) -> Result
+/// `may_set_profile_field` decides which fields are gated and who is exempt.
+async fn field_check<T>(services: &Services, body: &Ruma<T>, field: &ProfileFieldName) -> Result
 where
 	T: Sync,
 {
 	let is_admin = || services.admin.user_is_admin(body.sender_user());
 
-	if *field != ProfileFieldName::DisplayName
-		|| may_set_displayname(services, body, is_admin).await
-	{
+	if may_set_profile_field(services, body, field, is_admin).await {
 		return Ok(());
 	}
 
-	Err!(Request(Forbidden("Setting display names has been disabled.")))
+	Err!(Request(Forbidden("Setting the {field} field has been disabled.")))
 }
