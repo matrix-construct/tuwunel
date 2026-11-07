@@ -2,8 +2,11 @@
 
 [workspace]
 resolver = "2"
-members = ["src/*", "src/api/admin", "src/api/client", "src/api/federation", "src/api/mas", "src/api/oidc"]
-default-members = ["src/*", "src/api/admin", "src/api/client", "src/api/federation", "src/api/mas", "src/api/oidc"]
+members = ["src/*", "src/api/*"]
+default-members = ["src/*", "src/api/*"]
+exclude = [
+	"src/api/router",
+]
 
 [workspace.package]
 authors = [
@@ -746,14 +749,14 @@ package = "tuwunel_database"
 path = "src/database"
 default-features = false
 
-[workspace.dependencies.tuwunel-core]
-package = "tuwunel_core"
-path = "src/core"
-default-features = false
-
 [workspace.dependencies.tuwunel-matrix]
 package = "tuwunel_matrix"
 path = "src/matrix"
+default-features = false
+
+[workspace.dependencies.tuwunel-core]
+package = "tuwunel_core"
+path = "src/core"
 default-features = false
 
 [workspace.dependencies.tuwunel-macros]
