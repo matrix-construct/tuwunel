@@ -574,7 +574,16 @@ fn check_password_hashing(config: &Config) -> Result {
 fn check_jwt(config: &Config) -> Result {
 	let jwt = &config.jwt;
 
+	#[cfg(not(feature = "jwt_login"))]
+	if jwt.enable {
+		return Err!(Config(
+			"jwt.enable",
+			"tuwunel was not built with JWT login support (\"jwt_login\")"
+		));
+	}
+
 	// A server without JWT login has an empty key, and without [global.jwt] an empty format.
+	#[cfg(feature = "jwt_login")]
 	if jwt.enable {
 		jwt.key_format()?;
 		jwt.nonempty_key()?;

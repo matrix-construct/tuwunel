@@ -1,5 +1,6 @@
 mod backoff_metrics;
 mod change_log_level;
+#[cfg(feature = "jwt_login")]
 mod create_jwt;
 mod database_files;
 mod database_stats;
@@ -336,6 +337,7 @@ pub(super) enum DebugCommand {
 	},
 
 	/// - Create a JWT token for login
+	#[cfg(feature = "jwt_login")]
 	CreateJwt {
 		/// Localpart of the user's MXID
 		user: String,

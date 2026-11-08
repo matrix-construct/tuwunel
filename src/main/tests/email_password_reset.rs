@@ -1,5 +1,6 @@
 #![cfg(test)]
 #![cfg(feature = "email")]
+#![cfg(feature = "jwt_login")]
 
 use fixture::run as run_fixture;
 use tuwunel_core::{

@@ -2,7 +2,7 @@ use ruma::{
 	CanonicalJsonValue, OwnedUserId,
 	api::{
 		IncomingRequest,
-		client::uiaa::{AuthData, AuthFlow, AuthType, Jwt, UiaaInfo},
+		client::uiaa::{AuthData, AuthFlow, AuthType, UiaaInfo},
 	},
 };
 use serde_json::{json, value::to_raw_value};
@@ -15,6 +15,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::{Services, uiaa::SESSION_ID_LENGTH};
 
+#[cfg(feature = "jwt_login")]
 use super::jwt::validate_user;
 use crate::Ruma;
 
@@ -91,7 +92,7 @@ where
 	let has_sso = bound_idp.is_some();
 
 	let jwt_flow = [AuthType::Jwt];
-	let has_jwt = services.config.jwt.enable;
+	let has_jwt = cfg!(feature = "jwt_login") && services.config.jwt.enable;
 
 	let mut uiaainfo = UiaaInfo {
 		flows: has_password
@@ -117,8 +118,9 @@ where
 		.map(serde_json::from_value)
 		.transpose()?
 	{
-		| Some(AuthData::Jwt(Jwt { ref token, .. })) => {
-			let sender_user = validate_user(services, token)?;
+		#[cfg(feature = "jwt_login")]
+		| Some(AuthData::Jwt(ref jwt)) => {
+			let sender_user = validate_user(services, &jwt.token)?;
 
 			if !services.users.exists(&sender_user).await {
 				return Err!(Request(NotFound("User {sender_user} is not registered.")));
@@ -132,6 +134,8 @@ where
 			// Success!
 			Ok(sender_user)
 		},
+		#[cfg(not(feature = "jwt_login"))]
+		| Some(AuthData::Jwt(_)) => Err!(Request(Unauthorized("JWT login is not enabled."))),
 		| Some(ref auth) => {
 			let sender_user = body
 				.sender_user

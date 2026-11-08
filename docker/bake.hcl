@@ -30,11 +30,11 @@ variable "git_ref_name" {
 cargo_feat_sets = {
     none = ""
     # Default features
-    default = "brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gcs_storage,gzip_compression,io_uring,jemalloc,jemalloc_conf,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,release_max_log_level,s3_storage,sentry_telemetry,synapse_admin,systemd,url_preview,zstd_compression"
+    default = "brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gcs_storage,gzip_compression,io_uring,jemalloc,jemalloc_conf,jwt_login,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,release_max_log_level,s3_storage,sentry_telemetry,synapse_admin,systemd,url_preview,zstd_compression"
     # Default features sans release_max_log_level
-    logging = "brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gcs_storage,gzip_compression,io_uring,jemalloc,jemalloc_conf,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,s3_storage,sentry_telemetry,synapse_admin,systemd,url_preview,zstd_compression"
+    logging = "brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gcs_storage,gzip_compression,io_uring,jemalloc,jemalloc_conf,jwt_login,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,s3_storage,sentry_telemetry,synapse_admin,systemd,url_preview,zstd_compression"
     # All features
-    all = "brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gcs_storage,gzip_compression,io_uring,jemalloc,jemalloc_conf,jemalloc_prof,jemalloc_stats,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,perf_measurements,release_max_log_level,s3_storage,sentry_telemetry,synapse_admin,systemd,tokio_console,tuwunel_mods,url_preview,zstd_compression"
+    all = "brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gcs_storage,gzip_compression,io_uring,jemalloc,jemalloc_conf,jemalloc_prof,jemalloc_stats,jwt_login,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,perf_measurements,release_max_log_level,s3_storage,sentry_telemetry,synapse_admin,systemd,tokio_console,tuwunel_mods,url_preview,zstd_compression"
 }
 variable "cargo_features_always" {
     default = "direct_tls"

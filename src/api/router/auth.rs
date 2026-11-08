@@ -1,6 +1,7 @@
 pub(crate) mod admin;
 mod appservice;
 mod dispatch;
+#[cfg(feature = "jwt_login")]
 pub(crate) mod jwt;
 mod server;
 mod uiaa;

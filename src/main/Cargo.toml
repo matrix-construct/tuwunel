@@ -86,6 +86,7 @@ default = [
 	"io_uring",
 	"jemalloc",
 	"jemalloc_conf",
+	"jwt_login",
 	"ldap",
 	"lz4_compression",
 	"markdown",
@@ -161,6 +162,12 @@ jemalloc_prof = [
 ]
 jemalloc_stats = [
 	"tuwunel-core/jemalloc_stats",
+]
+jwt_login = [
+	"tuwunel-admin/jwt_login",
+	"tuwunel-api/jwt_login",
+	"tuwunel-api-client/jwt_login",
+	"tuwunel-core/jwt_login",
 ]
 ldap = [
 	"tuwunel-api/ldap",

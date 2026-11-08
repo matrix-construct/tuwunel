@@ -21,6 +21,7 @@ crate-type = [
 default = [
 	"brotli_compression",
 	"gzip_compression",
+	"jwt_login",
 	"ldap",
 	"release_max_log_level",
 	"zstd_compression",
@@ -38,6 +39,9 @@ gzip_compression = [
 	"reqwest/gzip",
 	"tuwunel-core/gzip_compression",
 	"tuwunel-service/gzip_compression",
+]
+jwt_login = [
+	"tuwunel-core/jwt_login",
 ]
 ldap = [
 	"tuwunel-service/ldap",

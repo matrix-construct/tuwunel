@@ -19,6 +19,7 @@ crate-type = [
 
 [features]
 default = [
+	"jwt_login",
 	"release_max_log_level",
 	"tuwunel-core/default",
 	"tuwunel-database/default",
@@ -26,6 +27,9 @@ default = [
 	"tuwunel-service/default",
 ]
 
+jwt_login = [
+	"tuwunel-core/jwt_login",
+]
 release_max_log_level = [
 	"log/max_level_trace",
 	"log/release_max_level_info",

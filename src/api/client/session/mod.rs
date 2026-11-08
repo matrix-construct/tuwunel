@@ -1,4 +1,5 @@
 mod appservice;
+#[cfg(feature = "jwt_login")]
 pub(crate) mod jwt;
 mod ldap;
 mod logout;
@@ -100,11 +101,8 @@ pub(crate) async fn get_login_types_route(
 		})
 	});
 
-	let jwt = services
-		.config
-		.jwt
-		.enable
-		.then(|| LoginType::Jwt(JwtLoginType::default()));
+	let has_jwt = cfg!(feature = "jwt_login") && services.config.jwt.enable;
+	let jwt = has_jwt.then(|| LoginType::Jwt(JwtLoginType::default()));
 
 	let flows = [appservice, token, password, sso, jwt]
 		.into_iter()
@@ -148,6 +146,7 @@ pub(crate) async fn login_route(
 
 			password_handle_login(&services, &body, info, client).await?
 		},
+		#[cfg(feature = "jwt_login")]
 		| LoginInfo::Jwt(info) if services.config.jwt.enable =>
 			jwt::handle_login(&services, &body, info).await?,
 		| LoginInfo::ApplicationService(info) =>

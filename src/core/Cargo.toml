@@ -24,6 +24,7 @@ default = [
 	"gzip_compression",
 	"jemalloc",
 	"jemalloc_conf",
+	"jwt_login",
 	"release_max_log_level",
 	"zstd_compression",
 ]
@@ -46,6 +47,9 @@ jemalloc_prof = [
 ]
 jemalloc_stats = [
 	"jevmalloc?/stats",
+]
+jwt_login = [
+	"jsonwebtoken/use_pem",
 ]
 release_max_log_level = [
 	"log/max_level_trace",

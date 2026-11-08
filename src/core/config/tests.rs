@@ -534,6 +534,7 @@ fn prev_events_concurrency_is_nonzero_and_reloadable() {
 	reload(&default, &one).expect("previous-event concurrency should reload");
 }
 
+#[cfg(feature = "jwt_login")]
 #[test]
 fn jwt_expiry_needs_a_nonzero_access_token_ttl() {
 	let config = |enable: bool, expire: bool, ttl: u64| {
@@ -1698,6 +1699,35 @@ fn an_out_of_range_sentry_sample_rate_fails_the_config_check() {
 	}
 }
 
+/// An enabled JWT login fails the check in a build without JWT login support.
+///
+/// The refusal names the `jwt_login` feature and covers startup and reload
+/// alike. A disabled JWT table passes with its other keys set, since no key
+/// conversion runs.
+#[cfg(not(feature = "jwt_login"))]
+#[test]
+fn jwt_login_needs_the_build_feature() {
+	const ENABLED: &str = "[global.jwt]\nenable = true\nkey = \"k\"\n";
+
+	for (toml, valid) in [
+		("[global]\n", true),
+		("[global.jwt]\nformat = \"bogus\"\nkey = \"k\"\n", true),
+		(ENABLED, false),
+	] {
+		let config = config_from_toml(toml).expect("the config should parse");
+
+		assert_verdict(toml, check(&config), valid, "jwt.enable");
+		assert_verdict(toml, reload(&default_config(), &config), valid, "jwt.enable");
+	}
+
+	let enabled = config_from_toml(ENABLED).expect("the config should parse");
+	let error = check(&enabled)
+		.expect_err("JWT login should fail the check")
+		.to_string();
+
+	assert!(error.contains("\"jwt_login\""), "{error}");
+}
+
 fn assert_verdict<T: Debug>(row: &str, result: Result<T>, valid: bool, field: &str) {
 	assert_eq!(result.is_ok(), valid, "{row}: {result:?}");
 
@@ -1714,6 +1744,7 @@ fn assert_verdict<T: Debug>(row: &str, result: Result<T>, valid: bool, field: &s
 /// Every documented spelling passes regardless of letter case, the older
 /// HMACB64 included. A disabled or absent JWT table is left alone, since its
 /// format may be empty.
+#[cfg(feature = "jwt_login")]
 #[test]
 fn an_unknown_jwt_key_format_fails_the_config_check() {
 	const ENABLED: &str = "[global.jwt]\nenable = true\nkey = \"secret\"\n";
@@ -1740,6 +1771,7 @@ fn an_unknown_jwt_key_format_fails_the_config_check() {
 ///
 /// No key format can use an empty key, so each one is refused. A disabled JWT
 /// table keeps the default empty key.
+#[cfg(feature = "jwt_login")]
 #[test]
 fn an_empty_jwt_key_fails_the_config_check() {
 	const ENABLED: &str = "[global.jwt]\nenable = true\n";
@@ -1765,6 +1797,7 @@ fn an_empty_jwt_key_fails_the_config_check() {
 /// An empty base64 key decodes to an empty secret, so neither format refuses
 /// one on its own. The rows leave JWT login disabled, since the conversions
 /// must not rely on the config check.
+#[cfg(feature = "jwt_login")]
 #[test]
 fn jwt_key_conversions_refuse_an_empty_key() {
 	for (format, key, valid) in [

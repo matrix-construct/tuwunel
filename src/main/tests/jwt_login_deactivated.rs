@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![cfg(feature = "jwt_login")]
 
 use std::{
 	fmt::Display,

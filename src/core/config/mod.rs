@@ -12,6 +12,7 @@ mod format;
 pub mod http;
 mod identity_provider_serde;
 pub mod ip_source;
+#[cfg(feature = "jwt_login")]
 mod jwt;
 pub mod manager;
 pub mod media;

@@ -245,7 +245,6 @@ version = "11.0"
 default-features = false
 features = [
 	"aws_lc_rs",
-	"use_pem",
 ]
 
 [workspace.dependencies.ldap3]
