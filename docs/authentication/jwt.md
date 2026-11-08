@@ -16,6 +16,14 @@ identity is owned by an external system. Two typical uses:
   token that authenticates as any user for password resets, key recovery,
   or legal compliance without modifying the user's credentials.
 
+JWT login requires the `jwt_login` build feature, which is included in the
+default build. If you build without the default features and need JWT login,
+include `jwt_login` in your feature selection.
+
+> [!WARNING]
+> A binary built without `jwt_login` refuses to start with `enable = true`
+> in `[global.jwt]`.
+
 
 ## Enabling JWT
 
