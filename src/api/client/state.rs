@@ -207,11 +207,11 @@ async fn send_state_event_for_key_helper(
 ) -> Result<OwnedEventId> {
 	allowed_to_send_state_event(services, sender, room_id, event_type, state_key, json).await?;
 
+	let state_lock = services.state.mutex.lock(room_id).await;
+
 	if *event_type == StateEventType::RoomMember {
 		check_member_content_size(services, sender, room_id, state_key, json).await?;
 	}
-
-	let state_lock = services.state.mutex.lock(room_id).await;
 
 	let current = match state_dedup_eligible(event_type, timestamp.as_ref()) {
 		| false => None,
