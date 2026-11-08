@@ -71,6 +71,7 @@ cpu_affinity
 direct_tls
 element_hacks
 email
+gcs_storage
 gzip_compression
 jemalloc
 jemalloc_conf
@@ -81,6 +82,7 @@ mas
 media_thumbnail
 oidc
 release_max_log_level
+s3_storage
 sentry_telemetry
 synapse_admin
 url_preview
@@ -95,7 +97,7 @@ export PATH=/usr/pkg/bin:/usr/pkg/sbin:$PATH
 export LIBCLANG_PATH=/usr/pkg/lib
 
 cargo build --release -p tuwunel --no-default-features \
-    --features brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gzip_compression,jemalloc,jemalloc_conf,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,release_max_log_level,sentry_telemetry,synapse_admin,url_preview,zstd_compression
+    --features brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gcs_storage,gzip_compression,jemalloc,jemalloc_conf,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,release_max_log_level,s3_storage,sentry_telemetry,synapse_admin,url_preview,zstd_compression
 ```
 
 No source changes or compiler flag workarounds are needed. The pinned RocksDB

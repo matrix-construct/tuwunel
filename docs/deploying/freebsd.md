@@ -48,6 +48,7 @@ cpu_affinity
 direct_tls
 element_hacks
 email
+gcs_storage
 gzip_compression
 jemalloc
 jemalloc_conf
@@ -58,6 +59,7 @@ mas
 media_thumbnail
 oidc
 release_max_log_level
+s3_storage
 sentry_telemetry
 synapse_admin
 url_preview
@@ -144,7 +146,7 @@ for you here.
 export LIBCLANG_PATH=/usr/local/llvm21/lib
 
 cargo build --release -p tuwunel --no-default-features \
-    --features brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gzip_compression,jemalloc,jemalloc_conf,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,release_max_log_level,sentry_telemetry,synapse_admin,url_preview,zstd_compression
+    --features brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gcs_storage,gzip_compression,jemalloc,jemalloc_conf,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,release_max_log_level,s3_storage,sentry_telemetry,synapse_admin,url_preview,zstd_compression
 ```
 
 A cold build took about 17 minutes on 8 jobs on `aarch64`, and about 33 minutes

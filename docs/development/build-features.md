@@ -13,6 +13,7 @@ The public Cargo feature surface is defined in [`src/main/Cargo.toml`](https://g
 | `direct_tls` | ✔️ | Serve HTTPS directly from Tuwunel. Configure the certificate and key in `[global.tls]`. |
 | `element_hacks` | ✔️ | Workarounds for Element: password authentication accepts the deprecated `user` field, and lazy-loaded syncs always include redundant members. These compatibility workarounds apply without additional runtime configuration. |
 | `email` | ✔️ | Send email through an SMTP relay: verification mail for adding an address, registering and resetting a password, and notification mail for email pushers. Required when `smtp.connection_uri` is set; a build without it refuses to start then, so it cannot require email at registration. Otherwise such a build answers as a server without SMTP: requests to verify or add an email address are refused, the `m.3pid_changes` capability reads disabled, new email pushers are refused, and existing ones send nothing. Addresses bound by an identity provider, MAS provisioning, admin commands or the Synapse admin API stay bound and listed. |
+| `gcs_storage` | ✔️ | Store media on Google Cloud Storage through `[global.storage_provider.<ID>.gcs]` providers. Supports presigned download redirects (`media.allow_redirect`). Required when such a section sets `bucket`; a build without it refuses to start then. |
 | `gzip_compression` | ✔️ | Gzip HTTP response compression and outbound response decompression. Enable `http.compression.gzip = true`; the client must accept Gzip; `network.http.gzip` controls outbound negotiation. |
 | `io_uring` | ✔️ | RocksDB I/O through io_uring. Requires Linux with kernel support for io_uring; liburing is needed when dynamically linked. |
 | `jemalloc` | ✔️ | Use jemalloc for Tuwunel allocations. MSVC uses the system allocator; dynamically linked jemalloc builds need the allocator library. |
@@ -27,6 +28,7 @@ The public Cargo feature surface is defined in [`src/main/Cargo.toml`](https://g
 | `oidc` | ✔️ | Native OIDC server API. Required when `well_known.client` is set together with `authentication.oidc.native_auth` or any `identity_provider`; a build without it refuses to start then. Legacy SSO alone does not need this feature, but SSO with `well_known.client` set does. |
 | `perf_measurements` | × | Export tracing spans and write flamegraph data. Enable `telemetry.jaeger.enable` with an OTLP collector, or `tracing.flame.enable` with a writable `tracing.flame.output_path`. |
 | `release_max_log_level` | ✔️ | Omit debug and trace logging from release builds. Remove this feature to use those log levels in a release build; runtime log filters cannot restore messages omitted at compile time. |
+| `s3_storage` | ✔️ | Store media on Amazon S3 and S3-compatible services through `[global.storage_provider.<ID>.s3]` providers. Supports presigned download redirects (`media.allow_redirect`). Required when such a section sets `url` or `bucket`; a build without it refuses to start then. |
 | `sentry_telemetry` | ✔️ | Sentry error reporting and tracing integration. Enable `telemetry.sentry.enable` and configure `telemetry.sentry.endpoint`. |
 | `synapse_admin` | ✔️ | Synapse admin API, client account suspend and lock endpoints, and the client `whois` alias. Most endpoints require an administrator token; shared-secret registration requires `registration.shared_secret`. |
 | `systemd` | ✔️ | Systemd readiness, watchdog, socket activation, and configuration reload notifications. Requires Linux and systemd. |
@@ -34,6 +36,8 @@ The public Cargo feature surface is defined in [`src/main/Cargo.toml`](https://g
 | `tuwunel_mods` | × | Hot reloadable development modules. Build with `--cfg tuwunel_mods` and provide loadable modules; see [Hot Reloading](hot_reload.md). |
 | `url_preview` | ✔️ | Fetch URL previews for clients. Configure `media.url_preview.domain_contains_allowlist` or `media.url_preview.domain_explicit_allowlist` for permitted domains. |
 | `zstd_compression` | ✔️ | Zstd HTTP compression/decompression and RocksDB compression. HTTP uses `http.compression.zstd = true` and client negotiation; `network.http.zstd` controls outbound negotiation; RocksDB uses `rocksdb.compression_algo`. |
+
+Local filesystem providers, including the default `media` provider, and the `query storage` admin commands work independently of `gcs_storage` and `s3_storage`.
 
 Journal logging works independently of the `systemd` feature. It requires `logging.journald` and the presence of both `SYSTEMD_EXEC_PID` and `JOURNAL_STREAM` in the environment.
 
@@ -57,6 +61,7 @@ The `main` crate defines every public feature and forwards it to the workspace c
 | `direct_tls` | `router` | `axum-server-dual-protocol`, `rustls`. |
 | `element_hacks` | `service` | No optional dependency activated by this feature. |
 | `email` | `service` | `lettre`. |
+| `gcs_storage` | `service` | `object_store`'s `gcp` feature, which adds its cloud client and `quick-xml`. |
 | `gzip_compression` | `api`, `core`, `router`, `service` | Compression features on existing HTTP dependencies. |
 | `io_uring` | `database` | RocksDB io_uring support and its native library requirements. |
 | `jemalloc` | `core`, `database` | `jevmalloc`; native allocator build. |
@@ -71,6 +76,7 @@ The `main` crate defines every public feature and forwards it to the workspace c
 | `oidc` | `api-oidc`, `router` | Optional workspace crate `tuwunel-api-oidc`; service-side issuer code remains compiled without this API feature. |
 | `perf_measurements` | None | `opentelemetry`, `opentelemetry-otlp`, `opentelemetry_sdk`, `tracing-flame`, `tracing-opentelemetry`. |
 | `release_max_log_level` | `admin`, `api`, `api-admin`, `api-client`, `api-federation`, `api-mas`, `api-oidc`, `core`, `database`, `matrix`, `router`, `service` | Log-level filtering on existing `log` and `tracing` dependencies. |
+| `s3_storage` | `service` | `object_store`'s `aws` feature, which adds its cloud client, `crc-fast`, `md-5`, `quick-xml` and `spin`. |
 | `sentry_telemetry` | `router` | `reqwest`, `sentry`, `sentry-tower`, `sentry-tracing`. |
 | `synapse_admin` | `api-admin`, `router` | Optional workspace crate `tuwunel-api-admin`. |
 | `systemd` | `router`, `service` | `sd-notify` on Linux Unix targets. |
