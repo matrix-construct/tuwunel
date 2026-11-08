@@ -552,6 +552,7 @@ fn member_avatar_must_be_an_mxc_uri() {
 		"mxc://b\u{fc}cher.example/abc",
 		"mxc://localhost/caf\u{e9}",
 		"mxc://localhost/a%20b",
+		"mxc://localhost/",
 		"https://localhost/abc",
 	] {
 		let error = check_member_content(usize::MAX, 0, None, Some(invalid)).expect_err(invalid);
