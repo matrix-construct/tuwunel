@@ -122,6 +122,7 @@ RUN chmod a+x /complement/provision_complement.sh
 ENV TUWUNEL_CONFIG="/complement/complement.toml"
 ENV TUWUNEL_RUNTIME_METRICS_DIR="/var/log/tuwunel/metrics"
 ENV TUWUNEL_RUNTIME_USAGE_DIR="/var/log/tuwunel/metrics"
+ENV MALLOC_CONF="stats_print:true,stats_print_opts:J"
 
 
 FROM complement-testee-base AS complement-testee
