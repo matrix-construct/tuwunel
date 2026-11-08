@@ -544,10 +544,6 @@ features = [
 	"write",
 ]
 
-[workspace.dependencies.subtle]
-version = "2.6"
-default-features = false
-
 [workspace.dependencies.syn]
 version = "2.0"
 default-features = false

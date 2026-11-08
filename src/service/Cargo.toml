@@ -115,7 +115,6 @@ serde.workspace = true
 serde_bytes.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
-subtle.workspace = true
 termimad.workspace = true
 termimad.optional = true
 tokio.workspace = true

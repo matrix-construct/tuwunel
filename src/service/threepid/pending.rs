@@ -7,10 +7,10 @@
 
 use std::time::{Duration, SystemTime};
 
+use aws_lc_rs::constant_time::verify_slices_are_equal;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as b64encode};
 use ruma::thirdparty::Medium;
 use serde::{Deserialize, Serialize};
-use subtle::ConstantTimeEq;
 use tuwunel_core::{
 	Err, Result, implement,
 	result::NotFound,
@@ -514,7 +514,7 @@ fn derive_sid(medium: &Medium, address: &str, client_secret: &str) -> String {
 
 fn expired(pending: &Pending) -> bool { deadline_has_passed(pending.expires_at) }
 
-fn ct_eq(a: &str, b: &str) -> bool { a.as_bytes().ct_eq(b.as_bytes()).into() }
+fn ct_eq(a: &str, b: &str) -> bool { verify_slices_are_equal(a.as_bytes(), b.as_bytes()).is_ok() }
 
 #[cfg(test)]
 mod tests {
