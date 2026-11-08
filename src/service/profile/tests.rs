@@ -187,8 +187,10 @@ fn displayname_empty_or_null_is_accepted() {
 
 #[test]
 fn avatar_url_accepts_its_budget_exactly() {
-	let url = "x".repeat(MAX_AVATAR_URL_LENGTH);
+	let prefix = "mxc://localhost/";
+	let url = format!("{prefix}{}", "a".repeat(MAX_AVATAR_URL_LENGTH - prefix.len()));
 
+	assert_eq!(url.len(), MAX_AVATAR_URL_LENGTH);
 	check_profile_value(AVATAR_URL, &json!(url)).unwrap();
 }
 
@@ -536,6 +538,26 @@ fn member_avatar_cap_counts_bytes() {
 	let error = check_member_content(usize::MAX, 0, None, Some(&too_long)).expect_err("too long");
 
 	assert!(bad_json(&error));
+}
+
+#[test]
+fn member_avatar_must_be_an_mxc_uri() {
+	for valid in ["mxc://localhost/abc", "mxc://1.2.3.4:8448/abc", "mxc://[2001:db8::1]:8448/abc"]
+	{
+		check_member_content(usize::MAX, 0, None, Some(valid))
+			.unwrap_or_else(|e| panic!("{valid} refused: {e}"));
+	}
+
+	for invalid in [
+		"mxc://b\u{fc}cher.example/abc",
+		"mxc://localhost/caf\u{e9}",
+		"mxc://localhost/a%20b",
+		"https://localhost/abc",
+	] {
+		let error = check_member_content(usize::MAX, 0, None, Some(invalid)).expect_err(invalid);
+
+		assert!(bad_json(&error), "{invalid}");
+	}
 }
 
 fn bad_json(error: &Error) -> bool {

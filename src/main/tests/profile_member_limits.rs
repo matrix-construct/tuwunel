@@ -319,6 +319,20 @@ async fn create_initial_member_limit(owner: &Client<'_>, user_id: &UserId) -> Re
 
 	expect_bad_json(refused, "257-character initial member display name").await?;
 
+	let invalid_avatar = json!({
+		"preset": "public_chat",
+		"initial_state": [initial(json!({
+			"membership": "join",
+			"avatar_url": "mxc://localhost/caf\u{e9}",
+		}))],
+	});
+
+	let refused = owner
+		.post_url(&create_url, &invalid_avatar)
+		.await?;
+
+	expect_bad_json(refused, "non-ASCII initial member avatar").await?;
+
 	BoolExt::ok_or_else(joined_room_count(owner).await? == rooms_before, || {
 		err!("refused createRoom left a room behind")
 	})?;

@@ -1028,15 +1028,8 @@ fn merge_member_content(
 		.map(|(key, value)| (key.as_str(), value))
 		.collect();
 
-	let displayname = extra
-		.get("displayname")
-		.and_then(|value| value.as_str())
-		.filter(|_| bound_name);
-
-	let avatar_url = extra
-		.get("avatar_url")
-		.and_then(|value| value.as_str())
-		.filter(|_| bound_avatar);
+	let displayname = bound_string(&extra, "displayname", bound_name)?;
+	let avatar_url = bound_string(&extra, "avatar_url", bound_avatar)?;
 
 	check_member_content(max_bytes, serialized_len(&extra)?, displayname, avatar_url)?;
 
@@ -1048,6 +1041,24 @@ fn merge_member_content(
 		.collect();
 
 	Ok(CanonicalJsonValue::Object(vacant.into_iter().chain(server).collect()))
+}
+
+// A remote join sends the merged content as it is, so a non-string cannot pass here.
+fn bound_string<'a>(
+	extra: &BTreeMap<&str, &'a CanonicalJsonValue>,
+	key: &str,
+	bound: bool,
+) -> Result<Option<&'a str>> {
+	extra
+		.get(key)
+		.copied()
+		.filter(|value| bound && !matches!(value, CanonicalJsonValue::Null))
+		.map(|value| {
+			value
+				.as_str()
+				.ok_or_else(|| err!(Request(BadJson("{key} must be a string."))))
+		})
+		.transpose()
 }
 
 #[implement(Service)]

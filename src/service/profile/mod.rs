@@ -982,13 +982,14 @@ pub fn check_member_displayname(displayname: Option<&str>) -> Result {
 	displayname.map_or(Ok(()), check_displayname_length)
 }
 
-/// Bounds a client-supplied `m.room.member` content from any route that accepts one.
+/// Validates a client-supplied `m.room.member` content from any route that accepts one.
 ///
 /// `json_len` is the canonical length. `displayname` and `avatar_url` are passed
 /// only when the write stores them, so a value the room already holds is not
 /// bounded again. The content is refused over `max_bytes`, the display name over
 /// `MAX_DISPLAYNAME_LENGTH` characters, and the avatar URL over
-/// `MAX_AVATAR_URL_LENGTH` bytes, all with `M_BAD_JSON`.
+/// `MAX_AVATAR_URL_LENGTH` bytes or when it is not a valid `mxc://` URI, all with
+/// `M_BAD_JSON`.
 pub fn check_member_content(
 	max_bytes: usize,
 	json_len: usize,
@@ -1000,9 +1001,11 @@ pub fn check_member_content(
 	check_member_avatar_url(avatar_url)
 }
 
-/// Bounds a member event's avatar URL, in bytes.
+/// Validates a member event's avatar URL.
+///
+/// An absent URL passes. A present one must be a valid `mxc://` URI within the byte cap.
 pub fn check_member_avatar_url(avatar_url: Option<&str>) -> Result {
-	avatar_url.map_or(Ok(()), check_avatar_url_length)
+	avatar_url.map_or(Ok(()), check_avatar_mxc)
 }
 
 /// Validate a profile field name against the Common Namespaced Identifier
@@ -1200,9 +1203,14 @@ fn check_avatar_url(value: &Value) -> Result {
 		return Err!(Request(BadJson("Avatar URL must be a string.")));
 	};
 
-	check_avatar_url_length(url)
+	check_avatar_mxc(url)
 }
 
-fn check_avatar_url_length(url: &str) -> Result {
-	check_field_length(url.len(), MAX_AVATAR_URL_LENGTH, "Avatar URL", "bytes")
+fn check_avatar_mxc(url: &str) -> Result {
+	check_field_length(url.len(), MAX_AVATAR_URL_LENGTH, "Avatar URL", "bytes")?;
+
+	// An empty value clears the avatar, so it is not a URI.
+	BoolExt::ok_or_else(url.is_empty() || <&MxcUri>::from(url).is_valid(), || {
+		err!(Request(BadJson("Avatar URL must be a valid mxc:// URI.")))
+	})
 }

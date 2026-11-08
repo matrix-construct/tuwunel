@@ -259,6 +259,15 @@ fn put_accepted(services: &Services, event_id: &EventId, event: &Value) -> Resul
 	Ok(())
 }
 
+#[test]
+fn a_non_string_client_name_or_avatar_is_refused() {
+	assert!(refused(&extras(json!({ "displayname": 123 }))));
+	assert!(refused(&extras(json!({ "avatar_url": { "url": "mxc://localhost/a" } }))));
+
+	merge(member(None, None), Some(&extras(json!({ "avatar_url": null }))))
+		.expect("a null avatar is not a value to check");
+}
+
 fn extras(value: Value) -> CanonicalJsonObject { from_value(value).expect("a canonical object") }
 
 fn refused(extra: &CanonicalJsonObject) -> bool {
