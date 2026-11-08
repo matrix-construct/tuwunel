@@ -73,6 +73,26 @@ struct ConnectionV1 {
 }
 
 #[test]
+fn enabling_e2ee_needs_a_pass() {
+	let mut conn = Connection::default();
+	let enabled = request_with_e2ee(true);
+	let disabled = request_with_e2ee(false);
+
+	assert!(conn.update_cache(&enabled));
+	assert!(!conn.update_cache(&enabled));
+	assert!(!conn.update_cache(&disabled));
+	assert!(conn.update_cache(&enabled));
+}
+
+fn request_with_e2ee(enabled: bool) -> Request {
+	let mut request = Request::new();
+
+	request.extensions.e2ee.enabled = Some(enabled);
+
+	request
+}
+
+#[test]
 fn update_cache_replaces_existing_list_ranges() {
 	let mut conn = Connection::default();
 

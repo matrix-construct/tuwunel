@@ -2,12 +2,12 @@ use std::collections::HashSet;
 
 use futures::{
 	FutureExt, StreamExt, TryFutureExt,
-	future::{join, join3},
+	future::{join, join4},
 	stream::once,
 };
 use ruma::{
 	OwnedUserId, RoomId,
-	api::client::sync::sync_events::{DeviceLists, v5::response},
+	api::client::sync::sync_events::{DeviceLists, v5::response::E2EE},
 	events::{
 		StateEventType, TimelineEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
@@ -27,15 +27,59 @@ use tuwunel_service::sync::Connection;
 use super::{SyncInfo, joined_since, share_encrypted_room};
 
 #[tracing::instrument(name = "e2ee", level = "trace", skip_all)]
-pub(super) async fn collect(
-	sync_info: SyncInfo<'_>,
-	conn: &Connection,
-) -> Result<response::E2EE> {
+pub(super) async fn collect(sync_info: SyncInfo<'_>, conn: &Connection) -> Result<(E2EE, bool)> {
 	let SyncInfo { services, sender_user, sender_device, .. } = sync_info;
 	let Some(sender_device) = sender_device else {
-		return Ok(response::E2EE::default());
+		return Ok(Default::default());
 	};
 
+	let device_lists = sync_info
+		.previous_connection_pos
+		.is_some()
+		.then_async(|| device_lists(sync_info, conn))
+		.map(Option::unwrap_or_default);
+
+	let keys_changed = services
+		.users
+		.last_one_time_keys_update(sender_user)
+		.map(|since| since > conn.globalsince);
+
+	let device_one_time_keys_count = services
+		.users
+		.count_one_time_keys(sender_user, sender_device);
+
+	let device_unused_fallback_key_types = services
+		.users
+		.unused_fallback_key_algorithms(sender_user, sender_device)
+		.collect::<Vec<_>>()
+		.map(Some);
+
+	let (
+		device_lists,
+		keys_changed,
+		device_one_time_keys_count,
+		device_unused_fallback_key_types,
+	) = join4(
+		device_lists,
+		keys_changed,
+		device_one_time_keys_count,
+		device_unused_fallback_key_types,
+	)
+	.boxed() // size firewall
+	.await;
+
+	let response = E2EE {
+		device_lists,
+		device_one_time_keys_count,
+		device_unused_fallback_key_types,
+	};
+
+	Ok((response, keys_changed))
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn device_lists(sync_info: SyncInfo<'_>, conn: &Connection) -> DeviceLists {
+	let SyncInfo { services, sender_user, .. } = sync_info;
 	let keys_changed = services
 		.users
 		.keys_changed(sender_user, conn.globalsince, Some(conn.next_batch))
@@ -66,39 +110,13 @@ pub(super) async fn collect(
 				.is_false()
 				.then_some(user_id)
 		})
-		.collect();
+		.collect()
+		.await;
 
-	let device_one_time_keys_count = services
-		.users
-		.last_one_time_keys_update(sender_user)
-		.then(|since| {
-			since.gt(&conn.globalsince).then_async(|| {
-				services
-					.users
-					.count_one_time_keys(sender_user, sender_device)
-			})
-		})
-		.map(Option::unwrap_or_default);
-
-	let device_unused_fallback_key_types = services
-		.users
-		.unused_fallback_key_algorithms(sender_user, sender_device)
-		.collect::<Vec<_>>()
-		.map(Some);
-
-	let (left, device_one_time_keys_count, device_unused_fallback_key_types) =
-		join3(left, device_one_time_keys_count, device_unused_fallback_key_types)
-			.boxed()
-			.await;
-
-	Ok(response::E2EE {
-		device_one_time_keys_count,
-		device_unused_fallback_key_types,
-		device_lists: DeviceLists {
-			changed: changed.into_iter().collect(),
-			left,
-		},
-	})
+	DeviceLists {
+		changed: changed.into_iter().collect(),
+		left,
+	}
 }
 
 #[tracing::instrument(level = "trace", skip_all, fields(room_id), ret)]

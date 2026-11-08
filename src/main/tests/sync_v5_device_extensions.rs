@@ -26,6 +26,16 @@ mod sliding_sync;
 
 const READER_TOKEN: &str = "sync-v5-device-extensions-reader-token";
 const SENDER_TOKEN: &str = "sync-v5-device-extensions-sender-token";
+const E2EE_TOKEN: &str = "sync-v5-device-extensions-e2ee-reader-token";
+
+/// Shared server options for the device-extension rounds.
+///
+/// Presence is off so pings do not move the global count and a caught-up round is really caught up.
+const OPTIONS: [&str; 3] = [
+	"logging.enable=false",
+	"presence.allow_local=false",
+	"presence.allow_outgoing=false",
+];
 
 /// How long a round with queued messages polls for, in milliseconds.
 ///
@@ -46,15 +56,93 @@ const NEWS_DEADLINE: Duration = Duration::from_secs(10);
 /// Invalid limits and unparsable tokens must be refused at the route.
 #[test]
 fn to_device_extension_pages_and_acknowledges() -> Result {
-	boot(
-		"sync-v5-device-extensions",
-		[
-			"logging.enable=false",
-			"presence.allow_local=false",
-			"presence.allow_outgoing=false",
-		],
-		exercise,
-	)
+	boot("sync-v5-device-extensions", OPTIONS, exercise)
+}
+
+/// Drives opening, key-upload, device-change and late-enabling e2ee rounds.
+///
+/// The opening omits device lists but carries both key fields.
+/// Uploading a key answers promptly, and a new device answers with unchanged counts.
+/// Enabling e2ee on a caught-up connection produces its section immediately.
+#[test]
+fn e2ee_extension_sections() -> Result {
+	boot("sync-v5-e2ee-extension-sections", OPTIONS, exercise_e2ee)
+}
+
+async fn exercise_e2ee(services: &Services, base: &str) -> Result {
+	let user = register(services, "e2eereader", E2EE_TOKEN).await?;
+	let reader = Client { services, base, token: E2EE_TOKEN };
+	let body = json!({ "conn_id": "e2ee", "extensions": { "e2ee": { "enabled": true } } });
+	let opening = reader.sliding_sync(None, 0, &body).await?;
+	let section = &opening["extensions"]["e2ee"];
+
+	assert!(section.is_object(), "(A): {opening}");
+	assert!(section.get("device_lists").is_none(), "(A): {opening}");
+	assert_eq!(section["device_one_time_keys_count"]["signed_curve25519"], 0, "(A): {opening}");
+	assert!(section["device_unused_fallback_key_types"].is_array(), "(A): {opening}");
+
+	let pos = field(&opening, "pos")?;
+	let upload = json!({
+		"one_time_keys": { "curve25519:AAAAAQ": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
+	});
+
+	reader.post("keys/upload", &upload).await?;
+
+	let (response, waited) = reader
+		.sliding_sync(Some(pos), NEWS_POLL_TIMEOUT, &body)
+		.timed()
+		.await;
+
+	let uploaded = response?;
+
+	answered_before_deadline(waited, "(B)")?;
+	assert_eq!(
+		uploaded["extensions"]["e2ee"]["device_one_time_keys_count"]["curve25519"], 1,
+		"(B): {uploaded}"
+	);
+
+	let pos = field(&uploaded, "pos")?;
+
+	services
+		.users
+		.create_device(&user, None, (None, None), None, None, None)
+		.await?;
+
+	let (response, waited) = reader
+		.sliding_sync(Some(pos), NEWS_POLL_TIMEOUT, &body)
+		.timed()
+		.await;
+
+	let changed = response?;
+
+	answered_before_deadline(waited, "(C)")?;
+
+	let section = &changed["extensions"]["e2ee"];
+	let users = section["device_lists"]["changed"]
+		.as_array()
+		.expect("(C) changed device lists");
+
+	assert!(users.iter().any(|id| id == user.as_str()), "(C): {changed}");
+	assert_eq!(section["device_one_time_keys_count"]["curve25519"], 1, "(C): {changed}");
+
+	let late = json!({ "conn_id": "late-e2ee" });
+	let opening = reader.sliding_sync(None, 0, &late).await?;
+	let pos = field(&opening, "pos")?;
+	let enabled = json!({
+		"conn_id": "late-e2ee",
+		"extensions": { "e2ee": { "enabled": true } },
+	});
+
+	let response = reader
+		.sliding_sync(Some(pos), 0, &enabled)
+		.await?;
+
+	let section = &response["extensions"]["e2ee"];
+
+	assert!(section.is_object(), "(D): {response}");
+	assert!(section["device_one_time_keys_count"].is_object(), "(D): {response}");
+
+	Ok(())
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {

@@ -11,6 +11,7 @@ use std::{
 	collections::{BTreeMap, BTreeSet},
 	fmt::Debug,
 	iter::{once, repeat},
+	mem::take,
 	sync::Arc,
 };
 
@@ -261,9 +262,11 @@ pub(crate) async fn sync_events_v5_route(
 			conn.update_rooms_epilogue(since, ranges.room_updates());
 			conn.update_profiles_epilogue();
 			response.rooms = ranges.into_payloads();
+			let keys_answer = woken || extensions.keys_changed();
+
 			response.extensions = extensions.into_response(&response.rooms);
 
-			if !is_empty_response(&mut response, woken) {
+			if !is_empty_response(&mut response, keys_answer) {
 				return respond(services, (&conn_key, &conn_val), &conn, response).await;
 			}
 		}
@@ -332,23 +335,32 @@ fn config_change_needs_position(
 
 /// Whether a pass has nothing to answer the client with.
 ///
-/// The e2ee extension reports the device's unused fallback key types on every
-/// pass. They are current state, and any activity on the server moves the
-/// global count that admits a first pass, so they never end one. A pass the
-/// user's watchers woke, on activity in their rooms or on their account, does
-/// answer with them, since matrix-rust-sdk backs up the room keys it has just
-/// made on that answer. The response is left as it was, so the types are still
-/// delivered.
-fn is_empty_response(response: &mut Response, woken: bool) -> bool {
+/// The key counts and fallback types are current state; they answer a pass the
+/// user's watchers woke or one where the counts changed since `pos`.
+/// A woken answer lets matrix-rust-sdk back up its room keys.
+/// Both fields remain in the response whether or not they answer the pass.
+fn is_empty_response(response: &mut Response, keys_answer: bool) -> bool {
+	let key_counts = take(
+		&mut response
+			.extensions
+			.e2ee
+			.device_one_time_keys_count,
+	);
+
 	let fallback_key_types = response
 		.extensions
 		.e2ee
 		.device_unused_fallback_key_types
-		.take(); // Extensions::is_empty cannot skip one field
+		.take(); // Extensions::is_empty cannot skip the key fields
 
 	let empty = response.extensions.is_empty()
 		&& response.rooms.is_empty()
-		&& (!woken || fallback_key_types.is_none());
+		&& (!keys_answer || (key_counts.is_empty() && fallback_key_types.is_none()));
+
+	response
+		.extensions
+		.e2ee
+		.device_one_time_keys_count = key_counts;
 
 	response
 		.extensions

@@ -19,7 +19,7 @@ use ruma::{
 		response::{Extensions, Room as ResponseRoom},
 	},
 };
-use tuwunel_core::{Result, apply, at, extract_variant, utils::BoolExt};
+use tuwunel_core::{Result, apply, at, extract_variant, implement, utils::BoolExt};
 use tuwunel_service::sync::Connection;
 
 pub(super) use self::to_device::{
@@ -37,16 +37,8 @@ use super::{SyncInfo, Window, WindowRoom, joined_since, range::Results, share_en
 pub(super) struct Collected {
 	response: Extensions,
 	typing: typing::Collected,
-}
-
-impl Collected {
-	pub(super) fn into_response(
-		mut self,
-		payloads: &BTreeMap<OwnedRoomId, ResponseRoom>,
-	) -> Extensions {
-		self.response.typing = self.typing.into_response(payloads);
-		self.response
-	}
+	/// Whether the one-time-key counts changed since the connection's position.
+	keys_changed: bool,
 }
 
 #[tracing::instrument(
@@ -97,6 +89,8 @@ pub(super) async fn handle(
 		.map(apply!(4, |t: Option<_>| t.unwrap_or(Ok(Default::default()))))
 		.await;
 
+	let (e2ee, keys_changed) = e2ee?;
+
 	// Receipt and room account-data payloads only exist as bounded room-range
 	// outputs, applied by `apply_ranges` after the ranges resolve.
 	let response = Extensions {
@@ -104,11 +98,24 @@ pub(super) async fn handle(
 		receipts: Default::default(),
 		typing: Default::default(),
 		to_device: to_device?,
-		e2ee: e2ee?,
+		e2ee,
 		profiles: Default::default(),
 	};
 
-	Ok(Collected { response, typing: typing? })
+	Ok(Collected { response, typing: typing?, keys_changed })
+}
+
+#[implement(Collected)]
+#[inline]
+pub(super) fn keys_changed(&self) -> bool { self.keys_changed }
+
+#[implement(Collected)]
+pub(super) fn into_response(
+	mut self,
+	payloads: &BTreeMap<OwnedRoomId, ResponseRoom>,
+) -> Extensions {
+	self.response.typing = self.typing.into_response(payloads);
+	self.response
 }
 
 #[tracing::instrument(level = "trace", skip_all)]

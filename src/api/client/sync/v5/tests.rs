@@ -8,6 +8,25 @@ use super::{
 };
 
 #[test]
+fn one_time_key_counts_alone_are_empty() {
+	assert!(is_empty_keeping_types(key_counts(), false));
+}
+
+#[test]
+fn changed_key_counts_answer_a_pass() {
+	assert!(!is_empty_keeping_types(key_counts(), true));
+}
+
+fn key_counts() -> E2EE {
+	E2EE {
+		device_one_time_keys_count: [(OneTimeKeyAlgorithm::SignedCurve25519, 0_u32.into())]
+			.into(),
+		device_unused_fallback_key_types: Some(vec![]),
+		..Default::default()
+	}
+}
+
+#[test]
 fn unused_fallback_key_types_alone_are_empty() {
 	for types in [vec![], vec![OneTimeKeyAlgorithm::SignedCurve25519]] {
 		let alone = E2EE {
@@ -60,10 +79,11 @@ fn list_counts_alone_are_empty() {
 	assert!(is_empty_response(&mut counts_only(), true));
 }
 
-fn is_empty_keeping_types(e2ee: E2EE, woken: bool) -> bool {
+fn is_empty_keeping_types(e2ee: E2EE, keys_answer: bool) -> bool {
+	let counts = e2ee.device_one_time_keys_count.clone();
 	let types = e2ee.device_unused_fallback_key_types.clone();
 	let mut response = e2ee_response(e2ee);
-	let empty = is_empty_response(&mut response, woken);
+	let empty = is_empty_response(&mut response, keys_answer);
 
 	assert_eq!(
 		response
@@ -72,6 +92,15 @@ fn is_empty_keeping_types(e2ee: E2EE, woken: bool) -> bool {
 			.device_unused_fallback_key_types,
 		types,
 		"the types are still delivered",
+	);
+
+	assert_eq!(
+		response
+			.extensions
+			.e2ee
+			.device_one_time_keys_count,
+		counts,
+		"the counts are still delivered"
 	);
 
 	empty

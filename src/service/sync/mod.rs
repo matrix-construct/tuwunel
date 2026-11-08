@@ -561,9 +561,16 @@ pub fn own_profile_owed(&self) -> bool {
 		&& (self.own_profile_since == 0 || self.own_profile_since > self.globalsince)
 }
 
+/// Merges the request's lists, subscriptions and extension settings into the
+/// connection.
+///
+/// Returns whether a caught-up connection needs a pass because a list or
+/// subscription changed or the request enabled the e2ee extension.
+/// MSC4543 requires the e2ee section in the response to the enabling request.
 #[implement(Connection)]
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn update_cache(&mut self, request: &Request) -> bool {
+	let e2ee_enabled = self.extensions.e2ee.enabled == Some(true);
 	let lists_changed = Self::update_cache_lists(request, self);
 	let subscriptions_changed = Self::update_cache_subscriptions(request, self);
 
@@ -571,7 +578,9 @@ pub fn update_cache(&mut self, request: &Request) -> bool {
 
 	self.update_cache_profiles_owed(fields_widened);
 
-	lists_changed || subscriptions_changed
+	lists_changed
+		|| subscriptions_changed
+		|| (!e2ee_enabled && self.extensions.e2ee.enabled == Some(true))
 }
 
 #[implement(Connection)]
