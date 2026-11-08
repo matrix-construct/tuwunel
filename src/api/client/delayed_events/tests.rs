@@ -45,7 +45,7 @@ fn bare_or_invalid_delay_is_refused() {
 #[test]
 fn delay_within_limit_passes() {
 	assert_eq!(check_delay(Duration::from_millis(1), LIMITS, true).expect("min"), 1);
-	assert_eq!(check_delay(Duration::from_millis(1_000), LIMITS, false).expect("max"), 1_000);
+	assert_eq!(check_delay(Duration::from_secs(1), LIMITS, false).expect("max"), 1_000);
 }
 
 #[test]

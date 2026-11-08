@@ -131,7 +131,7 @@ const DELAY_ID_LEN: usize = 32;
 // Sent at once, so one wedged room cannot hold up the rest.
 const SEND_WIDTH: usize = 8;
 
-const MAX_WAIT: Duration = Duration::from_secs(60);
+const MAX_WAIT: Duration = Duration::from_mins(1);
 
 #[async_trait]
 impl crate::Service for Service {
