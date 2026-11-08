@@ -68,6 +68,7 @@ async fn check_features(services: &Services, base: &str, enabled: bool) -> Resul
 	let features = &versions["unstable_features"];
 
 	assert_eq!(features["org.matrix.simplified_msc3575"], true, "{versions}");
+	assert_eq!(features["org.matrix.msc4538"], true, "{versions}");
 
 	for feature in OIDC_FEATURES {
 		let advertised = features.get(feature).and_then(Value::as_bool);

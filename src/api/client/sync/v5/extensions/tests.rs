@@ -1,9 +1,16 @@
 use std::slice::Iter;
 
-use ruma::{events::room::member::MembershipState, room_id};
+use ruma::{
+	api::{client::sync::sync_events::v5::request::ToDevice, error::ErrorKind},
+	events::room::member::MembershipState,
+	room_id, uint,
+};
 use tuwunel_service::sync::Room;
 
-use super::*;
+use super::{
+	to_device::{check, limit},
+	*,
+};
 use crate::sync::v5::ListIds;
 
 #[test]
@@ -90,6 +97,53 @@ fn subscribed_room_already_selected_by_list_is_not_duplicated() {
 	let rooms = [ExtensionRoomConfig::AllSubscribed];
 
 	assert_eq!(listed(&conn, &window, &lists, &rooms), [room_id]);
+}
+
+#[test]
+fn to_device_zero_limit_is_refused() {
+	let zero = ToDevice {
+		limit: Some(uint!(0)),
+		..Default::default()
+	};
+
+	let error = check(&zero).expect_err("zero limit");
+
+	assert_eq!(error.kind(), ErrorKind::BadJson);
+	check(&ToDevice { limit: Some(uint!(1)), ..zero }).expect("positive limit");
+}
+
+#[test]
+fn to_device_unparsable_since_is_refused() {
+	for since in ["garbage", "", "-1"] {
+		let config = ToDevice {
+			since: Some(since.into()),
+			..Default::default()
+		};
+
+		let error = check(&config).expect_err(since);
+
+		assert_eq!(error.kind(), ErrorKind::InvalidParam, "{since}");
+	}
+}
+
+#[test]
+fn to_device_numeric_since_passes() {
+	for since in [None, Some("0".into()), Some(u64::MAX.to_string().into())] {
+		let config = ToDevice { since, ..Default::default() };
+
+		check(&config).expect("numeric or absent since");
+	}
+}
+
+#[test]
+fn to_device_limit_defaults_to_one_hundred() {
+	let config = ToDevice {
+		limit: Some(uint!(2)),
+		..Default::default()
+	};
+
+	assert_eq!(limit(&ToDevice::default()), 100);
+	assert_eq!(limit(&config), 2);
 }
 
 fn window(room_id: &RoomId, payload_count: u64) -> Window {

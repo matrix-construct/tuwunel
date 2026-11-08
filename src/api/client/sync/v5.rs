@@ -46,7 +46,10 @@ use tuwunel_service::{
 };
 
 use self::{
-	extensions::{apply_profiles, apply_ranges, handle as handle_extensions},
+	extensions::{
+		acknowledge_to_device, apply_profiles, apply_ranges, check_to_device,
+		handle as handle_extensions, to_device_pending,
+	},
 	range::collect as collect_ranges,
 };
 use super::{joined_since, share_encrypted_room};
@@ -121,6 +124,8 @@ pub(crate) async fn sync_events_v5_route(
 		services.profile.check_requested_fields(fields)?;
 	}
 
+	check_to_device(&request.extensions.to_device)?;
+
 	let since = request
 		.pos
 		.as_ref()
@@ -186,10 +191,16 @@ pub(crate) async fn sync_events_v5_route(
 	conn.next_batch = services.globals.wait_pending().await?;
 	conn.globalsince = since.min(conn.next_batch);
 	let config_changed = conn.update_cache(request);
+
+	acknowledge_to_device(services, sender_user, sender_device, &conn).await?;
+
 	let caught_up = conn.globalsince == conn.next_batch;
 
-	// A whole profile owed to a caught-up connection needs a pass like a new list.
-	let needs_pass = config_changed || conn.own_profile_owed();
+	// Caught-up connections run no pass, so config changes, owed profiles or to-device messages
+	// after `since` need a reserved position.
+	let needs_pass = config_changed
+		|| conn.own_profile_owed()
+		|| caught_up && to_device_pending(services, sender_user, sender_device, &conn).await?;
 
 	if config_change_needs_position(needs_pass, advancing, caught_up, since) {
 		// The permit publishes the reserved position when it retires on drop.

@@ -716,6 +716,7 @@ fn update_cache_typing(request: &Typing, cached: &mut Typing) {
 fn update_cache_to_device(request: &ToDevice, cached: &mut ToDevice) {
 	some_or_sticky(request.enabled.as_ref(), &mut cached.enabled);
 	cached.since.clone_from(&request.since);
+	cached.limit = request.limit;
 }
 
 /// Merges the profiles extension settings into the connection.

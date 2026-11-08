@@ -22,6 +22,9 @@ use ruma::{
 use tuwunel_core::{Result, apply, at, extract_variant, utils::BoolExt};
 use tuwunel_service::sync::Connection;
 
+pub(super) use self::to_device::{
+	acknowledge as acknowledge_to_device, check as check_to_device, pending as to_device_pending,
+};
 use self::{
 	account_data::{
 		collect as collect_account_data, collect_ranges as collect_account_data_ranges,
