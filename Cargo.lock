@@ -535,17 +535,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cargo_toml"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82f4b26e751e711a5302649417f2da046dce6391b2ea30a4820f37462314f0b9"
-dependencies = [
- "semver",
- "serde",
- "toml",
-]
-
-[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5086,7 +5075,6 @@ version = "1.1.8+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20489e00e4d8741d6be680764cc12e270655e375a20d1011e844a9c3379e678d"
 dependencies = [
- "indexmap",
  "serde_core",
  "serde_spanned",
  "toml_datetime",
@@ -5587,7 +5575,6 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "bytesize",
- "cargo_toml",
  "checked_ops",
  "chrono",
  "clap",
@@ -5624,6 +5611,7 @@ dependencies = [
  "reqwest",
  "ruma",
  "sanitize-filename",
+ "semver",
  "serde",
  "serde_core",
  "serde_html_form",

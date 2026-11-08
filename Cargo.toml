@@ -108,11 +108,6 @@ version = "2.3"
 default-features = false
 features = ["serde", "std"]
 
-[workspace.dependencies.cargo_toml]
-version = "1.0"
-default-features = false
-features = ["features"]
-
 [workspace.dependencies.checked_ops]
 version = "0.1"
 
@@ -462,6 +457,11 @@ version = "0.6"
 [workspace.dependencies.sd-notify]
 version = "0.5"
 default-features = false
+
+[workspace.dependencies.semver]
+version = "1.0"
+default-features = false
+features = ["serde"]
 
 [workspace.dependencies.sentry]
 version = "0.49"

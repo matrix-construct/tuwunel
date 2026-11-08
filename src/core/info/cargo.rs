@@ -4,12 +4,62 @@
 //! This module processes that data lazily for runtime queries about project
 //! features and dependencies.
 
-use std::sync::OnceLock;
+#[cfg(test)]
+mod tests;
 
-use cargo_toml::{DepsSet, Manifest};
+use std::{collections::BTreeMap, sync::OnceLock};
+
+use semver::VersionReq;
+use serde::{Deserialize, de::IgnoredAny};
+use smallstr::SmallString;
+use toml::from_str;
 use tuwunel_macros::cargo_manifest;
 
-use crate::Result;
+use crate::{Result, implement};
+
+type Dependencies = BTreeMap<Name, Dependency>;
+type Features = BTreeMap<String, Vec<IgnoredAny>>;
+type Name = SmallString<[u8; 16]>;
+
+/// The `[features]` table of a crate manifest.
+///
+/// Every other table is ignored, and a manifest without one has no features.
+#[derive(Deserialize)]
+struct Manifest {
+	#[serde(default)]
+	features: Features,
+}
+
+/// The `[workspace.dependencies]` table of the workspace manifest.
+///
+/// A manifest without a `[workspace]` table fails to parse.
+#[derive(Deserialize)]
+struct WorkspaceManifest {
+	workspace: Workspace,
+}
+
+#[derive(Deserialize)]
+struct Workspace {
+	#[serde(default)]
+	dependencies: Dependencies,
+}
+
+/// One `[workspace.dependencies]` entry, a bare version or a table.
+///
+/// A table without a version, such as a git or path dependency, requires any
+/// version (`*`).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Dependency {
+	Simple(VersionReq),
+	Detailed {
+		#[serde(default)]
+		version: VersionReq,
+
+		#[serde(default)]
+		features: Vec<Name>,
+	},
+}
 
 // Raw captures of the cargo manifest for each crate. This is provided by a
 // proc-macro at build time since the source directory and the cargo toml's may
@@ -39,38 +89,57 @@ static FEATURES: OnceLock<Vec<String>> = OnceLock::new();
 
 /// Processed list of dependencies. This is generated from the data captured in
 /// the MANIFEST.
-static DEPENDENCIES: OnceLock<DepsSet> = OnceLock::new();
+static DEPENDENCIES: OnceLock<Dependencies> = OnceLock::new();
 
-#[must_use]
 /// Lists dependency names declared by the workspace manifest.
 ///
-/// Names borrow from the lazily parsed dependency map. Their ordering follows
-/// the map's deterministic key order.
+/// Names borrow from the lazily parsed dependencies, in name order.
 ///
 /// # Panics
 ///
 /// Panics when the embedded workspace manifest is invalid or lacks its
 /// workspace section.
-pub fn dependencies_names() -> Vec<&'static str> {
-	dependencies()
-		.keys()
-		.map(String::as_str)
-		.collect()
+pub fn dependencies_names() -> impl Iterator<Item = &'static str> {
+	dependencies().map(|(name, ..)| name)
 }
 
 /// Returns dependencies declared by the embedded workspace manifest.
 ///
-/// The manifest is parsed once on first access and the ordered map is retained
-/// for the process lifetime. Package-specific dependency tables are not merged
-/// here.
+/// Each item is a name, its version requirement and the features it enables,
+/// in name order. The manifest is parsed once on first access and retained for
+/// the process lifetime. Package-specific dependency tables are not merged here.
 ///
 /// # Panics
 ///
 /// Panics when the manifest is invalid or lacks its workspace section.
-pub fn dependencies() -> &'static DepsSet {
-	DEPENDENCIES.get_or_init(|| {
-		init_dependencies().unwrap_or_else(|e| panic!("Failed to initialize dependencies: {e}"))
-	})
+pub fn dependencies() -> impl Iterator<Item = (&'static str, &'static VersionReq, &'static [Name])>
+{
+	DEPENDENCIES
+		.get_or_init(|| {
+			init_dependencies()
+				.unwrap_or_else(|e| panic!("Failed to initialize dependencies: {e}"))
+		})
+		.iter()
+		.map(|(name, dependency)| {
+			(name.as_str(), dependency.version(), dependency.enabled_features())
+		})
+}
+
+#[implement(Dependency)]
+#[inline]
+fn version(&self) -> &VersionReq {
+	match self {
+		| Self::Simple(version) | Self::Detailed { version, .. } => version,
+	}
+}
+
+#[implement(Dependency)]
+#[inline]
+fn enabled_features(&self) -> &[Name] {
+	match self {
+		| Self::Simple(_) => &[],
+		| Self::Detailed { features, .. } => features,
+	}
 }
 
 /// List of all possible features for the project. For *enabled* features in
@@ -98,20 +167,15 @@ fn init_features() -> Result<Vec<String>> {
 }
 
 fn append_features(features: &mut Vec<String>, manifest: &str) -> Result {
-	let manifest = Manifest::from_str(manifest)?;
-	features.extend(manifest.features.keys().cloned());
+	let manifest: Manifest = from_str(manifest)?;
+
+	features.extend(manifest.features.into_keys());
 
 	Ok(())
 }
 
-fn init_dependencies() -> Result<DepsSet> {
-	let manifest = Manifest::from_str(WORKSPACE_MANIFEST)?;
-	let deps_set = manifest
-		.workspace
-		.as_ref()
-		.expect("manifest has workspace section")
-		.dependencies
-		.clone();
+fn init_dependencies() -> Result<Dependencies> {
+	let manifest: WorkspaceManifest = from_str(WORKSPACE_MANIFEST)?;
 
-	Ok(deps_set)
+	Ok(manifest.workspace.dependencies)
 }

@@ -134,13 +134,6 @@ pub enum Error {
 	#[error(transparent)]
 	CapacityError(#[from] arrayvec::CapacityError),
 
-	/// Reports failure to parse Cargo manifest data.
-	///
-	/// Automatic conversion preserves the original source error. Its display
-	/// text is forwarded unchanged.
-	#[error(transparent)]
-	CargoToml(#[from] cargo_toml::Error),
-
 	/// Reports a command-line parsing or presentation failure.
 	///
 	/// Automatic conversion preserves the original Clap error. Its display text
