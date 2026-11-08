@@ -574,9 +574,10 @@ fn check_password_hashing(config: &Config) -> Result {
 fn check_jwt(config: &Config) -> Result {
 	let jwt = &config.jwt;
 
-	// Without [global.jwt], the derived Default's empty format would fail this.
+	// A server without JWT login has an empty key, and without [global.jwt] an empty format.
 	if jwt.enable {
 		jwt.key_format()?;
+		jwt.nonempty_key()?;
 	}
 
 	if jwt.enable && jwt.expire_access_token && config.authentication.access_token_ttl == 0 {

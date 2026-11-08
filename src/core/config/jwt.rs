@@ -1,9 +1,9 @@
 //! Turns the JWT key settings into signing and verifying keys and an algorithm.
 //!
 //! Every use of the key, format and algorithm settings goes through these
-//! conversions. The startup and reload check parses the format alone, so an
-//! unknown format is refused before the first login while a key that does not
-//! decode fails at login.
+//! conversions. The startup and reload check refuses an empty key and an
+//! unknown format, so either fails before the first login, while a key that
+//! does not decode fails at login.
 
 use super::JwtConfig;
 use crate::{
@@ -33,11 +33,11 @@ const KEY_FORMATS: [(&str, KeyFormat); 5] = [
 
 /// Decodes the configured key for verifying tokens.
 ///
-/// Fails when the format is not one of the supported spellings or when the key
-/// does not parse in that format.
+/// Fails when the key is empty, when the format is not one of the supported
+/// spellings, or when the key does not parse in that format.
 #[implement(JwtConfig)]
 pub fn decoding_key(&self) -> Result<DecodingKey> {
-	let key = self.key.as_str();
+	let key = self.nonempty_key()?;
 
 	match self.key_format()? {
 		| KeyFormat::Hmac => Ok(DecodingKey::from_secret(key.as_bytes())),
@@ -50,13 +50,29 @@ pub fn decoding_key(&self) -> Result<DecodingKey> {
 	}
 }
 
+/// Borrows the configured key, refusing an empty one.
+///
+/// An empty key is an empty secret in either shared-secret format and never a
+/// valid PEM key, so no format can use one.
+#[implement(JwtConfig)]
+pub(super) fn nonempty_key(&self) -> Result<&str> {
+	if self.key.is_empty() {
+		return Err!(Config(
+			"jwt.key",
+			"JWT key is empty; set the shared secret or public key that verifies tokens."
+		));
+	}
+
+	Ok(self.key.as_str())
+}
+
 /// Decodes the configured key for signing tokens.
 ///
 /// Only the shared-secret formats can sign. An ECDSA or EDDSA key is the
 /// issuer's public key, which verifies but never signs.
 #[implement(JwtConfig)]
 pub fn encoding_key(&self) -> Result<EncodingKey> {
-	let key = self.key.as_str();
+	let key = self.nonempty_key()?;
 	let format = self.format.as_str();
 
 	match self.key_format()? {

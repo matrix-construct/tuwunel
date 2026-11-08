@@ -1243,8 +1243,9 @@ pub struct LdapConfig {
 /// ```
 ///
 /// Tips:
-/// - Startup and reload refuse an unknown `format` while enabled, but a `key`
-///   that does not decode or an unsuitable `algorithm` fails only at login.
+/// - Startup and reload refuse an empty `key` or an unknown `format` while
+///   enabled, but a `key` that does not decode or an unsuitable `algorithm`
+///   fails only at login.
 /// - With `register_user` (the default), a valid token for an unknown user
 ///   creates the account regardless of `registration.enable`.
 /// - `validate_signature = false` has an effect only in debug builds.

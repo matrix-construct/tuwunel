@@ -213,11 +213,16 @@ user on the server.
 ## Key formats and algorithms
 
 `format` selects how `key` is interpreted. `algorithm` selects the JWT
-signing algorithm. The two must agree. While `enable = true`, the server
-refuses to start, and refuses a configuration reload, when `format` is
-not one of those below (in any case; `HMACB64` is also accepted for
-`B64HMAC`). A `key` that does not decode, or an `algorithm` that does not
-suit the format, is reported at each login instead.
+signing algorithm. The two must agree. Format names are case-insensitive.
+`HMACB64` is also accepted for `B64HMAC`.
+
+> [!WARNING]
+> While `enable = true`, Tuwunel refuses to start or reload its
+> configuration if `key` is empty or `format` is not one of the supported
+> names below.
+
+If `key` cannot be decoded or `algorithm` does not suit the format,
+Tuwunel reports the error at each login instead.
 
 | Format | Algorithm | Key content |
 |---|---|---|

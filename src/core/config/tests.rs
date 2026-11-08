@@ -5,6 +5,7 @@ mod hierarchy;
 
 use std::{
 	cell::RefCell,
+	fmt::Debug,
 	io::{Result as IoResult, Write},
 	net::IpAddr,
 	sync::{Arc, Mutex, Once},
@@ -537,7 +538,7 @@ fn prev_events_concurrency_is_nonzero_and_reloadable() {
 fn jwt_expiry_needs_a_nonzero_access_token_ttl() {
 	let config = |enable: bool, expire: bool, ttl: u64| {
 		let toml = format!(
-			"[global.jwt]\nenable = {enable}\nexpire_access_token = \
+			"[global.jwt]\nenable = {enable}\nkey = \"secret\"\nexpire_access_token = \
 			 {expire}\n[global.authentication]\naccess_token_ttl = {ttl}\n"
 		);
 
@@ -545,7 +546,12 @@ fn jwt_expiry_needs_a_nonzero_access_token_ttl() {
 	};
 
 	assert!(check(&config(true, true, 1)).is_ok(), "a lasting token should pass validation");
-	assert!(check(&config(true, true, 0)).is_err(), "a dead token should fail validation");
+
+	let dead = check(&config(true, true, 0))
+		.expect_err("a dead token should fail validation")
+		.to_string();
+
+	assert!(dead.contains("'jwt.expire_access_token' directive"), "{dead}");
 	assert!(check(&config(true, false, 0)).is_ok(), "no expiry should pass validation");
 	assert!(check(&config(false, true, 0)).is_ok(), "no JWT login should pass validation");
 	reload(&default_config(), &config(true, true, 1)).expect("JWT expiry should reload");
@@ -1687,18 +1693,19 @@ fn an_out_of_range_sentry_sample_rate_fails_the_config_check() {
 		("[global]\nsentry_traces_sample_rate = 1.5\n".to_owned(), true),
 	] {
 		let config = config_from_toml(&toml).expect("the config should parse");
-		let result = check(&config);
 
-		assert_eq!(result.is_ok(), valid, "{toml}: {result:?}");
+		assert_verdict(&toml, check(&config), valid, "telemetry.sentry.traces_sample_rate");
+	}
+}
 
-		if let Err(error) = result {
-			assert!(
-				error
-					.to_string()
-					.contains("'telemetry.sentry.traces_sample_rate' directive"),
-				"{error}"
-			);
-		}
+fn assert_verdict<T: Debug>(row: &str, result: Result<T>, valid: bool, field: &str) {
+	assert_eq!(result.is_ok(), valid, "{row}: {result:?}");
+
+	if let Err(error) = result {
+		let directive = format!("'{field}' directive");
+		let error = error.to_string();
+
+		assert!(error.contains(&directive), "{row}: {error}");
 	}
 }
 
@@ -1709,7 +1716,7 @@ fn an_out_of_range_sentry_sample_rate_fails_the_config_check() {
 /// format may be empty.
 #[test]
 fn an_unknown_jwt_key_format_fails_the_config_check() {
-	const ENABLED: &str = "[global.jwt]\nenable = true\n";
+	const ENABLED: &str = "[global.jwt]\nenable = true\nkey = \"secret\"\n";
 
 	for (toml, valid) in [
 		("[global]\n".to_owned(), true),
@@ -1724,15 +1731,58 @@ fn an_unknown_jwt_key_format_fails_the_config_check() {
 		(format!("{ENABLED}format = \"\"\n"), false),
 	] {
 		let config = config_from_toml(&toml).expect("the config should parse");
-		let result = check(&config);
 
-		assert_eq!(result.is_ok(), valid, "{toml}: {result:?}");
+		assert_verdict(&toml, check(&config), valid, "jwt.format");
+	}
+}
 
-		if let Err(error) = result {
-			let error = error.to_string();
+/// An enabled JWT login with an empty key fails the check at startup and reload.
+///
+/// No key format can use an empty key, so each one is refused. A disabled JWT
+/// table keeps the default empty key.
+#[test]
+fn an_empty_jwt_key_fails_the_config_check() {
+	const ENABLED: &str = "[global.jwt]\nenable = true\n";
 
-			assert!(error.contains("'jwt.format' directive"), "{toml}: {error}");
-		}
+	for (toml, valid) in [
+		("[global.jwt]\nkey = \"\"\n".to_owned(), true),
+		(format!("{ENABLED}key = \"k\"\n"), true),
+		(ENABLED.to_owned(), false),
+		(format!("{ENABLED}key = \"\"\n"), false),
+		(format!("{ENABLED}format = \"B64HMAC\"\n"), false),
+		(format!("{ENABLED}format = \"ECDSA\"\n"), false),
+		(format!("{ENABLED}format = \"EDDSA\"\n"), false),
+	] {
+		let config = config_from_toml(&toml).expect("the config should parse");
+
+		assert_verdict(&toml, check(&config), valid, "jwt.key");
+		assert_verdict(&toml, reload(&default_config(), &config), valid, "jwt.key");
+	}
+}
+
+/// The key conversions refuse an empty key in either shared-secret format.
+///
+/// An empty base64 key decodes to an empty secret, so neither format refuses
+/// one on its own. The rows leave JWT login disabled, since the conversions
+/// must not rely on the config check.
+#[test]
+fn jwt_key_conversions_refuse_an_empty_key() {
+	for (format, key, valid) in [
+		("HMAC", "", false),
+		("B64HMAC", "", false),
+		("HMAC", "c2VjcmV0", true),
+		("B64HMAC", "c2VjcmV0", true),
+	] {
+		let config = JwtConfig {
+			key: key.to_owned(),
+			format: format.to_owned(),
+			..Default::default()
+		};
+
+		let row = format!("{format} {key:?}");
+
+		assert_verdict(&row, config.decoding_key(), valid, "jwt.key");
+		assert_verdict(&row, config.encoding_key(), valid, "jwt.key");
 	}
 }
 
