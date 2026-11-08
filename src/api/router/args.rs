@@ -16,11 +16,11 @@ use ruma::{
 	},
 };
 use serde_json::{Value as JsonValue, from_slice};
-use tuwunel_core::{Error, Result, err, implement, utils::string::EMPTY};
+use tuwunel_core::{Err, Error, Result, err, implement, utils::string::EMPTY};
 use tuwunel_service::{Services, appservice::RegistrationInfo};
 
 use super::{
-	auth::{Auth, AuthDispatch, admin::require_admin, auth},
+	auth::{Auth, AuthDispatch, Scheme, admin::require_admin, auth},
 	client_ip::rate_limit_ip,
 	request::{Request, from as request_from},
 };
@@ -129,10 +129,11 @@ where
 		services: &State,
 	) -> Result<Self, Self::Rejection> {
 		let route = TypeId::of::<T>();
+		let scheme = T::Authentication::SCHEME;
 		let request = request_from(services, request).await?;
 		let json_body = match ADMIN {
-			| true => parse_json(&request, route),
-			| false => Ok(parse_json(&request, route)?),
+			| true => parse_json(&request, route, scheme),
+			| false => Ok(parse_json(&request, route, scheme)?),
 		};
 
 		let json = json_body.as_ref().ok().and_then(Option::as_ref);
@@ -180,26 +181,41 @@ fn record_auth_context(span: &tracing::Span, auth: &Auth) {
 ///
 /// A raw-body route's bytes are never parsed and pass through unchanged. Empty
 /// POST and DELETE bodies on other routes become objects for UIA.
-fn parse_json(request: &Request, route: TypeId) -> Result<Option<CanonicalJsonValue>> {
+/// A server-signed body must be canonical JSON because its signature covers only
+/// the canonical form; only a zero-byte body is authenticated without content.
+fn parse_json(
+	request: &Request,
+	route: TypeId,
+	scheme: Scheme,
+) -> Result<Option<CanonicalJsonValue>> {
 	if takes_raw_body(route) {
 		return Ok(None);
 	}
 
 	let json_body = from_slice(&request.body).ok();
-	let json_endpoint = matches!(
-		request.parts.method,
-		Method::POST | Method::PUT | Method::DELETE | Method::PATCH
-	);
+	let signed = scheme == Scheme::ServerSignatures;
+	let json_endpoint = signed
+		|| matches!(
+			request.parts.method,
+			Method::POST | Method::PUT | Method::DELETE | Method::PATCH
+		);
 
 	if json_body.is_some() || !json_endpoint {
 		return Ok(json_body);
 	}
 
-	let empty = request.body.iter().all(u8::is_ascii_whitespace);
+	let empty = match signed {
+		| true => request.body.is_empty(),
+		| false => request.body.iter().all(u8::is_ascii_whitespace),
+	};
 
 	if !empty {
 		from_slice::<JsonValue>(&request.body)
 			.map_err(|_| err!(Request(NotJson("Request body is not valid JSON."))))?;
+
+		if signed {
+			return Err!(Request(BadJson("Request body is not canonical JSON.")));
+		}
 	}
 
 	let empty_object = (empty && matches!(request.parts.method, Method::POST | Method::DELETE))
@@ -325,4 +341,103 @@ fn serialize_body(json_body: &CanonicalJsonValue) -> Bytes {
 	serde_json::to_writer(&mut buf, json_body).expect("value serialization can't fail");
 
 	buf.into_inner().freeze()
+}
+
+#[cfg(test)]
+mod tests {
+	use std::any::TypeId;
+
+	use axum::extract::Path;
+	use axum_extra::extract::cookie::CookieJar;
+	use bytes::Bytes;
+	use http::{Method, Request as HttpRequest, StatusCode};
+	use ruma::{CanonicalJsonValue, api::error::ErrorKind};
+
+	use super::{Request, Scheme, parse_json};
+	use crate::router::request::{PathParams, QueryParams};
+
+	#[test]
+	fn signed_body_must_be_canonical() {
+		for method in [Method::GET, Method::PUT, Method::POST] {
+			for body in [r#"{"x":0.5}"#, r#"{"x":9007199254740992}"#] {
+				let request = request(method.clone(), body);
+				let error = parse_json(&request, TypeId::of::<()>(), Scheme::ServerSignatures)
+					.unwrap_err();
+
+				assert_eq!(error.status_code(), StatusCode::BAD_REQUEST);
+				assert_eq!(error.kind(), ErrorKind::BadJson);
+			}
+		}
+	}
+
+	#[test]
+	fn client_body_stays_lenient() {
+		for method in [Method::PUT, Method::POST] {
+			for scheme in [Scheme::AccessToken, Scheme::None] {
+				let request = request(method.clone(), r#"{"x":0.5}"#);
+
+				assert_eq!(parse_json(&request, TypeId::of::<()>(), scheme).unwrap(), None);
+			}
+		}
+
+		for scheme in [Scheme::AccessToken, Scheme::None] {
+			let request = request(Method::POST, " \t\r\n");
+
+			assert_eq!(
+				parse_json(&request, TypeId::of::<()>(), scheme).unwrap(),
+				Some(CanonicalJsonValue::Object(Default::default()))
+			);
+		}
+	}
+
+	#[test]
+	fn signed_empty_body_unchanged() {
+		let put = request(Method::PUT, "");
+		let post = request(Method::POST, "");
+		let scheme = Scheme::ServerSignatures;
+
+		assert_eq!(parse_json(&put, TypeId::of::<()>(), scheme).unwrap(), None);
+		assert_eq!(
+			parse_json(&post, TypeId::of::<()>(), scheme).unwrap(),
+			Some(CanonicalJsonValue::Object(Default::default()))
+		);
+	}
+
+	#[test]
+	fn signed_garbage_body_is_not_json() {
+		for method in [Method::GET, Method::PUT, Method::POST] {
+			for body in ["{", " \t\r\n"] {
+				let request = request(method.clone(), body);
+				let error = parse_json(&request, TypeId::of::<()>(), Scheme::ServerSignatures)
+					.unwrap_err();
+
+				assert_eq!(error.status_code(), StatusCode::BAD_REQUEST);
+				assert_eq!(error.kind(), ErrorKind::NotJson);
+			}
+		}
+	}
+
+	fn request(method: Method, body: &'static str) -> Request {
+		let (parts, ()) = HttpRequest::builder()
+			.method(method)
+			.uri("/")
+			.body(())
+			.unwrap()
+			.into_parts();
+
+		let query = QueryParams {
+			access_token: None,
+			user_id: None,
+			device_id: None,
+			msc3202_device_id: None,
+		};
+
+		Request {
+			cookie: CookieJar::default(),
+			path: Path(PathParams::new()),
+			query,
+			body: Bytes::from_static(body.as_bytes()),
+			parts,
+		}
+	}
 }

@@ -37,8 +37,7 @@ use ruma::{
 use tuwunel_core::{Err, Result, utils::deadline_has_passed};
 use tuwunel_service::{Services, appservice::RegistrationInfo};
 
-pub(super) use self::dispatch::AuthDispatch;
-use self::dispatch::Scheme;
+pub(super) use self::dispatch::{AuthDispatch, Scheme};
 pub use self::uiaa::auth_uiaa;
 use super::request::Request;
 

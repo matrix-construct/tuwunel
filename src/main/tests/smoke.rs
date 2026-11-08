@@ -6,7 +6,11 @@ use insta::{assert_debug_snapshot, with_settings};
 use reqwest::StatusCode;
 use serde_json::Value;
 use tuwunel::{Args, Runtime, Server};
-use tuwunel_core::Result;
+use tuwunel_core::{
+	Result,
+	http::{HeaderValue, Request as HttpRequest, header::AUTHORIZATION},
+	ruma::api::federation::authentication::{ServerSignaturesInput, XMatrix},
+};
 use tuwunel_service::Services;
 
 use self::fixture::boot;
@@ -129,4 +133,52 @@ async fn expect_error(
 
 	assert_eq!(body["errcode"], errcode, "{url}");
 	Ok(body)
+}
+
+/// A signature without content cannot authenticate a non-canonical body.
+///
+/// Signing the empty request models a replayed header from a body-less request.
+/// The canonical JSON error proves refusal before typed request parsing.
+#[test]
+fn content_less_signature_cannot_carry_a_body() -> Result {
+	let options = ["logging.enable=false", POOL_CAP];
+
+	boot("canonical-body", options, async |services, base| {
+		let server_name = services.globals.server_name().to_owned();
+		let uri = format!("{base}/_matrix/federation/v1/send/canonical-body");
+		let request = HttpRequest::builder()
+			.method("PUT")
+			.uri(&uri)
+			.body("")?;
+
+		let input = ServerSignaturesInput::new(
+			server_name.clone(),
+			server_name.clone(),
+			services.server_keys.keypair(),
+		);
+
+		let signature =
+			XMatrix::try_from_http_request(&request, input).expect("sign the empty request");
+
+		let body = format!(
+			r#"{{"origin":"{server_name}","origin_server_ts":1,"pdus":[],"edus":[],"x":0.5}}"#
+		);
+		let response = services
+			.client
+			.clients
+			.default
+			.put(&uri)
+			.header(AUTHORIZATION, HeaderValue::from(&signature))
+			.body(body)
+			.send()
+			.await?;
+
+		assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+		let body: Value = response.json().await?;
+
+		assert_eq!(body["errcode"], "M_BAD_JSON");
+		assert_eq!(body["error"], "M_BAD_JSON: Request body is not canonical JSON.");
+		Ok(())
+	})
 }
