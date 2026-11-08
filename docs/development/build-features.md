@@ -12,6 +12,7 @@ The public Cargo feature surface is defined in [`src/main/Cargo.toml`](https://g
 | `cpu_affinity` | ✔️ | Pin Tokio worker threads and database pool workers to CPU cores. A build without it leaves thread placement to the operating system, ignores `database.pool.affinity`, sizes the database pool from `database.pool.workers` instead of detected storage queues, and counts CPUs with the Rust standard library, which also applies cgroup CPU quotas. OpenBSD counts CPUs with `num_cpus` either way. |
 | `direct_tls` | ✔️ | Serve HTTPS directly from Tuwunel. Configure the certificate and key in `[global.tls]`. |
 | `element_hacks` | ✔️ | Workarounds for Element: password authentication accepts the deprecated `user` field, and lazy-loaded syncs always include redundant members. These compatibility workarounds apply without additional runtime configuration. |
+| `email` | ✔️ | Send email through an SMTP relay: verification mail for adding an address, registering and resetting a password, and notification mail for email pushers. Required when `smtp.connection_uri` is set; a build without it refuses to start then, so it cannot require email at registration. Otherwise such a build answers as a server without SMTP: requests to verify or add an email address are refused, the `m.3pid_changes` capability reads disabled, new email pushers are refused, and existing ones send nothing. Addresses bound by an identity provider, MAS provisioning, admin commands or the Synapse admin API stay bound and listed. |
 | `gzip_compression` | ✔️ | Gzip HTTP response compression and outbound response decompression. Enable `http.compression.gzip = true`; the client must accept Gzip; `network.http.gzip` controls outbound negotiation. |
 | `io_uring` | ✔️ | RocksDB I/O through io_uring. Requires Linux with kernel support for io_uring; liburing is needed when dynamically linked. |
 | `jemalloc` | ✔️ | Use jemalloc for Tuwunel allocations. MSVC uses the system allocator; dynamically linked jemalloc builds need the allocator library. |
@@ -55,6 +56,7 @@ The `main` crate defines every public feature and forwards it to the workspace c
 | `cpu_affinity` | `core` | `core_affinity`. |
 | `direct_tls` | `router` | `axum-server-dual-protocol`, `rustls`. |
 | `element_hacks` | `service` | No optional dependency activated by this feature. |
+| `email` | `service` | `lettre`. |
 | `gzip_compression` | `api`, `core`, `router`, `service` | Compression features on existing HTTP dependencies. |
 | `io_uring` | `database` | RocksDB io_uring support and its native library requirements. |
 | `jemalloc` | `core`, `database` | `jevmalloc`; native allocator build. |

@@ -80,7 +80,7 @@ COPY src src
 
 ARG RUST_TARGET
 ARG SYSROOT
-ARG FEATURES="brotli_compression,cpu_affinity,element_hacks,gzip_compression,jemalloc,jemalloc_conf,markdown,media_thumbnail,release_max_log_level,systemd,url_preview,zstd_compression"
+ARG FEATURES="brotli_compression,cpu_affinity,element_hacks,email,gzip_compression,jemalloc,jemalloc_conf,markdown,media_thumbnail,release_max_log_level,systemd,url_preview,zstd_compression"
 
 # RUSTUP_TOOLCHAIN pins the toolchain the image already carries, so that
 # rust-toolchain.toml does not send rustup after a same-versioned but

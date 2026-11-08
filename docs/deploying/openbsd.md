@@ -225,6 +225,7 @@ console
 cpu_affinity
 direct_tls
 element_hacks
+email
 gzip_compression
 jemalloc
 jemalloc_conf
@@ -260,7 +261,7 @@ export LIBCLANG_PATH=/usr/local/llvm21/lib
 export CARGO_TARGET_DIR=/home/build/target
 
 cargo build --release -p tuwunel --no-default-features \
-    --features brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,gzip_compression,jemalloc,jemalloc_conf,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,release_max_log_level,sentry_telemetry,synapse_admin,url_preview,zstd_compression
+    --features brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gzip_compression,jemalloc,jemalloc_conf,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,release_max_log_level,sentry_telemetry,synapse_admin,url_preview,zstd_compression
 ```
 
 Building the 1.8.3 release rather than the current tree needs one more change.
