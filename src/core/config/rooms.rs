@@ -22,6 +22,8 @@ use super::true_fn;
 ///
 /// Sub-sections:
 ///
+/// - `[global.rooms.delayed_events]`: events scheduled to be sent later
+///   (MSC4140).
 /// - `[global.rooms.extremities]`: forward-extremity pruning.
 /// - `[global.rooms.invites]`: invite restrictions and automatic acceptance.
 /// - `[global.rooms.joins]`: server selection when joining remote rooms.
@@ -44,7 +46,7 @@ use super::true_fn;
 	filename = "tuwunel-example.toml",
 	section = "global.rooms",
 	group = "true",
-	ignore = "extremities invites joins policy_server redaction relations"
+	ignore = "delayed_events extremities invites joins policy_server redaction relations"
 )]
 pub struct Rooms {
 	/// Sets the default `m.federate` property for newly created rooms when the
@@ -198,6 +200,12 @@ pub struct Rooms {
 	#[serde(default)]
 	pub delete_after_leave: bool,
 
+	/// Settings for rooms delayed events.
+	///
+	/// display: section
+	#[serde(default)]
+	pub delayed_events: DelayedEvents,
+
 	/// Settings for rooms extremities.
 	///
 	/// display: section
@@ -233,6 +241,50 @@ pub struct Rooms {
 	/// display: section
 	#[serde(default)]
 	pub relations: Relations,
+}
+
+/// Delayed events (MSC4140)
+///
+/// Lets clients schedule an event to be sent later, then restart its delay,
+/// cancel it or send it early. Element Call schedules a leave this way, so a
+/// caller whose client crashes still leaves the call. Scheduled events
+/// survive a restart, and any that fell due meanwhile are sent on startup.
+///
+/// Tips:
+/// - Setting either limit to 0 disables delayed events and stops
+///   advertising them to clients.
+#[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[config_example_generator(
+	filename = "tuwunel-example.toml",
+	section = "global.rooms.delayed_events",
+	group = "true"
+)]
+pub struct DelayedEvents {
+	/// Limits how far ahead an event may be scheduled, in seconds.
+	///
+	/// reloadable: yes
+	/// default: 86400
+	#[serde(default = "default_max_delay_s")]
+	pub max_delay_s: u64,
+
+	/// Limits how many events one user may have scheduled at once.
+	///
+	/// reloadable: yes
+	/// default: 100
+	#[serde(default = "default_max_scheduled")]
+	pub max_scheduled: usize,
+
+	/// Checks a change to the sender's own membership against the room's
+	/// rules when it is scheduled, as every other delayed event is.
+	///
+	/// When false, such a change is checked only when it is sent, which lets
+	/// a user schedule a join they could not make yet.
+	///
+	/// reloadable: yes
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub check_own_membership: bool,
 }
 
 /// Forward-extremity pruning
@@ -624,12 +676,23 @@ impl Default for Rooms {
 			auto_deactivate_banned_room_attempts: Default::default(),
 			forbidden_alias_names: Default::default(),
 			delete_after_leave: Default::default(),
+			delayed_events: DelayedEvents::default(),
 			extremities: Extremities::default(),
 			invites: Invites::default(),
 			joins: Joins::default(),
 			policy_server: PolicyServer::default(),
 			redaction: Redaction::default(),
 			relations: Relations::default(),
+		}
+	}
+}
+
+impl Default for DelayedEvents {
+	fn default() -> Self {
+		Self {
+			max_delay_s: default_max_delay_s(),
+			max_scheduled: default_max_scheduled(),
+			check_own_membership: true_fn(),
 		}
 	}
 }
@@ -683,6 +746,10 @@ impl Default for Redaction {
 #[must_use]
 #[inline]
 pub fn default_default_version() -> RoomVersionId { RoomVersionId::V12 }
+
+fn default_max_delay_s() -> u64 { 86_400 }
+
+fn default_max_scheduled() -> usize { 100 }
 
 fn default_max() -> usize { 60 }
 

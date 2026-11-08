@@ -273,6 +273,11 @@ impl Service {
 		self.set_password(user_id, None).await?;
 		drop(admin_lock);
 
+		self.services
+			.delayed_events
+			.remove_user(user_id)
+			.await;
+
 		// Revoke any SSO authorizations, outside the lock since each is a request
 		// to the identity provider.
 		self.services

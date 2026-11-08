@@ -441,6 +441,15 @@
     "runtime_path": "rooms.runtime_extra"
   },
   {
+    "section": "global.rooms.delayed_events",
+    "field": "rooms.delayed_events.max_delay_s",
+    "empty": "[global]\n[global.rooms.delayed_events]\n",
+    "partial": "[global]\n[global.rooms.delayed_events]\nmax_delay_s = 3600\n",
+    "unknown_input": "[global.rooms.delayed_events]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "rooms.delayed_events.future_setting",
+    "runtime_path": "rooms.delayed_events.runtime_extra"
+  },
+  {
     "section": "global.rooms.extremities",
     "field": "forward_extremities_emergency_max",
     "empty": "[global]\n[global.rooms.extremities]\n",

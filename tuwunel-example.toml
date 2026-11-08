@@ -4759,6 +4759,8 @@
 #
 # Sub-sections:
 #
+# - `[global.rooms.delayed_events]`: events scheduled to be sent later
+#   (MSC4140).
 # - `[global.rooms.extremities]`: forward-extremity pruning.
 # - `[global.rooms.invites]`: invite restrictions and automatic acceptance.
 # - `[global.rooms.joins]`: server selection when joining remote rooms.
@@ -4909,6 +4911,43 @@
 # reloadable: yes
 #
 #delete_after_leave = false
+
+
+################################################################################
+# Delayed events (MSC4140)
+#
+# Lets clients schedule an event to be sent later, then restart its delay,
+# cancel it or send it early. Element Call schedules a leave this way, so a
+# caller whose client crashes still leaves the call. Scheduled events
+# survive a restart, and any that fell due meanwhile are sent on startup.
+#
+# Tips:
+# - Setting either limit to 0 disables delayed events and stops
+#   advertising them to clients.
+#
+#[global.rooms.delayed_events]
+
+# Limits how far ahead an event may be scheduled, in seconds.
+#
+# reloadable: yes
+#
+#max_delay_s = 86400
+
+# Limits how many events one user may have scheduled at once.
+#
+# reloadable: yes
+#
+#max_scheduled = 100
+
+# Checks a change to the sender's own membership against the room's
+# rules when it is scheduled, as every other delayed event is.
+#
+# When false, such a change is checked only when it is sent, which lets
+# a user schedule a join they could not make yet.
+#
+# reloadable: yes
+#
+#check_own_membership = true
 
 
 ################################################################################

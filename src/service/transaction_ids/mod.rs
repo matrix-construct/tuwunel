@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use ruma::{DeviceId, EventId, RoomId, TransactionId, UserId};
 use tuwunel_core::{Result, implement};
-use tuwunel_database::{Handle, Map};
+use tuwunel_database::{Handle, Map, Txn};
 
 /// Persistent transaction-response lookup service.
 ///
@@ -50,6 +50,9 @@ pub enum RoomScope<'a> {
 
 	/// A redaction, scoped by its target event.
 	Redact(&'a EventId),
+
+	/// A delayed event's scheduling, scoped by its event type.
+	Delayed(&'a str),
 }
 
 struct Data {
@@ -68,6 +71,7 @@ type RoomKey<'a> = (
 
 const ROOM_SEND_TAG: &str = "room-send";
 const ROOM_REDACT_TAG: &str = "room-redact";
+const ROOM_DELAYED_TAG: &str = "room-delayed";
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
@@ -133,6 +137,21 @@ pub fn add_room_txnid(&self, txn: RoomTxn<'_>, scope: RoomScope<'_>, data: &[u8]
 }
 
 #[implement(Service)]
+/// Queues a response under a scoped room transaction key into a batch.
+///
+/// The response commits with the caller's other writes, so a retry never
+/// finds the operation without its response or the response without it.
+pub fn add_room_txnid_batch(
+	&self,
+	batch: &mut Txn,
+	txn: RoomTxn<'_>,
+	scope: RoomScope<'_>,
+	data: &[u8],
+) {
+	batch.put_raw(&self.db.userdevicetxnid_response, room_txnid_key(txn, scope), data);
+}
+
+#[implement(Service)]
 /// Looks up a response under a scoped room transaction key.
 ///
 /// A domain tag, the room, and the scope extend the legacy key so unrelated
@@ -160,6 +179,7 @@ fn room_txnid_key<'a>(txn: RoomTxn<'a>, scope: RoomScope<'a>) -> RoomKey<'a> {
 	let (tag, scope) = match scope {
 		| RoomScope::Send(event_type) => (ROOM_SEND_TAG, event_type),
 		| RoomScope::Redact(event_id) => (ROOM_REDACT_TAG, event_id.as_str()),
+		| RoomScope::Delayed(event_type) => (ROOM_DELAYED_TAG, event_type),
 	};
 
 	(txn.user_id, txn.device_id, txn.txn_id, tag, txn.room_id, scope)

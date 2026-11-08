@@ -117,8 +117,19 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
+		name: "delayid_event",
+		key_size_hint: Some(32),
+		val_size_hint: Some(384),
+		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
 		name: "disabledroomids",
 		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
+		name: "dueat_delayid",
+		key_size_hint: Some(48),
+		..descriptor::SEQUENTIAL_SMALL
 	},
 	Descriptor {
 		name: "email_userid",
@@ -672,6 +683,11 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "userid_blurhash",
+		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
+		name: "userid_delayid",
+		key_size_hint: Some(80),
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {

@@ -3,8 +3,8 @@
 //! Tests for transaction-key compatibility and room scoping.
 //!
 //! The cases preserve the original legacy key bytes. They also prove that the
-//! room tag, room identifier, and scope (an event type for a send, a target for
-//! a redaction) independently separate room keys.
+//! room tag, room identifier, and scope (an event type for a send or a delayed
+//! event, a target for a redaction) independently separate room keys.
 
 use ruma::{DeviceId, EventId, RoomId, TransactionId, UserId};
 use tuwunel_database::serialize_to_vec;
@@ -50,6 +50,22 @@ fn redact_key_appends_tag_room_and_target() {
 	assert_eq!(
 		room_key(Some(device()), room(), RoomScope::Redact(event())),
 		b"@user:example.com\xFFDEVICE\xFFtransaction\xFFroom-redact\xFF!room:example.com\xFF$event:example.com",
+	);
+}
+
+#[test]
+fn delayed_key_appends_tag_room_and_event_type() {
+	assert_eq!(
+		room_key(Some(device()), room(), RoomScope::Delayed("m.room.message")),
+		b"@user:example.com\xFFDEVICE\xFFtransaction\xFFroom-delayed\xFF!room:example.com\xFFm.room.message",
+	);
+}
+
+#[test]
+fn delayed_and_send_tags_are_independent_key_scopes() {
+	assert_ne!(
+		room_key(Some(device()), room(), RoomScope::Delayed("m.room.message")),
+		room_key(Some(device()), room(), RoomScope::Send("m.room.message")),
 	);
 }
 

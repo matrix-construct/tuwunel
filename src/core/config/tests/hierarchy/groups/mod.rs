@@ -35,7 +35,7 @@ fn cases() -> impl Iterator<Item = Case> {
 	let cases: Vec<Case> = from_str(include_str!("../../baseline/groups/probes.json"))
 		.expect("independent group cases parse");
 
-	assert_eq!(cases.len(), 67);
+	assert_eq!(cases.len(), 68);
 	assert_group_coverage(cases.iter().map(|case| case.section.as_str()));
 
 	cases.into_iter()
