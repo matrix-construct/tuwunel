@@ -47,7 +47,7 @@ pub(crate) use self::{
 };
 use crate::{
 	send::{check_send_content, check_send_policy},
-	state::allowed_to_send_state_event,
+	state::{allowed_to_send_state_event, check_member_content_size},
 };
 
 struct Schedule<'a> {
@@ -144,6 +144,12 @@ async fn schedule(
 	// A concurrent retry may have scheduled it while the policy ran.
 	if let Some(delay_id) = existing().await.transpose()?.flatten() {
 		return Ok(delay_id);
+	}
+
+	if let Kind::State { event_type, state_key, content } = kind
+		&& *event_type == StateEventType::RoomMember
+	{
+		check_member_content_size(services, sender, room_id, state_key, content).await?;
 	}
 
 	services

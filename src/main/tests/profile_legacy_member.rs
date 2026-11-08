@@ -26,6 +26,7 @@ const TOKEN: &str = "profile-legacy-member-test-access-token";
 const INVALID_AVATAR_TOKEN: &str = "profile-legacy-invalid-avatar-test-access-token";
 const JOIN_EXTRAS_TOKEN: &str = "profile-legacy-join-extras-test-access-token";
 const MEMBER_ONLY_TOKEN: &str = "profile-legacy-member-only-test-access-token";
+const DELAYED_TOKEN: &str = "profile-legacy-delayed-test-access-token";
 
 // Not a valid mxc URI: the media ID is not ASCII.
 const INVALID_AVATAR: &str = "mxc://localhost/caf\u{e9}";
@@ -111,7 +112,9 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	join_extras_invalid_avatar(services, base).await?;
 
-	member_only_invalid_avatar(services, base).await
+	member_only_invalid_avatar(services, base).await?;
+
+	delayed_invalid_avatar(services, base).await
 }
 
 /// A stored avatar that is not a valid mxc URI can be kept, but a new one is refused.
@@ -264,6 +267,35 @@ async fn member_only_invalid_avatar(services: &Services, base: &str) -> Result {
 	let new_invalid = member_content("after", ESCAPED_AVATAR);
 
 	expect_refused(&owner, &room, &user_id, &new_invalid).await
+}
+
+/// A delayed member event is held to the member limits when it is scheduled.
+///
+/// A refusal at scheduling leaves nothing to be sent when the delay ends, and a valid
+/// event is still scheduled.
+async fn delayed_invalid_avatar(services: &Services, base: &str) -> Result {
+	let user_id = register(services, "delayedmember", DELAYED_TOKEN).await?;
+	let owner = Client { services, base, token: DELAYED_TOKEN };
+
+	let room = owner
+		.create_room(&json!({ "preset": "public_chat" }))
+		.await?;
+
+	let url = owner.url(&format!(
+		"rooms/{room}/state/m.room.member/{user_id}?org.matrix.msc4140.delay=60000"
+	));
+
+	let invalid = member_content("after", ESCAPED_AVATAR);
+	let refused = owner.request(Method::PUT, &url, &invalid).await?;
+
+	expect_bad_json(refused, "delayed member event with an invalid avatar").await?;
+
+	let valid = member_content("after", &avatar_url('r', 40));
+	let scheduled = owner.request(Method::PUT, &url, &valid).await?;
+
+	accepted(scheduled).await?;
+
+	Ok(())
 }
 
 fn member_content(displayname: &str, avatar_url: &str) -> Value {
