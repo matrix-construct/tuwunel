@@ -439,6 +439,30 @@ Element Call should now be working.
 
 ## Additional Configuration
 
+### Delayed events
+
+Tuwunel supports delayed events with no setup.
+
+Element Call relies on
+[delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140)
+to remove callers who disappear. When someone joins a call, their client
+schedules their leave on the server and keeps postponing it while the call
+runs. If the client crashes or loses its connection, the postponing stops and
+the server sends the leave, so the caller drops out of the call instead of
+lingering in it. lk-jwt-service can postpone and send that leave on a caller's
+behalf.
+
+The limits are in the `[global.rooms.delayed_events]` section of your
+`tuwunel.toml` configuration file.
+
+| Setting | Limit | Default |
+| --- | --- | --- |
+| `max_delay_s` | How far ahead an event may be scheduled, in seconds | `86400` (one day) |
+| `max_scheduled` | How many events one user may have pending | `100` |
+
+Setting either to `0` disables delayed events and stops advertising them to
+clients, so callers who drop out stay listed in the call.
+
 ### External TURN Integration
 
 If you follow this guide and also set up Coturn as per the
