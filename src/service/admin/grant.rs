@@ -5,7 +5,6 @@ use ruma::{
 		StateEventType,
 		room::{
 			member::{MembershipState, RoomMemberEventContent},
-			message::RoomMessageEventContent,
 			power_levels::{RoomPowerLevelsEventContent, UserPowerLevel},
 		},
 	},
@@ -17,6 +16,7 @@ use tuwunel_core::{
 };
 use tuwunel_matrix::pdu::PduBuilder;
 
+use super::notices::text_markdown;
 use crate::rooms::state::RoomMutexGuard;
 
 /// Invite the user to the tuwunel admin room.
@@ -119,15 +119,13 @@ pub async fn make_user_admin(&self, user_id: &UserId) -> Result {
 	}
 
 	if !already_member && self.services.server.config.admin.room.notices {
-		let welcome_message = String::from(
-			"## Thank you for trying out tuwunel!\n\nTuwunel is a continuation of conduwuit which was technically a hard fork of Conduit.\n\nHelpful links:\n> GitHub Repo: https://github.com/matrix-construct/tuwunel\n> Documentation: https://matrix-construct.github.io/tuwunel\n> Report issues: https://github.com/matrix-construct/tuwunel/issues\n\nFor a list of available commands, send the following message in this room: `!admin --help`",
-		);
+		let welcome_message = "## Thank you for trying out tuwunel!\n\nTuwunel is a continuation of conduwuit which was technically a hard fork of Conduit.\n\nHelpful links:\n> GitHub Repo: https://github.com/matrix-construct/tuwunel\n> Documentation: https://matrix-construct.github.io/tuwunel\n> Report issues: https://github.com/matrix-construct/tuwunel/issues\n\nFor a list of available commands, send the following message in this room: `!admin --help`";
 
 		// Send welcome message
 		self.services
 			.timeline
 			.build_and_append_pdu(
-				PduBuilder::timeline(&RoomMessageEventContent::text_markdown(welcome_message)),
+				PduBuilder::timeline(&text_markdown(welcome_message)),
 				server_user,
 				&room_id,
 				&state_lock,

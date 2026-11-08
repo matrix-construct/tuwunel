@@ -23,7 +23,7 @@ use tuwunel_matrix::{
 	pdu::{MAX_PDU_BYTES, PduBuilder},
 };
 
-use super::CommandOutput;
+use super::{CommandOutput, notices::notice_markdown};
 use crate::rooms::state::RoomMutexGuard;
 
 /// Room event relation carried by an admin response.
@@ -268,7 +268,7 @@ impl Mode {
 
 fn notice(text: &str, markdown: bool) -> RoomMessageEventContent {
 	match markdown {
-		| true => RoomMessageEventContent::notice_markdown(text),
+		| true => notice_markdown(text),
 		| false => RoomMessageEventContent::notice_plain(text),
 	}
 }

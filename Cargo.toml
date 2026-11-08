@@ -385,7 +385,6 @@ features = [
     "federation-api",
     "identifiers-validation",
     "identity-service-api",
-    "markdown",
     "push-gateway-api-c",
     "rand",
     "ring-compat",

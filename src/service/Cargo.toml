@@ -24,6 +24,7 @@ default = [
 	"element_hacks",
 	"gzip_compression",
 	"ldap",
+	"markdown",
 	"media_thumbnail",
 	"release_max_log_level",
 	"systemd",
@@ -49,6 +50,9 @@ gzip_compression = [
 ]
 ldap = [
 	"dep:ldap3",
+]
+markdown = [
+	"ruma/markdown",
 ]
 media_thumbnail = [
 	"dep:image",

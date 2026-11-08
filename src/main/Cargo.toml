@@ -86,6 +86,7 @@ default = [
 	"jemalloc_conf",
 	"ldap",
 	"lz4_compression",
+	"markdown",
 	"mas",
 	"media_thumbnail",
 	"oidc",
@@ -159,6 +160,9 @@ ldap = [
 ]
 lz4_compression = [
 	"tuwunel-database/lz4_compression",
+]
+markdown = [
+	"tuwunel-service/markdown",
 ]
 mas = [
 	"dep:tuwunel-api-mas",
