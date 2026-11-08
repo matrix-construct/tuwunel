@@ -10,20 +10,29 @@ The configuration options themselves are listed in the
 
 ## Enabling previews
 
-Previews are off until at least one allowlist names something. With
+URL previews require a build with the `url_preview` feature and at least one
+non-empty allowlist, a list of domains or URLs you permit the server to fetch.
+Every preview request is refused when all three allowlists are empty:
 `url_preview_domain_explicit_allowlist`, `url_preview_domain_contains_allowlist`
-and `url_preview_url_contains_allowlist` all empty, every request is refused
-and the server advertises the `io.element.msc4452.preview_url` capability as
-disabled, which well-behaved clients read as "do not ask".
+and `url_preview_url_contains_allowlist`. A build without the `url_preview`
+feature refuses previews regardless of the allowlists.
+
+In either case, the server advertises the `m.preview_url` capability and its
+unstable name `io.element.msc4452.preview_url` as disabled, which well-behaved
+clients read as "do not ask".
+
+For example, add these domains to the `[global]` section of the configuration
+file your server loads to allow previews of YouTube links:
 
 ```toml
 [global]
 url_preview_domain_explicit_allowlist = ["youtube.com", "www.youtube.com", "youtu.be"]
 ```
 
-Setting any allowlist to `["*"]` allows every URL. That is a large amount of
-attack surface: a client can then ask the server to fetch anything the CIDR
-denylist does not already block. Prefer naming the domains you want.
+> [!WARNING]
+> Setting any allowlist to `["*"]` allows every URL. That is a large amount of
+> attack surface. A client can then ask the server to fetch anything the CIDR
+> denylist does not already block. Prefer naming the domains you want.
 
 ## How a preview is produced
 

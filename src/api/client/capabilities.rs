@@ -124,11 +124,8 @@ fn capabilities(
 		json!({"enabled": services.config.rooms.forget_forced_upon_leave}),
 	)?;
 
-	// MSC4452: enabled mirrors the per-URL gate; empty allowlists 403 every URL.
-	capabilities.set(
-		"io.element.msc4452.preview_url",
-		json!({"enabled": preview_url_enabled(services)}),
-	)?;
+	// MSC4452: stable and unstable names share the media service gate.
+	set_preview_url(&mut capabilities, services.media.url_preview_enabled())?;
 
 	// MSC3664: absent rather than present-and-disabled, since a client testing
 	// for the key rather than its value would otherwise read support.
@@ -153,6 +150,14 @@ fn capabilities(
 	Ok(capabilities)
 }
 
+fn set_preview_url(capabilities: &mut Capabilities, enabled: bool) -> Result {
+	let value = json!({"enabled": enabled});
+
+	capabilities.set("m.preview_url", value.clone())?;
+	capabilities.set("io.element.msc4452.preview_url", value)?;
+	Ok(())
+}
+
 // non_exhaustive: no struct literal, so the limits fill a default in place
 fn delayed_events_capability(
 	mut capability: DelayedEventsCapability,
@@ -166,22 +171,22 @@ fn delayed_events_capability(
 	capability
 }
 
-fn preview_url_enabled(services: &Services) -> bool {
-	let config = &services.config;
+#[cfg(test)]
+mod tests {
+	use super::{Capabilities, json, set_preview_url};
 
-	!config
-		.media
-		.url_preview
-		.domain_contains_allowlist
-		.is_empty()
-		|| !config
-			.media
-			.url_preview
-			.domain_explicit_allowlist
-			.is_empty()
-		|| !config
-			.media
-			.url_preview
-			.url_contains_allowlist
-			.is_empty()
+	#[test]
+	fn preview_url_capability_names_agree() {
+		for enabled in [false, true] {
+			let mut capabilities = Capabilities::default();
+
+			set_preview_url(&mut capabilities, enabled).expect("custom capabilities");
+			let stable = capabilities
+				.get("m.preview_url")
+				.expect("stable capability");
+
+			assert_eq!(stable.as_ref(), &json!({"enabled": enabled}));
+			assert_eq!(capabilities.get("io.element.msc4452.preview_url"), Some(stable));
+		}
+	}
 }

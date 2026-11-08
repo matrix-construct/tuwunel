@@ -1050,16 +1050,31 @@ pub(super) fn check_url_host(&self, url: &Url) -> Result {
 	Ok(())
 }
 
+/// Reports whether URL previews are enabled by the build and configuration.
+///
+/// Requires the `url_preview` feature and at least one non-empty allowlist.
+#[implement(Service)]
+#[inline]
+pub fn url_preview_enabled(&self) -> bool {
+	cfg!(feature = "url_preview") && enabled(&self.services.config.media.url_preview)
+}
+
+fn enabled(config: &UrlPreview) -> bool {
+	!config.domain_contains_allowlist.is_empty()
+		|| !config.domain_explicit_allowlist.is_empty()
+		|| !config.url_contains_allowlist.is_empty()
+}
+
 /// Reports whether the `media.url_preview` settings allow previewing `url`.
 ///
 /// Only HTTP and HTTPS URLs with a host qualify. `"*"` in any allowlist admits
 /// every such URL; otherwise the explicit denylist is checked before the
 /// allowlists, and `check_root_domain` retries the explicit lists with the
-/// host's first label removed.
+/// host's first label removed. Builds without `url_preview` always refuse.
 #[implement(Service)]
 #[inline]
 pub fn url_preview_allowed(&self, url: &Url) -> bool {
-	url_allowed(&self.services.config.media.url_preview, url)
+	cfg!(feature = "url_preview") && url_allowed(&self.services.config.media.url_preview, url)
 }
 
 fn url_allowed(url_preview: &UrlPreview, url: &Url) -> bool {
@@ -1161,11 +1176,36 @@ mod tests {
 	use tuwunel_core::utils::time::timepoint_ago;
 	use url::Url;
 
-	use super::{CachedPreview, UrlPreview, UrlPreviewData, is_youtube, url_allowed};
+	use super::{CachedPreview, UrlPreview, UrlPreviewData, enabled, is_youtube, url_allowed};
 	#[cfg(feature = "url_preview")]
 	use super::{oembed_endpoint, reserve_capped, video_type};
 
 	const TTL: Duration = Duration::from_hours(24);
+
+	#[test]
+	fn enabled_by_any_allowlist() {
+		assert!(!enabled(&UrlPreview::default()));
+		let denied = UrlPreview {
+			domain_explicit_denylist: vec!["example.org".to_owned()],
+			..Default::default()
+		};
+
+		assert!(!enabled(&denied));
+		let entry = || vec!["example.org".to_owned()];
+
+		for (domain_contains_allowlist, domain_explicit_allowlist, url_contains_allowlist) in
+			[(entry(), vec![], vec![]), (vec![], entry(), vec![]), (vec![], vec![], entry())]
+		{
+			let config = UrlPreview {
+				domain_contains_allowlist,
+				domain_explicit_allowlist,
+				url_contains_allowlist,
+				..Default::default()
+			};
+
+			assert!(enabled(&config));
+		}
+	}
 
 	#[test]
 	fn url_allowed_by_the_preview_lists() {
