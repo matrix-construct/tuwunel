@@ -279,6 +279,9 @@ nightly_rustflags = [
     # "coherence" restores the solver every prior release used, leaving the new one
     # where it has long been the default. Drop this once those are fixed upstream.
     "-Z next-solver=coherence",
+    # Parallel front end. Eight is the count the parallel rustc working group
+    # tested and recommends; rustc draws the extra threads from the jobserver.
+    "-Z threads=8",
 ]
 
 dynamic_nightly_rustflags = [
