@@ -4,15 +4,15 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 218. Passing: **87.6%**
-  - ✅ `pass`: 191
-  - 🟨 `some`: 10
+- Test groups: 218. Passing: **88.1%**
+  - ✅ `pass`: 192
+  - 🟨 `some`: 9
   - 🟥 `fail`: 17
   - ⬛ `skip`: 0
 
-- Subtests: 606. Passing: **82.0%**
-  - ✅ `pass`: 497
-  - 🟥 `fail`: 101
+- Subtests: 610. Passing: **83.3%**
+  - ✅ `pass`: 508
+  - 🟥 `fail`: 94
   - ⬛ `skip`: 8
 
 ## All Top-Level Tests
@@ -44,7 +44,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | 🟥 | – | `CorruptedAuthChain` |
 | ✅ | – | `CumulativeJoinLeaveJoinSync` |
 | ✅ | 4/0/0 | `DeactivateAccount` |
-| 🟨 | 6/7/1 | `DelayedEvents` |
+| ✅ | 17/0/1 | `DelayedEvents` |
 | ✅ | 1/0/0 | `DeletingDeviceRemovesDeviceLocalNotificationSettings` |
 | ✅ | – | `DemotingUsersViaUsersDefault` |
 | 🟨 | 8/2/0 | `DeviceListUpdates` |
