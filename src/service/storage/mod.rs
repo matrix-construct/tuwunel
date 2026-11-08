@@ -22,6 +22,8 @@ use futures::TryStreamExt;
 /// object-store dependency path. Their behavior is supplied by the selected
 /// storage backend.
 pub use object_store::{CopyMode, GetResult, GetResultPayload, PutPayload, PutResult};
+#[cfg(not(all(feature = "gcs_storage", feature = "s3_storage")))]
+use tuwunel_core::Err;
 use tuwunel_core::{
 	Result, at, config::StorageProvider, err, implement, utils::stream::IterStream,
 };
@@ -78,8 +80,20 @@ fn build_providers(args: &crate::Args<'_>) -> Result<Providers> {
 		.storage_provider_sections()
 		.filter_map(|(name, conf)| match conf.as_ref() {
 			| StorageProvider::local(conf) => provider::local::new(args, name, conf).transpose(),
+			#[cfg(feature = "s3_storage")]
 			| StorageProvider::s3(conf) => provider::s3::new(args, name, conf).transpose(),
+			#[cfg(feature = "gcs_storage")]
 			| StorageProvider::gcs(conf) => provider::gcs::new(args, name, conf).transpose(),
+			#[cfg(not(feature = "s3_storage"))]
+			| StorageProvider::s3(conf) if conf.is_enabled() => Some(Err!(Config(
+				"storage_provider",
+				"tuwunel was not built with S3 support (\"s3_storage\") for provider {name:?}"
+			))),
+			#[cfg(not(feature = "gcs_storage"))]
+			| StorageProvider::gcs(conf) if conf.is_enabled() => Some(Err!(Config(
+				"storage_provider",
+				"tuwunel was not built with GCS support (\"gcs_storage\") for provider {name:?}"
+			))),
 			| _ => None,
 		})
 		.collect::<Result<_>>()

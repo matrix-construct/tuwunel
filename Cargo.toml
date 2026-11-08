@@ -320,9 +320,7 @@ version = "0.2"
 version = "0.14"
 default-features = false
 features = [
-	"aws",
 	"fs",
-	"gcp",
 ]
 
 [workspace.dependencies.opentelemetry]

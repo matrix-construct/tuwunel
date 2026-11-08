@@ -17,6 +17,7 @@ pub mod local;
 /// object-store client as a provider. Credentials come from the environment,
 /// ending at the instance metadata server, so GKE Workload Identity needs no
 /// credential settings. Configurations without a bucket return no provider.
+#[cfg(feature = "gcs_storage")]
 pub mod gcs;
 
 /// S3-compatible storage-provider construction.
@@ -24,6 +25,7 @@ pub mod gcs;
 /// The constructor applies endpoint, credential, transport, and signing
 /// options before wrapping the object-store client as a provider.
 /// Configurations with neither a URL nor a bucket return no provider.
+#[cfg(feature = "s3_storage")]
 pub mod s3;
 
 #[cfg(test)]
@@ -39,10 +41,13 @@ use std::{
 use bytes::Bytes;
 use derive_more::Debug;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+#[cfg(any(feature = "gcs_storage", feature = "s3_storage"))]
 use http::Method;
+#[cfg(any(feature = "gcs_storage", feature = "s3_storage"))]
+use object_store::signer::Signer;
 use object_store::{
 	Attributes, CopyMode, DynObjectStore, GetResult, MultipartUpload, ObjectMeta, ObjectStore,
-	ObjectStoreExt, PutPayload, PutResult, path::Path, signer::Signer,
+	ObjectStoreExt, PutPayload, PutResult, path::Path,
 };
 use tuwunel_core::{
 	Error, Result,
@@ -74,6 +79,7 @@ pub struct Provider {
 	/// Erased object-store implementation receiving provider operations.
 	pub(crate) provider: Box<DynObjectStore>,
 
+	#[cfg(any(feature = "gcs_storage", feature = "s3_storage"))]
 	#[debug(skip)]
 	/// Optional backend signer used to create time-limited object URLs.
 	pub(crate) signer: Option<Arc<dyn Signer>>,
@@ -404,6 +410,7 @@ pub async fn load(&self, path: &str) -> Result<GetResult> {
 ///
 /// The provider prefix is applied before signing. Backends without a signer,
 /// such as local filesystem providers, return `None` without performing I/O.
+#[cfg(any(feature = "gcs_storage", feature = "s3_storage"))]
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -427,6 +434,17 @@ pub async fn signed_get_url(&self, path: &str, ttl: Duration) -> Result<Option<U
 		.map_err(Error::from)
 		.map_ok(Some)
 		.await
+}
+
+/// Creates no URL, since a build without S3 or GCS support has no signer.
+///
+/// Such a build has only local filesystem providers, so callers serve every
+/// object directly, as they do for local providers in any build.
+#[cfg(not(any(feature = "gcs_storage", feature = "s3_storage")))]
+#[implement(Provider)]
+#[expect(clippy::unused_async)]
+pub async fn signed_get_url(&self, _path: &str, _ttl: Duration) -> Result<Option<Url>> {
+	Ok(None)
 }
 
 /// Deletes one object from this provider.

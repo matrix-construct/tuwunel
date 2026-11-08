@@ -81,6 +81,7 @@ default = [
 	"direct_tls",
 	"element_hacks",
 	"email",
+	"gcs_storage",
 	"gzip_compression",
 	"io_uring",
 	"jemalloc",
@@ -92,6 +93,7 @@ default = [
 	"media_thumbnail",
 	"oidc",
 	"release_max_log_level",
+	"s3_storage",
 	"sentry_telemetry",
 	"synapse_admin",
 	"systemd",
@@ -134,6 +136,9 @@ element_hacks = [
 ]
 email = [
 	"tuwunel-service/email",
+]
+gcs_storage = [
+	"tuwunel-service/gcs_storage",
 ]
 gzip_compression = [
 	"tuwunel-api/gzip_compression",
@@ -205,6 +210,9 @@ release_max_log_level = [
 	"tuwunel-matrix/release_max_log_level",
 	"tuwunel-router/release_max_log_level",
 	"tuwunel-service/release_max_log_level",
+]
+s3_storage = [
+	"tuwunel-service/s3_storage",
 ]
 sentry_telemetry = [
 	"dep:reqwest",

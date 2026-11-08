@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![cfg(feature = "s3_storage")]
 
 use std::{env::var, process::id as process_id, sync::Arc};
 

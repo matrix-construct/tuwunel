@@ -23,11 +23,13 @@ default = [
 	"console",
 	"element_hacks",
 	"email",
+	"gcs_storage",
 	"gzip_compression",
 	"ldap",
 	"markdown",
 	"media_thumbnail",
 	"release_max_log_level",
+	"s3_storage",
 	"systemd",
 	"url_preview",
 	"zstd_compression",
@@ -47,6 +49,9 @@ console = [
 element_hacks = []
 email = [
 	"dep:lettre",
+]
+gcs_storage = [
+	"object_store/gcp",
 ]
 gzip_compression = [
 	"reqwest/gzip",
@@ -69,6 +74,9 @@ release_max_log_level = [
 	"tuwunel-core/release_max_log_level",
 	"tuwunel-database/release_max_log_level",
 	"tuwunel-matrix/release_max_log_level",
+]
+s3_storage = [
+	"object_store/aws",
 ]
 systemd = [
 	"dep:sd-notify",
