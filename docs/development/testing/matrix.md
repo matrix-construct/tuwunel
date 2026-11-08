@@ -31,7 +31,7 @@ that nothing in the default code path accidentally depends on an optional featur
 
 The feature set shipped to users in standard packages:
 
-`brotli_compression`, `bzip2_compression`, `console`, `direct_tls`,
+`brotli_compression`, `bzip2_compression`, `console`, `cpu_affinity`, `direct_tls`,
 `element_hacks`, `gzip_compression`, `io_uring`, `jemalloc`, `jemalloc_conf`,
 `ldap`, `lz4_compression`, `mas`, `media_thumbnail`, `oidc`,
 `release_max_log_level`, `sentry_telemetry`, `synapse_admin`, `systemd`,

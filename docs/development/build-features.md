@@ -9,6 +9,7 @@ The public Cargo feature surface is defined in [`src/main/Cargo.toml`](https://g
 | `brotli_compression` | ✔️ | Brotli HTTP response compression and outbound response decompression. Enable `http.compression.brotli = true`; the client must accept Brotli; `network.http.brotli` controls outbound negotiation. |
 | `bzip2_compression` | ✔️ | Bzip2 compression for RocksDB. Select `rocksdb.compression_algo = "bz2"`. |
 | `console` | ✔️ | Interactive administration console on the terminal. Start with `--console`; an interactive terminal is needed. |
+| `cpu_affinity` | ✔️ | Pin Tokio worker threads and database pool workers to CPU cores. A build without it leaves thread placement to the operating system, ignores `database.pool.affinity`, sizes the database pool from `database.pool.workers` instead of detected storage queues, and counts CPUs with the Rust standard library, which also applies cgroup CPU quotas. OpenBSD counts CPUs with `num_cpus` either way. |
 | `direct_tls` | ✔️ | Serve HTTPS directly from Tuwunel. Configure the certificate and key in `[global.tls]`. |
 | `element_hacks` | ✔️ | Workarounds for Element: password authentication accepts the deprecated `user` field, and lazy-loaded syncs always include redundant members. These compatibility workarounds apply without additional runtime configuration. |
 | `gzip_compression` | ✔️ | Gzip HTTP response compression and outbound response decompression. Enable `http.compression.gzip = true`; the client must accept Gzip; `network.http.gzip` controls outbound negotiation. |
@@ -50,6 +51,7 @@ The `main` crate defines every public feature and forwards it to the workspace c
 | `brotli_compression` | `api`, `core`, `router`, `service` | Compression features on existing HTTP dependencies. |
 | `bzip2_compression` | `database` | RocksDB Bzip2 support. |
 | `console` | `service` | `rustyline-async`, `termimad`. |
+| `cpu_affinity` | `core` | `core_affinity`. |
 | `direct_tls` | `router` | `axum-server-dual-protocol`, `rustls`. |
 | `element_hacks` | `service` | No optional dependency activated by this feature. |
 | `gzip_compression` | `api`, `core`, `router`, `service` | Compression features on existing HTTP dependencies. |

@@ -134,7 +134,7 @@ COPY src src
 ARG RUST_TARGET
 ARG CROSS
 ARG SYSROOT
-ARG FEATURES="brotli_compression,element_hacks,gzip_compression,jemalloc,jemalloc_conf,media_thumbnail,release_max_log_level,systemd,url_preview,zstd_compression"
+ARG FEATURES="brotli_compression,cpu_affinity,element_hacks,gzip_compression,jemalloc,jemalloc_conf,media_thumbnail,release_max_log_level,systemd,url_preview,zstd_compression"
 
 # Pinning the clang triple and sysroot matters more here than on a 64-bit
 # target: if bindgen fell back to the host headers it would generate bindings
