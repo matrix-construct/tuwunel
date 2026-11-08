@@ -33,7 +33,7 @@ The feature set shipped to users in standard packages:
 
 `brotli_compression`, `bzip2_compression`, `console`, `cpu_affinity`, `direct_tls`,
 `element_hacks`, `gzip_compression`, `io_uring`, `jemalloc`, `jemalloc_conf`,
-`ldap`, `lz4_compression`, `mas`, `media_thumbnail`, `oidc`,
+`ldap`, `lz4_compression`, `markdown`, `mas`, `media_thumbnail`, `oidc`,
 `release_max_log_level`, `sentry_telemetry`, `synapse_admin`, `systemd`,
 `url_preview`, `zstd_compression`
 

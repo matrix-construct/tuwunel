@@ -20,6 +20,7 @@ The public Cargo feature surface is defined in [`src/main/Cargo.toml`](https://g
 | `jemalloc_stats` | × | Compile jemalloc allocation statistics support. Enable `jemalloc`; a substituted allocator must support statistics. |
 | `ldap` | ✔️ | Authenticate users against LDAP. Enable and configure `[global.ldap]`; an LDAP server is needed. |
 | `lz4_compression` | ✔️ | LZ4 compression for RocksDB. Select `rocksdb.compression_algo = "lz4"` or `"lz4hc"`. |
+| `markdown` | ✔️ | Render Markdown to HTML in the server's administrative messages: admin command output, admin room notices and the welcome message, and room and user reports. A build without it sends their Markdown source as plain text. |
 | `mas` | ✔️ | Matrix Authentication Service provisioning API. Required when `authentication.mas_secret` is set; a build without it refuses to start with a nonempty secret. |
 | `media_thumbnail` | ✔️ | Generate media thumbnails. Video extraction also needs `media.video_thumbnail.command` and its external program. |
 | `oidc` | ✔️ | Native OIDC server API. Required when `well_known.client` is set together with `authentication.oidc.native_auth` or any `identity_provider`; a build without it refuses to start then. Legacy SSO alone does not need this feature, but SSO with `well_known.client` set does. |
@@ -62,6 +63,7 @@ The `main` crate defines every public feature and forwards it to the workspace c
 | `jemalloc_stats` | `core` | Statistics on `jevmalloc` if the allocator is enabled. |
 | `ldap` | `api`, `api-client`, `service` | `ldap3`. |
 | `lz4_compression` | `database` | RocksDB LZ4 support. |
+| `markdown` | `service` | Ruma's `markdown` feature, which adds `pulldown-cmark`. |
 | `mas` | `api-mas`, `router` | Optional workspace crate `tuwunel-api-mas`. |
 | `media_thumbnail` | `service` | `image`. |
 | `oidc` | `api-oidc`, `router` | Optional workspace crate `tuwunel-api-oidc`; service-side issuer code remains compiled without this API feature. |

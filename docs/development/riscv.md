@@ -80,7 +80,7 @@ COPY src src
 
 ARG RUST_TARGET
 ARG SYSROOT
-ARG FEATURES="brotli_compression,cpu_affinity,element_hacks,gzip_compression,jemalloc,jemalloc_conf,media_thumbnail,release_max_log_level,systemd,url_preview,zstd_compression"
+ARG FEATURES="brotli_compression,cpu_affinity,element_hacks,gzip_compression,jemalloc,jemalloc_conf,markdown,media_thumbnail,release_max_log_level,systemd,url_preview,zstd_compression"
 
 # RUSTUP_TOOLCHAIN pins the toolchain the image already carries, so that
 # rust-toolchain.toml does not send rustup after a same-versioned but
@@ -118,10 +118,11 @@ docker buildx build --platform linux/riscv64 \
     -f Dockerfile.riscv64 -t tuwunel:riscv64 --load .
 ```
 
-A cold build takes about fourteen minutes and produces a 45 MB image. The
-`RUN ["/usr/local/bin/tuwunel", "--version"]` line executes under emulation
-during the build, so a binary that cannot run fails the build rather than
-shipping.
+A cold build takes about fourteen minutes and produces a 45 MB image.
+
+The `RUN ["/usr/local/bin/tuwunel", "--version"]` line executes under
+emulation during the build, so a binary that cannot run fails the build
+rather than shipping.
 
 Both Alpine and Debian publish `riscv64` base images, so either works for the
 runtime stage. Alpine is used here because the binary is linked against musl.
