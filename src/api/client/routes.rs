@@ -1,15 +1,23 @@
 use axum::{
 	Router,
 	response::IntoResponse,
-	routing::{any, get, post, put},
+	routing::{MethodRouter, any, get, post, put},
 };
 use const_str::{concat, join, replace};
 use http::{HeaderValue, header};
+use ruma::api::{
+	IncomingRequest,
+	client::{message::send_message_event, state::send_state_event},
+	path_builder::PathBuilder,
+};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tuwunel_api::router::RouterExt;
 use tuwunel_core::{Server, err};
 
-use crate::{self as client, State, put_msc4388_route, sso_callback_route};
+use crate::{
+	self as client, State, put_msc4388_route, send_message_event_or_delayed_route,
+	send_state_event_or_delayed_route, sso_callback_route,
+};
 
 /// Builds the client endpoint routes.
 ///
@@ -28,6 +36,7 @@ pub fn build(server: &Server) -> Router<State> {
 		config.media.deny_inline_styles,
 	);
 
+	let router = register_delayed_event_routes(router);
 	let router = register_client_misc_routes(router);
 	let router = register_rendezvous_routes(router);
 	let router = if config.federation.enable {
@@ -183,9 +192,19 @@ fn register_client_room_routes(router: Router<State>) -> Router<State> {
 }
 
 fn register_client_state_and_sync_routes(router: Router<State>) -> Router<State> {
+	// MSC4140: these paths also schedule an event under a query parameter, and
+	// a scheduling answers with a different response type than the send.
+	let router = route_paths::<send_message_event::v3::Request>(
+		router,
+		&put(send_message_event_or_delayed_route),
+	);
+
+	let router = route_paths::<send_state_event::v3::Request>(
+		router,
+		&put(send_state_event_or_delayed_route),
+	);
+
 	router
-		.ruma_route(&client::send_message_event_route)
-		.ruma_route(&client::send_state_event_for_key_route)
 		.ruma_route(&client::get_state_events_route)
 		.ruma_route(&client::get_state_events_for_key_route)
 		// Ruma doesn't have support for multiple paths for a single endpoint yet, and these
@@ -194,23 +213,23 @@ fn register_client_state_and_sync_routes(router: Router<State>) -> Router<State>
 		.route(
 			"/_matrix/client/r0/rooms/{room_id}/state/{event_type}",
 			get(client::get_state_events_for_empty_key_route)
-				.put(client::send_state_event_for_empty_key_route),
+				.put(send_state_event_or_delayed_route),
 		)
 		.route(
 			"/_matrix/client/v3/rooms/{room_id}/state/{event_type}",
 			get(client::get_state_events_for_empty_key_route)
-				.put(client::send_state_event_for_empty_key_route),
+				.put(send_state_event_or_delayed_route),
 		)
 		// These two endpoints allow trailing slashes
 		.route(
 			"/_matrix/client/r0/rooms/{room_id}/state/{event_type}/",
 			get(client::get_state_events_for_empty_key_route)
-				.put(client::send_state_event_for_empty_key_route),
+				.put(send_state_event_or_delayed_route),
 		)
 		.route(
 			"/_matrix/client/v3/rooms/{room_id}/state/{event_type}/",
 			get(client::get_state_events_for_empty_key_route)
-				.put(client::send_state_event_for_empty_key_route),
+				.put(send_state_event_or_delayed_route),
 		)
 		.ruma_route(&client::events_route)
 		.ruma_route(&client::sync_events_route)
@@ -224,6 +243,19 @@ fn register_client_state_and_sync_routes(router: Router<State>) -> Router<State>
 		.ruma_route(&client::get_relating_events_with_rel_type_route)
 		.ruma_route(&client::get_relating_events_route)
 		.ruma_route(&client::get_hierarchy_route)
+}
+
+/// Registers one handler at every path a Ruma request type declares.
+///
+/// It serves a handler that answers with something other than the type's own
+/// response, which `ruma_route` cannot register.
+fn route_paths<Req: IncomingRequest>(
+	router: Router<State>,
+	handler: &MethodRouter<State>,
+) -> Router<State> {
+	Req::PATH_BUILDER
+		.all_paths()
+		.fold(router, |router, path| router.route(path, handler.clone()))
 }
 
 fn register_client_media_and_device_routes(
@@ -256,6 +288,15 @@ fn register_client_media_and_device_routes(
 		.ruma_route(&client::get_dehydrated_events_route)
 		.ruma_route(&client::send_event_to_device_route)
 		.merge(media_content_router)
+}
+
+fn register_delayed_event_routes(router: Router<State>) -> Router<State> {
+	router
+		.ruma_route(&client::send_delayed_event_route)
+		.ruma_route(&client::update_delayed_event_route)
+		.ruma_route(&client::update_delayed_event_by_body_route)
+		.ruma_route(&client::get_delayed_event_route)
+		.ruma_route(&client::get_delayed_events_route)
 }
 
 fn register_client_misc_routes(router: Router<State>) -> Router<State> {

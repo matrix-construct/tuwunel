@@ -50,6 +50,15 @@ pub(crate) async fn get_supported_versions_route(
 				.into_iter()
 				.flatten(),
 		)
+		.chain(
+			services
+				.delayed_events
+				.limits()
+				.is_some()
+				.then_some(DELAYED_EVENTS_FEATURES)
+				.into_iter()
+				.flatten(),
+		)
 		.map(Into::into)
 		.zip(once(true).cycle())
 		.collect();
@@ -172,4 +181,11 @@ static OIDC_FEATURES: [&str; 6] = [
 	"org.matrix.msc2967",
 	// OIDC delegation aware
 	"org.matrix.msc3824",
+];
+
+static DELAYED_EVENTS_FEATURES: [&str; 2] = [
+	// Delayed events (https://github.com/matrix-org/matrix-spec-proposals/pull/4140)
+	"org.matrix.msc4140",
+	// Delayed events on their stable endpoints, ahead of a spec version
+	"org.matrix.msc4140.stable",
 ];

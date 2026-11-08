@@ -29,13 +29,13 @@
 
 | ✅ `yes` | 🟨 `part` | 🟥 `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 285 | 65 | 448 | 312 | 1110 |
+| 285 | 66 | 447 | 312 | 1110 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
-| merged | 185 | 25 | 14 | 57 | 281 |
+| merged | 185 | 26 | 13 | 57 | 281 |
 | open | 64 | 25 | 348 | 181 | 618 |
 | closed | 36 | 15 | 86 | 74 | 211 |
 
@@ -99,7 +99,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4156 | ✅ ● | 100/100 | Migrate `server_name` to `via` | via parameter handled via Ruma |
 | MSC4151 | ✅ ● | 100/100 | Reporting rooms (Client-Server API) | POST /rooms/{roomId}/report implemented and routed |
 | MSC4143 | 🟨 ◐ | 50/60 | MatrixRTC | Discovery exists; auth and slot upgrade gaps; client RTC excluded |
-| MSC4140 | 🟥 ● | 0/0 | Cancellable delayed events | No delayed-event lifecycle; client capability-use requirements excluded |
+| MSC4140 | 🟨 ● | 60/60 | Cancellable delayed events | Full lifecycle; no finalised state, unsigned delay_id or rate limiting |
 | MSC4138 | ✅ ● | 100/100 | Update allowed HTTP methods in CORS responses | CORS METHODS list includes HEAD and PATCH; excludes CONNECT/TRACE |
 | MSC4133 | ✅ ● | 85/95 | Extending User Profile API with Custom Key:Value Pairs | endpoints + caps/errcodes; unset legacy 200 omit by choice, 404 key-scoped |
 | MSC4127 | 🟥 ● | 0/0 | Removal of query string auth | src/api/router/auth.rs:78 still falls back to request.query.access_token |
@@ -292,6 +292,7 @@ for spec compliance.
 | MSC2324 | 🟨 ◐ | 60/100 |  | Facilitating early releases of software dependent on spec | two MUST misses: unprefixed unstable SSO callback; stable v1/auth_issuer |
 | MSC2675 | 🟨 ◐ | 60/75 | 1.3 | Serverside aggregations of message relationships | thread+edit+reference bundled (edit/ref gated); reactions unbundled |
 | MSC3267 | 🟨 ◐ | 60/80 | 1.5 | reference relationships | m.reference bundle added; gated default-off; no ignore/visibility filter |
+| MSC4140 | 🟨 ● | 60/60 |  | Cancellable delayed events | Full lifecycle; no finalised state, unsigned delay_id or rate limiting |
 | MSC4508 | 🟨 ◐ | 60/80 |  | Sliding Sync Extensions: Common format and Typing | Typing exists; joined-only filtering and scope reentry remain incomplete. |
 | MSC4543 | 🟨 ◐ | 60/90 |  | Sliding Sync Extensions: End-to-end encryption | Client processing excluded; initial device lists and key counts diverge |
 | MSC1957 | 🟨 ● | 50/50 |  | Integration manager discovery | account-data passthrough only; no m.integrations key in well-known client |
@@ -314,7 +315,6 @@ for spec compliance.
 | MSC3288 | 🟥 ● | 0/0 | 1.2 | Add room type to `/_matrix/identity/v2/store-invite` API | sole clause is addressed to homeservers, so not n/a; no 3PID invite at all |
 | MSC3550 | 🟥 ◐ | 0/0 | 1.2 | Add HTTP 403 to possible profile lookup responses | CS /profile returns 403 M_FORBIDDEN when outbound profile lookup disabled |
 | MSC4127 | 🟥 ● | 0/0 |  | Removal of query string auth | src/api/router/auth.rs:78 still falls back to request.query.access_token |
-| MSC4140 | 🟥 ● | 0/0 |  | Cancellable delayed events | No delayed-event lifecycle; client capability-use requirements excluded |
 | MSC4183 | 🟥 ● | 0/0 | 1.18 | Additional Error Codes for submitToken endpoints | mixed MSC; the submit_url half is homeserver scope and we emit no submit_url |
 | MSC4335 | 🟥 ● | 0/0 | 1.18 | M_USER_LIMIT_EXCEEDED error code | M_USER_LIMIT_EXCEEDED error code not used |
 | MSC4354 | 🟥 ● | 0/0 |  | Sticky Events | No sticky delivery or expiry paths; client ephemeral maps excluded |

@@ -11,6 +11,7 @@ pub(crate) mod backup;
 pub(crate) mod capabilities;
 pub(crate) mod context;
 pub(crate) mod dehydrated_device;
+pub(crate) mod delayed_events;
 pub(crate) mod device;
 pub(crate) mod directory;
 pub(crate) mod events;
@@ -87,6 +88,11 @@ pub(crate) use self::{
 		delete_dehydrated_device_route, get_dehydrated_device_route, get_dehydrated_events_route,
 		put_dehydrated_device_route,
 	},
+	delayed_events::{
+		get_delayed_event_route, get_delayed_events_route, send_delayed_event_route,
+		send_message_event_or_delayed_route, send_state_event_or_delayed_route,
+		update_delayed_event_by_body_route, update_delayed_event_route,
+	},
 	device::{
 		delete_device_route, delete_devices_route, get_device_route, get_devices_route,
 		update_device_route,
@@ -150,7 +156,6 @@ pub(crate) use self::{
 	},
 	rtc::get_transports_route,
 	search::search_events_route,
-	send::send_message_event_route,
 	session::{
 		get_login_types_route, login_route, login_token_route, logout_all_route, logout_route,
 		refresh_token_route, sso_callback_route, sso_complete_js_route, sso_css_route,
@@ -159,8 +164,7 @@ pub(crate) use self::{
 	space::get_hierarchy_route,
 	state::{
 		get_state_events_for_empty_key_route, get_state_events_for_key_route,
-		get_state_events_route, send_state_event_for_empty_key_route,
-		send_state_event_for_key_route,
+		get_state_events_route,
 	},
 	sync::{sync_events_route, sync_events_v5_route},
 	tag::{delete_tag_route, get_tags_route, update_tag_route},

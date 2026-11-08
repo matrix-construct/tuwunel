@@ -6,16 +6,18 @@ use ruma::api::client::discovery::get_capabilities::v3::{
 	SetAvatarUrlCapability, SetDisplayNameCapability,
 };
 use ruma::{
+	UInt,
 	api::client::discovery::get_capabilities::v3::{
 		AccountModerationCapability, Capabilities, ChangePasswordCapability,
-		ForgetForcedUponLeaveCapability, GetLoginTokenCapability, ProfileFieldsCapability,
-		Request, Response, RoomVersionsCapability, ThirdPartyIdChangesCapability,
+		DelayedEventsCapability, ForgetForcedUponLeaveCapability, GetLoginTokenCapability,
+		ProfileFieldsCapability, Request, Response, RoomVersionsCapability,
+		ThirdPartyIdChangesCapability,
 	},
 	profile::ProfileFieldName,
 };
 use serde_json::json;
 use tuwunel_core::{Result, utils::BoolExt};
-use tuwunel_service::Services;
+use tuwunel_service::{Services, delayed_events::Limits};
 
 use crate::{Ruma, utils::may_set_profile_field};
 
@@ -138,7 +140,30 @@ fn capabilities(
 		capabilities.account_moderation = AccountModerationCapability::new(true, true);
 	}
 
+	// MSC4140: absent while disabled; current clients skip a delayed leave
+	// without one of the two names.
+	let delayed_events = services
+		.delayed_events
+		.limits()
+		.map(|limits| delayed_events_capability(DelayedEventsCapability::default(), limits));
+
+	capabilities.delayed_events = delayed_events;
+	capabilities.unstable_delayed_events = delayed_events;
+
 	Ok(capabilities)
+}
+
+// non_exhaustive: no struct literal, so the limits fill a default in place
+fn delayed_events_capability(
+	mut capability: DelayedEventsCapability,
+	limits: Limits,
+) -> DelayedEventsCapability {
+	capability.max_delay_ms = Some(UInt::new_saturating(limits.max_delay_ms));
+	capability.max_scheduled = u64::try_from(limits.max_scheduled)
+		.ok()
+		.map(UInt::new_saturating);
+
+	capability
 }
 
 fn preview_url_enabled(services: &Services) -> bool {

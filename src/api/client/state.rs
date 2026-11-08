@@ -61,19 +61,6 @@ pub(crate) async fn send_state_event_for_key_route(
 	})
 }
 
-/// # `PUT /_matrix/client/*/rooms/{roomId}/state/{eventType}`
-///
-/// Sends a state event into the room.
-pub(crate) async fn send_state_event_for_empty_key_route(
-	State(services): State<crate::State>,
-	body: Ruma<send_state_event::v3::Request>,
-) -> Result<RumaResponse<send_state_event::v3::Response>> {
-	send_state_event_for_key_route(State(services), body)
-		.boxed()
-		.await
-		.map(RumaResponse)
-}
-
 /// # `GET /_matrix/client/v3/rooms/{roomid}/state`
 ///
 /// Get all state events for a room.
@@ -296,7 +283,14 @@ fn is_duplicate_state(
 	Ok(current_content == *content)
 }
 
-async fn allowed_to_send_state_event(
+/// Applies the server's policy for sending a state event, before the room
+/// lock.
+///
+/// Refuses what room auth alone would allow but this server forbids: changes
+/// to `m.room.create`, a server ACL that would lock this server out, admin
+/// room exposure, foreign aliases, and membership changes the sender is
+/// barred from.
+pub(crate) async fn allowed_to_send_state_event(
 	services: &Services,
 	sender: &UserId,
 	room_id: &RoomId,
