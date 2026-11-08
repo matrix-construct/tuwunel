@@ -450,7 +450,15 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
+		name: "senderkey_emailcursor",
+		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
 		name: "senderkey_pusher",
+		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
+		name: "senderkeyroom_emailthrottle",
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {

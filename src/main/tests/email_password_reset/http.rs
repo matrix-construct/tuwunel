@@ -5,11 +5,7 @@ use quoted_printable::{ParseMode, decode};
 use reqwest::{Client, Url};
 use serde_json::{Value, json};
 use serde_urlencoded::from_str;
-use tokio::{
-	io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-	net::TcpListener as TokioTcpListener,
-	time::{sleep, timeout},
-};
+use tokio::time::{sleep, timeout};
 use tuwunel_core::{
 	Err, Result, err,
 	ruma::{
@@ -18,7 +14,7 @@ use tuwunel_core::{
 	},
 };
 
-use super::Reset;
+use super::{Reset, smtp::capture_email};
 
 pub(super) struct PasswordTokenRequest<'a> {
 	pub(super) client: &'a Client,
@@ -203,64 +199,6 @@ pub(super) async fn request_password_token(
 	assert!(!token.is_empty(), "verification email carried an empty token");
 
 	Ok((sid, token))
-}
-
-async fn capture_email(listener: TcpListener) -> Result<String> {
-	listener.set_nonblocking(true)?;
-
-	let listener = TokioTcpListener::from_std(listener)?;
-	let (stream, _) = listener.accept().await?;
-	let (reader, mut writer) = stream.into_split();
-	let mut lines = BufReader::new(reader).lines();
-
-	writer
-		.write_all(b"220 localhost ESMTP\r\n")
-		.await?;
-
-	loop {
-		let line = lines
-			.next_line()
-			.await?
-			.ok_or_else(|| err!("SMTP client closed before sending a message"))?;
-
-		match line.as_str() {
-			| _ if line.starts_with("EHLO ") || line.starts_with("HELO ") =>
-				writer.write_all(b"250 localhost\r\n").await?,
-			| "DATA" => {
-				writer
-					.write_all(b"354 End data with <CRLF>.<CRLF>\r\n")
-					.await?;
-
-				let mut message = String::with_capacity(1024);
-
-				loop {
-					let line = lines
-						.next_line()
-						.await?
-						.ok_or_else(|| err!("SMTP client closed during message data"))?;
-
-					if line == "." {
-						break;
-					}
-
-					message.push_str(line.strip_prefix("..").unwrap_or(&line));
-					message.push_str("\r\n");
-				}
-
-				writer
-					.write_all(b"250 Message accepted\r\n")
-					.await?;
-
-				return Ok(message);
-			},
-			| "QUIT" => {
-				writer.write_all(b"221 Bye\r\n").await?;
-
-				return Err!("SMTP client quit before sending a message");
-			},
-			| _ => writer.write_all(b"250 OK\r\n").await?,
-		}
-	}
 }
 
 fn validation_link(message: &str) -> Result<Url> {

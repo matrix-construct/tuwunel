@@ -12,6 +12,7 @@ mod fixture;
 mod http;
 #[path = "email_password_reset/scenarios.rs"]
 mod scenarios;
+mod smtp;
 
 #[derive(Deserialize, Serialize)]
 #[serde(crate = "tuwunel_core::ruma::exports::serde")]

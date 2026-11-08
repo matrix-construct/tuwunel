@@ -3866,7 +3866,8 @@
 # Controls delivery to the push gateways that clients register for their
 # users, and which events reach them. Push works with nothing set here: by
 # default the server evaluates each user's push rules and forwards only
-# events the rules mark as notifying.
+# events the rules mark as notifying. `email_delay` decides when notification
+# emails go out to users who turn them on.
 #
 # Tips:
 # - Gateway requests obey `network.http.ip_range_denylist`, so with its
@@ -3887,14 +3888,15 @@
 #
 #notification_path = "/_matrix/push/v1/notify"
 
-# Sends every message to pushers without filtering by push rules or
+# Sends every message to HTTP pushers without filtering by push rules or
 # actions.
 #
 # This compatibility and special-purpose setting should not normally be
 # needed, but can bypass bugs or outdated server-side rule support, let
 # clients evaluate rules themselves, or support hosting and custom-pusher
 # requirements. It does not alter the notification records shown in the
-# notifications pane.
+# notifications pane. Email pushers still mail only what the push rules
+# notify for.
 #
 # reloadable: yes
 #
@@ -3917,16 +3919,32 @@
 #
 #msc3664_related_event_match = false
 
-# Experimentally suppresses push notifications for active users.
+# Experimentally suppresses HTTP push notifications for active users.
 #
 # When enabled, users with Online presence and recent activity,
-# determined from presence and sync activity, receive no push
+# determined from presence and sync activity, receive no HTTP push
 # notifications, reducing duplicate alerts while active on another
-# client. The default is disabled to preserve legacy behavior.
+# client. The default is disabled to preserve legacy behavior. Email
+# pushers ignore this setting; they do not mail messages the user reads
+# before `email_delay` ends.
 #
 # reloadable: yes
 #
 #suppress_when_active = false
+
+# Seconds an unread notification waits before an email pusher mails it.
+#
+# Email notifications need `[global.smtp]`; a user receives them when
+# their client registers an email pusher for an address verified on their
+# account. A notification still unread after this delay is mailed
+# together with any others waiting. A room in that mail is then held back
+# longer before it can prompt each further mail, up to a day, until the
+# user reads it. With a delay of 0, each notification is mailed as it
+# arrives and no room is held back.
+#
+# reloadable: yes
+#
+#email_delay = 600
 
 
 ################################################################################

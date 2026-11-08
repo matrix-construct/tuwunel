@@ -548,7 +548,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4075 | 🟥 ● | 0/0 | MatrixRTC Notification Event (call ringing) | New RTC push defaults absent; client signalling excluded |
 | MSC4074 | 🟥 ● | 0/0 | Server side annotation aggregation | server-side annotation aggregation not implemented |
 | MSC4071 | 🟥 ● | 0/0 | Pagination Token Headers | No X-Matrix-Pagination-* header handling. |
-| MSC4062 | 🟨 ◐ | 50/50 | Add a push rule tweak to disable email notification | Custom tweak round trips through ruma; no email pusher to honour dont_email |
+| MSC4062 | 🟨 ◐ | 50/50 | Add a push rule tweak to disable email notification | Custom tweak round trips through ruma; email pusher ignores dont_email |
 | MSC4060 | 🟥 ● | 0/0 | Accept room rules before speaking | No m.room.rules state event or acceptance gating. |
 | MSC4057 | 🟥 ● | 0/0 | Static Room Aliases | No .well-known/matrix/rooms lookup before federation directory. |
 | MSC4056 | 🟥 ● | 0/0 | Role-Based Access Control (mk II) | No m.role / m.role_map RBAC support. |

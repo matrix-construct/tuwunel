@@ -1,5 +1,11 @@
+//! Users' pushers and the notifications they deliver.
+//!
+//! The service stores pushers, evaluates push rules for each appended event,
+//! keeps notification counts, and delivers to push gateways and by email.
+
 mod append;
 mod badge;
+mod email;
 mod notification;
 mod redact;
 mod request;
@@ -13,6 +19,7 @@ use std::{
 	sync::{Arc, LazyLock},
 };
 
+use async_trait::async_trait;
 use futures::{Stream, StreamExt, TryFutureExt, future::join};
 use ruma::{
 	DeviceId, OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, UserId,
@@ -36,13 +43,14 @@ use tuwunel_core::{
 		stream::{BroadbandExt, IterStream, ReadyExt, TryIgnore, WidebandExt},
 	},
 };
-use tuwunel_database::{Database, Deserialized, Ignore, Interfix, Json, Map};
+use tuwunel_database::{Database, Deserialized, Ignore, Interfix, Map};
 use tuwunel_matrix::Event;
 use url::Url;
 
 use self::badge::SentBadges;
 pub use self::{
 	append::Notified,
+	email::Outcome as EmailOutcome,
 	suppressed::{SuppressedPushes, SuppressedRooms},
 };
 
@@ -99,6 +107,10 @@ struct InReplyTo {
 	event_id: OwnedEventId,
 }
 
+/// Stores pushers and delivers the notifications they ask for.
+///
+/// HTTP pushers are pushed through the sending queue, and email pushers are
+/// mailed by this service's worker.
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	notification_increment_mutex: CountMutex,
@@ -106,11 +118,15 @@ pub struct Service {
 	db: Data,
 	suppressed: suppressed::SuppressedQueue,
 	sent_badges: SentBadges,
+	email_wakes: email::Wakes,
+	email_locks: email::Locks,
 }
 
 struct Data {
 	db: Arc<Database>,
+	senderkey_emailcursor: Arc<Map>,
 	senderkey_pusher: Arc<Map>,
+	senderkeyroom_emailthrottle: Arc<Map>,
 	pushkey_deviceid: Arc<Map>,
 	useridcount_notification: Arc<Map>,
 	userroomid_highlightcount: Arc<Map>,
@@ -118,6 +134,7 @@ struct Data {
 	roomuserid_lastnotificationread: Arc<Map>,
 }
 
+#[async_trait]
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
@@ -126,7 +143,9 @@ impl crate::Service for Service {
 			highlight_increment_mutex: MutexMap::new(),
 			db: Data {
 				db: args.db.clone(),
+				senderkey_emailcursor: args.db["senderkey_emailcursor"].clone(),
 				senderkey_pusher: args.db["senderkey_pusher"].clone(),
+				senderkeyroom_emailthrottle: args.db["senderkeyroom_emailthrottle"].clone(),
 				pushkey_deviceid: args.db["pushkey_deviceid"].clone(),
 				useridcount_notification: args.db["useridcount_notification"].clone(),
 				userroomid_highlightcount: args.db["userroomid_highlightcount"].clone(),
@@ -136,8 +155,18 @@ impl crate::Service for Service {
 			},
 			suppressed: suppressed::SuppressedQueue::default(),
 			sent_badges: SentBadges::default(),
+			email_wakes: email::Wakes::default(),
+			email_locks: MutexMap::new(),
 		}))
 	}
+
+	async fn worker(self: Arc<Self>) -> Result {
+		self.email_worker().await;
+
+		Ok(())
+	}
+
+	async fn interrupt(&self) { self.close_email_wakes(); }
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
@@ -202,8 +231,8 @@ async fn set_pusher_post(
 		self.check_email_pusher(sender, pushkey).await?;
 	}
 
-	let key = (sender, pushkey);
-	self.db.senderkey_pusher.put(key, Json(action));
+	self.put_pusher(sender, pushkey, action).await;
+
 	self.db
 		.pushkey_deviceid
 		.insert(pushkey, sender_device);
@@ -263,13 +292,30 @@ async fn check_email_pusher(&self, sender: &UserId, address: &str) -> Result {
 		})
 }
 
+/// Deletes one of the user's pushers, with its email cursor and throttles.
+///
+/// The email lock keeps the worker from writing them back.
 #[implement(Service)]
 pub async fn delete_pusher(&self, sender: &UserId, pushkey: &str) {
+	let _lock = self.email_lock(sender, pushkey).await;
+
+	self.remove_pusher(sender, pushkey).await;
+}
+
+/// Deletes a pusher and everything kept for it.
+///
+/// Callers hold the pusher's email lock.
+#[implement(Service)]
+async fn remove_pusher(&self, sender: &UserId, pushkey: &str) {
 	let key = (sender, pushkey);
+
 	self.db.senderkey_pusher.del(key);
 	self.db.pushkey_deviceid.remove(pushkey);
 	self.clear_suppressed_pushkey(sender, pushkey);
 	self.forget_sent_badge(sender, pushkey);
+
+	// Last: a cancelled removal leaves only email rows, cleared at boot or by a new email pusher.
+	self.forget_email_state(sender, pushkey).await;
 
 	self.services
 		.sending

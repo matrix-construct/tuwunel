@@ -1,12 +1,12 @@
 use std::{collections::HashSet, sync::Arc};
 
 use futures::{
-	FutureExt, StreamExt,
+	FutureExt, Stream, StreamExt,
 	future::{join, join4},
 };
 use ruma::{
 	EventId, RoomId, UserId,
-	api::client::push::ProfileTag,
+	api::client::push::{ProfileTag, Pusher, PusherKind},
 	events::{
 		AnySyncTimelineEvent, TimelineEventType,
 		invite_permission_config::InvitePermission,
@@ -20,10 +20,11 @@ use tracing::Level;
 use tuwunel_core::{
 	Result, implement, trace,
 	utils::{
-		BoolExt, ReadyExt, future::TryExtExt, option::OptionExt, result::ErrLog, time::now_millis,
+		BoolExt, ReadyExt, future::TryExtExt, option::OptionExt, result::ErrLog,
+		stream::TryIgnore, time::now_millis,
 	},
 };
-use tuwunel_database::{Deserialized, Json, Map};
+use tuwunel_database::{Deserialized, Ignore, Interfix, Json, Map, deserialize_from_slice};
 use tuwunel_matrix::{
 	event::Event,
 	pdu::{Count, Pdu, PduId, RawPduId},
@@ -229,18 +230,67 @@ async fn append_pdu_for_user(
 		}
 	}
 
+	// Email is built from the recorded rows, so only a recorded notification wakes it.
+	let mailable = notify && matches!(PduId::from(*pdu_id).count, Count::Normal(_));
+
 	if notify || highlight || self.services.config.push.everything {
-		self.get_pushkeys(user)
-			.map(ToOwned::to_owned)
-			.ready_for_each(|push_key| {
-				self.services
-					.sending
-					.send_pdu_push(pdu_id, user, push_key)
-					.log_err(Level::TRACE)
-					.ok();
+		self.keyed_pushers(user)
+			.ready_for_each(|(pushkey, pusher)| {
+				self.dispatch_push(user, pdu_id, pushkey, pusher, mailable);
 			})
 			.await;
 	}
+}
+
+/// The user's pushers by pushkey, each `None` when it cannot be decoded.
+///
+/// The pushkey comes from the row's key, so a pusher that cannot be decoded is
+/// still known by it.
+#[implement(super::Service)]
+fn keyed_pushers<'a>(
+	&'a self,
+	user: &'a UserId,
+) -> impl Stream<Item = (&'a str, Option<Pusher>)> + Send + 'a {
+	let prefix = (user, Interfix);
+
+	self.db
+		.senderkey_pusher
+		.stream_prefix(&prefix)
+		.ignore_err()
+		.map(|((_, pushkey), pusher): ((Ignore, &str), &[u8])| {
+			(pushkey, deserialize_from_slice(pusher).ok())
+		})
+}
+
+/// Hands one appended event to one of the user's pushers, by kind.
+///
+/// An email pusher wakes the email worker when there is a recorded notification
+/// to mail, and an HTTP pusher queues a push. A pusher that cannot be decoded
+/// is queued a push too, and its delivery reports the fault.
+#[implement(super::Service)]
+fn dispatch_push(
+	&self,
+	user: &UserId,
+	pdu_id: &RawPduId,
+	pushkey: &str,
+	pusher: Option<Pusher>,
+	mailable: bool,
+) {
+	match pusher.map(|Pusher { ids, kind, .. }| (kind, ids.pushkey)) {
+		| None => self.queue_push(user, pdu_id, pushkey.to_owned()),
+		| Some((PusherKind::Email(_), _)) if mailable => self.wake_email(user, pushkey),
+		| Some((PusherKind::Http(_), pushkey)) => self.queue_push(user, pdu_id, pushkey),
+		| Some(_) => {},
+	}
+}
+
+#[implement(super::Service)]
+fn queue_push(&self, user: &UserId, pdu_id: &RawPduId, pushkey: String) {
+	self.services
+		.sending
+		.send_pdu_push(pdu_id, user, pushkey)
+		.log_err(Level::TRACE)
+		.ok();
 }
 
 #[implement(super::Service)]

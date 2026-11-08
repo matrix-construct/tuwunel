@@ -1164,9 +1164,25 @@ where
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn is_joined<'a>(&'a self, user_id: &'a UserId, room_id: &'a RoomId) -> bool {
 	let key = (user_id, room_id);
+
 	self.db
 		.userroomid_joinedcount
 		.contains(&key)
+		.await
+}
+
+/// Tests whether a user is indexed as joined to a room, returning a failed read
+/// as an error.
+///
+/// Only a missing row returns `false`.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub async fn try_is_joined(&self, user_id: &UserId, room_id: &RoomId) -> Result<bool> {
+	let key = (user_id, room_id);
+
+	self.db
+		.userroomid_joinedcount
+		.try_contains(&key)
 		.await
 }
 
@@ -1192,9 +1208,25 @@ pub async fn is_knocked<'a>(&'a self, user_id: &'a UserId, room_id: &'a RoomId) 
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn is_invited(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	let key = (user_id, room_id);
+
 	self.db
 		.userroomid_invitestate
 		.contains(&key)
+		.await
+}
+
+/// Tests whether a user is indexed as invited to a room, returning a failed read
+/// as an error.
+///
+/// Only a missing row returns `false`.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub async fn try_is_invited(&self, user_id: &UserId, room_id: &RoomId) -> Result<bool> {
+	let key = (user_id, room_id);
+
+	self.db
+		.userroomid_invitestate
+		.try_contains(&key)
 		.await
 }
 
