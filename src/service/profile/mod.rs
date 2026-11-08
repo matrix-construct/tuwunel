@@ -573,21 +573,25 @@ async fn set_profile_keys_locked(
 ) -> Result {
 	let local = self.services.globals.user_is_local(user_id);
 
+	let changed = self
+		.changed_fields(user_id, profile_values)
+		.await?;
+
+	// Only a change is checked, so a stored value now refused can still be restated.
 	if local {
 		for (name, value) in profile_values {
 			check_profile_key(name.as_str())?;
 
-			if let Some(value) = value {
+			if let Some(value) = value
+				.as_ref()
+				.filter(|_| changed.contains(&name.as_str()))
+			{
 				check_profile_value(name.as_str(), value)?;
 				self.enforce_profile_size(user_id, name.as_str(), value)
 					.await?;
 			}
 		}
 	}
-
-	let changed = self
-		.changed_fields(user_id, profile_values)
-		.await?;
 
 	let propagation = propagation.unwrap_or(
 		if self
