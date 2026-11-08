@@ -12,7 +12,7 @@ use ruma::{
 use tuwunel_core::{Result, implement, result::NotFound, utils::stream::TryIgnore};
 use tuwunel_database::{Cbor, Deserialized, Ignore, Interfix};
 
-use super::{Binding, EmailKey};
+use super::{Binding, EmailKey, canonicalize_email};
 
 /// Persists a canonical email binding unless another account holds it.
 ///
@@ -158,6 +158,29 @@ pub async fn bound_elsewhere(&self, user_id: &UserId, email_canon: &str) -> Resu
 	self.user_id_for_email(email_canon)
 		.await
 		.map(|bound| bound.is_some_and(|bound| bound != user_id))
+}
+
+/// Whether an email address, as given, is bound to `user_id`.
+///
+/// An address that does not canonicalize was never bound, so it answers
+/// `false`. Storage and decoding failures from the reverse lookup are
+/// propagated.
+#[implement(super::Service)]
+#[tracing::instrument(
+	level = "debug",
+	skip(self, address),
+	fields(
+		%user_id,
+	),
+)]
+pub async fn address_bound_to(&self, user_id: &UserId, address: &str) -> Result<bool> {
+	let Ok(email_canon) = canonicalize_email(address) else {
+		return Ok(false);
+	};
+
+	self.user_id_for_email(&email_canon)
+		.await
+		.map(|bound| bound.is_some_and(|bound| bound == user_id))
 }
 
 /// Returns the user bound to a canonical email address.

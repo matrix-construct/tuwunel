@@ -16,9 +16,12 @@ use tuwunel_core::{
 	Err, Result, err,
 	ruma::{
 		DeviceId, EventId, OwnedEventId, OwnedRoomId, RoomId, UInt, UserId,
-		api::client::push::{
-			Pusher, PusherIds, PusherInit, PusherKind,
-			set_pusher::v3::{PusherAction, Request as SetPusherRequest},
+		api::{
+			client::push::{
+				EmailPusherData, Pusher, PusherIds, PusherInit, PusherKind,
+				set_pusher::v3::{PusherAction, Request as SetPusherRequest},
+			},
+			error::ErrorKind,
 		},
 		device_id,
 		presence::PresenceState,
@@ -605,6 +608,7 @@ async fn run_cases(services: &Services) -> Result {
 	};
 
 	reject_bad_url(&fixture).await?;
+	reject_email_without_smtp(&fixture).await?;
 	full_format_delivery(&fixture).await?;
 	event_id_only_delivery(&fixture).await?;
 	gateway_url_paths(&fixture).await?;
@@ -670,6 +674,44 @@ async fn reject_bad_url(fixture: &Fixture<'_>) -> Result {
 		.is_err()
 		.then_some(())
 		.ok_or_else(|| err!("set_pusher accepted a non-HTTP(S) pusher URL"))
+}
+
+/// An email pusher is refused while the server has no SMTP transport.
+///
+/// The refusal comes before anything is written, so the address finds no
+/// stored pusher.
+async fn reject_email_without_smtp(fixture: &Fixture<'_>) -> Result {
+	let address = "pushtest@example.com";
+	let action = email_pusher_action(address);
+
+	let refusal = fixture
+		.services
+		.pusher
+		.set_pusher(fixture.user, fixture.device, &action)
+		.await
+		.err()
+		.ok_or_else(|| err!("set_pusher accepted an email pusher without SMTP"))?;
+
+	assert!(
+		matches!(refusal.kind(), ErrorKind::InvalidParam),
+		"email pusher refusal without SMTP: {refusal}"
+	);
+
+	let stored = fixture
+		.services
+		.pusher
+		.get_pusher(fixture.user, address)
+		.await;
+
+	assert!(stored.is_err(), "a refused email pusher was stored");
+
+	Ok(())
+}
+
+fn email_pusher_action(address: &str) -> PusherAction {
+	let ids = PusherIds::new(address.to_owned(), "m.email".to_owned());
+
+	post_action(ids, PusherKind::Email(EmailPusherData::new()))
 }
 
 /// A full-format notification carries the event, sender, content, and device
@@ -1228,9 +1270,15 @@ fn pusher_action(
 	data.data
 		.insert("disable_badge_count".into(), Value::Bool(disable_badge_count));
 
+	let ids = PusherIds::new(pushkey.to_owned(), APP_ID.to_owned());
+
+	post_action(ids, PusherKind::Http(data))
+}
+
+fn post_action(ids: PusherIds, kind: PusherKind) -> PusherAction {
 	let pusher: Pusher = PusherInit {
-		ids: PusherIds::new(pushkey.to_owned(), APP_ID.to_owned()),
-		kind: PusherKind::Http(data),
+		ids,
+		kind,
 		app_display_name: "Tuwunel Test".into(),
 		device_display_name: "Test Device".into(),
 		profile_tag: None,

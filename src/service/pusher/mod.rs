@@ -142,6 +142,11 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
+/// Stores or deletes one of the user's pushers, as `/pushers/set` asks.
+///
+/// Storing refuses an HTTP pusher whose URL is invalid or forbidden. It
+/// refuses an email pusher when the server has no SMTP, or when the address is
+/// malformed or not verified on the user's account.
 #[implement(Service)]
 pub async fn set_pusher(
 	&self,
@@ -154,7 +159,8 @@ pub async fn set_pusher(
 			self.set_pusher_delete(sender, ids.pushkey.as_str())
 				.await,
 		| PusherAction::Post(data) =>
-			self.set_pusher_post(sender, sender_device, pusher, &data.pusher)?,
+			self.set_pusher_post(sender, sender_device, pusher, &data.pusher)
+				.await?,
 	}
 
 	Ok(())
@@ -166,7 +172,7 @@ async fn set_pusher_delete(&self, sender: &UserId, pushkey: &str) {
 }
 
 #[implement(Service)]
-fn set_pusher_post(
+async fn set_pusher_post(
 	&self,
 	sender: &UserId,
 	sender_device: &DeviceId,
@@ -190,6 +196,10 @@ fn set_pusher_post(
 		})?;
 
 		self.check_http_pusher_url(&url)?;
+	}
+
+	if matches!(pusher.kind, PusherKind::Email(_)) {
+		self.check_email_pusher(sender, pushkey).await?;
 	}
 
 	let key = (sender, pushkey);
@@ -227,6 +237,30 @@ fn check_http_pusher_url(&self, url: &Url) -> Result {
 	}
 
 	Ok(())
+}
+
+/// Refuses an email pusher this server cannot or may not deliver.
+///
+/// Mail needs SMTP configured and the address verified on the sender's own
+/// account. Without the binding check any user could direct notification mail
+/// at any address.
+#[implement(Service)]
+async fn check_email_pusher(&self, sender: &UserId, address: &str) -> Result {
+	if !self.services.sendmail.is_enabled() {
+		return Err!(Request(InvalidParam(
+			"Email notifications are not available on this server."
+		)));
+	}
+
+	self.services.sendmail.check_address(address)?;
+	self.services
+		.threepid
+		.address_bound_to(sender, address)
+		.await?
+		.into_option()
+		.ok_or_else(|| {
+			err!(Request(ThreepidNotFound("Email address is not bound to your account.")))
+		})
 }
 
 #[implement(Service)]
