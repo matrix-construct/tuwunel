@@ -14,6 +14,7 @@ use tuwunel_core::{
 use tuwunel_database::{
 	Deserialized, Ignore, IgnoreAll, Interfix, KeyBuf, deserialize_from_slice as deserialize_key,
 };
+use tuwunel_matrix::Event;
 
 /// Per-thread unread counts: `(notification, highlight)` keyed by thread root.
 type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
@@ -277,6 +278,45 @@ fn merge_thread_count(
 	entry.0 = entry.0.saturating_add(notifications);
 	entry.1 = entry.1.saturating_add(highlights);
 	counts
+}
+
+/// Whether the user has read past one notified event.
+///
+/// The room's main watermark covers every notification up to it, and a
+/// notification in a thread is also read once that thread's watermark passes
+/// it. `count` is the event's position, comparable with both.
+#[implement(super::Service)]
+#[tracing::instrument(
+	level = "debug",
+	skip(self, event),
+	fields(
+		event_id = %event.event_id(),
+	),
+)]
+pub async fn notification_read<E>(&self, user_id: &UserId, event: &E, count: u64) -> bool
+where
+	E: Event,
+{
+	let room_id = event.room_id();
+	let read_past = |last_read: Result<u64>| last_read.is_ok_and(|last_read| last_read >= count);
+
+	let main_read = self
+		.last_notification_read(user_id, room_id)
+		.await;
+
+	if read_past(main_read) {
+		return true;
+	}
+
+	let Some(thread_root) = self.services.threads.get_thread_id(event).await else {
+		return false;
+	};
+
+	let thread_read = self
+		.last_thread_notification_read(user_id, room_id, &thread_root)
+		.await;
+
+	read_past(thread_read)
 }
 
 #[implement(super::Service)]

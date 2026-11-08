@@ -72,19 +72,8 @@ pub(crate) async fn get_notifications_route(
 
 			let read = services
 				.pusher
-				.last_notification_read(sender_user, event.room_id())
-				.await
-				.is_ok_and(|last_read| last_read.ge(&count));
-
-			let read = read
-				|| match services.threads.get_thread_id(&event).await {
-					| None => false,
-					| Some(thread_root) => services
-						.pusher
-						.last_thread_notification_read(sender_user, event.room_id(), &thread_root)
-						.await
-						.is_ok_and(|last_read| last_read.ge(&count)),
-				};
+				.notification_read(sender_user, &event, count)
+				.await;
 
 			let ts = notify
 				.ts
