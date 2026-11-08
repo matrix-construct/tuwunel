@@ -39,6 +39,7 @@ pub(super) fn command_dispatch(item: ItemEnum, args: &[Meta]) -> Result<TokenStr
 			command: #name,
 			context: &crate::Context<'_>
 		) -> Result {
+			use ::futures::FutureExt as _;
 			use #name::*;
 			#[expect(non_snake_case)]
 			match command {
@@ -73,6 +74,8 @@ fn dispatch_arm(v: &Variant, prefix: &str) -> Result<TokenStream2> {
 		target = format!("{prefix}{target}");
 	}
 	let handler = Ident::new(&target, Span::call_site().into());
+
+	// Each arm's dyn box is a size and compile-time firewall per handler.
 	let res = match &v.fields {
 		// command with args
 		| Fields::Named(fields) => {
@@ -85,7 +88,7 @@ fn dispatch_arm(v: &Variant, prefix: &str) -> Result<TokenStream2> {
 			quote! {
 				#( #cfgs )*
 				#name { #( #field ),* } => {
-					Box::pin(context.#handler(#( #arg ),*)).await
+					context.#handler(#( #arg ),*).boxed().await
 				},
 			}
 		},
@@ -94,7 +97,7 @@ fn dispatch_arm(v: &Variant, prefix: &str) -> Result<TokenStream2> {
 			quote! {
 				#( #cfgs )*
 				#name => {
-					Box::pin(context.#handler()).await
+					context.#handler().boxed().await
 				},
 			}
 		},
@@ -107,7 +110,7 @@ fn dispatch_arm(v: &Variant, prefix: &str) -> Result<TokenStream2> {
 			quote! {
 				#( #cfgs )*
 				#name ( #field ) => {
-					Box::pin(#handler::process(#field, context)).await
+					#handler::process(#field, context).boxed().await
 				}
 			}
 		},

@@ -8,6 +8,8 @@ use axum::{
 	response::{IntoResponse, Response},
 	routing::{MethodFilter, on},
 };
+#[cfg(debug_assertions)]
+use futures::FutureExt;
 use http::{Method, Request};
 use ruma::api::{IncomingRequest, path_builder::PathBuilder};
 use tuwunel_core::Result;
@@ -137,7 +139,7 @@ macro_rules! ruma_handler {
 				};
 
 				cfg_select! {
-					debug_assertions => Box::pin(response),
+					debug_assertions => response.boxed(), // compile-time firewall per route
 					_ => response,
 				}
 			}
