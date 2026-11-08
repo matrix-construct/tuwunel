@@ -22,6 +22,7 @@ default = [
 	"brotli_compression",
 	"console",
 	"element_hacks",
+	"email",
 	"gzip_compression",
 	"ldap",
 	"markdown",
@@ -44,6 +45,9 @@ console = [
 	"dep:termimad",
 ]
 element_hacks = []
+email = [
+	"dep:lettre",
+]
 gzip_compression = [
 	"reqwest/gzip",
 	"tuwunel-core/gzip_compression",
@@ -98,6 +102,7 @@ ipaddress.workspace = true
 ldap3.workspace = true
 ldap3.optional = true
 lettre.workspace = true
+lettre.optional = true
 log.workspace = true
 loole.workspace = true
 lru-cache.workspace = true

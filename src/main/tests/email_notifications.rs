@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![cfg(feature = "email")]
 
 use std::{net::TcpListener, time::Duration};
 

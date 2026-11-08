@@ -1,7 +1,6 @@
 use std::{borrow::Cow, fmt::Write};
 
 use futures::StreamExt;
-use lettre::Address;
 use ruma::{OwnedRoomId, RoomId, UserId, events::TimelineEventType};
 use serde::Deserialize;
 use tuwunel_core::{
@@ -18,6 +17,7 @@ use tuwunel_core::{
 use tuwunel_matrix::{Event, pdu::Pdu};
 
 use super::evaluate::{Pending, Scan, invites};
+use crate::sendmail::Address;
 
 pub(super) struct Mail {
 	pub(super) subject: String,

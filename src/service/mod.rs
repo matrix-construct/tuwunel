@@ -32,6 +32,7 @@ pub mod rendezvous;
 pub mod resolver;
 pub mod rooms;
 pub mod sending;
+#[cfg_attr(not(feature = "email"), path = "sendmail/stub.rs")]
 pub mod sendmail;
 pub mod server_keys;
 pub mod storage;

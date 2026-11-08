@@ -80,6 +80,7 @@ default = [
 	"cpu_affinity",
 	"direct_tls",
 	"element_hacks",
+	"email",
 	"gzip_compression",
 	"io_uring",
 	"jemalloc",
@@ -130,6 +131,9 @@ direct_tls = [
 ]
 element_hacks = [
 	"tuwunel-service/element_hacks",
+]
+email = [
+	"tuwunel-service/email",
 ]
 gzip_compression = [
 	"tuwunel-api/gzip_compression",

@@ -8,7 +8,6 @@ use futures::{
 	StreamExt, TryFutureExt, TryStreamExt,
 	future::{join, try_join},
 };
-use lettre::Address;
 use ruma::{
 	OwnedRoomId, RoomId, UserId,
 	api::client::push::{EmailPusherData, Pusher, PusherKind},
@@ -34,7 +33,9 @@ use tuwunel_matrix::{
 };
 
 use super::render::SHOWN;
-use crate::{pusher::Notified, rooms::short::ShortRoomId, threepid::canonicalize_email};
+use crate::{
+	pusher::Notified, rooms::short::ShortRoomId, sendmail::Address, threepid::canonicalize_email,
+};
 
 /// What one evaluation of an email pusher found.
 ///

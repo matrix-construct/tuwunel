@@ -1,3 +1,4 @@
+#![cfg(feature = "email")]
 #![expect(
 	clippy::tests_outside_test_module,
 	reason = "this integration target requires one top-level test entry point"

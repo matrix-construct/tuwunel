@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![cfg(feature = "email")]
 
 use fixture::run as run_fixture;
 use tuwunel_core::{

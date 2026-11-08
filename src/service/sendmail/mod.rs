@@ -3,10 +3,14 @@
 //! The service builds messages from the configured sender and delivers them through a pooled SMTP
 //! transport. It remains disabled when no SMTP connection URI is configured.
 
+#[cfg(test)]
+mod tests;
+
 use std::sync::Arc;
 
+pub use lettre::Address;
 use lettre::{
-	Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+	AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
 	error::Error as EmailError,
 	message::{
 		Mailbox, MessageBuilder,
