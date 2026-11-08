@@ -4,7 +4,14 @@
 //! simultaneous multithreading and hardware nodes. Platform-specific
 //! implementations provide available parallelism and current-CPU data.
 
-use std::{cell::Cell, fmt::Debug, path::PathBuf, sync::LazyLock};
+#[cfg(all(not(feature = "cpu_affinity"), not(target_os = "openbsd")))]
+use std::thread::available_parallelism as std_parallelism;
+use std::{cell::Cell, fmt::Debug, path::PathBuf, sync::LazyLock, thread};
+
+#[cfg(all(feature = "cpu_affinity", not(target_os = "openbsd")))]
+use core_affinity::get_core_ids;
+#[cfg(feature = "cpu_affinity")]
+use core_affinity::{CoreId, set_each_for_current, set_for_current};
 
 use crate::{Result, is_equal_to};
 
@@ -18,6 +25,14 @@ const MASK_BITS: usize = CORES_MAX;
 /// Maximum number of cores we support; for now limited to bits of our mask
 /// integral.
 pub const CORES_MAX: usize = 128;
+
+/// Whether `cores_available` lists the operating system's CPU IDs.
+///
+/// Builds without the `cpu_affinity` feature, and OpenBSD, list nominal IDs
+/// `0..n` instead, which hardware topology such as a storage queue's CPU list
+/// cannot be matched against.
+pub const CORE_IDS_FROM_OS: bool =
+	cfg!(all(feature = "cpu_affinity", not(target_os = "openbsd")));
 
 /// The mask of logical cores available to the process (at startup).
 static CORES_AVAILABLE: LazyLock<Mask> = LazyLock::new(|| into_mask(query_cores_available()));
@@ -36,41 +51,49 @@ thread_local! {
 	static CORE_AFFINITY: Cell<Mask> = const { Cell::new(0) };
 }
 
-/// Set the core affinity for this thread. The ID should be listed in
-/// CORES_AVAILABLE. Empty input is a no-op; prior affinity unchanged.
+/// Sets the core affinity for this thread.
+///
+/// The IDs should be listed in `CORES_AVAILABLE`; empty input is a no-op that
+/// leaves the prior affinity unchanged. The mask is always recorded for
+/// `get_affinity`, but the thread is pinned only in builds with the
+/// `cpu_affinity` feature.
 #[tracing::instrument(
 	level = "debug",
 	skip_all,
 	fields(
-		id = ?std::thread::current().id(),
-		name = %std::thread::current().name().unwrap_or("None"),
+		id = ?thread::current().id(),
+		name = %thread::current().name().unwrap_or("None"),
 		set = ?ids.clone().collect::<Vec<_>>(),
 		CURRENT = %format!("[b{:b}]", CORE_AFFINITY.get()),
 		AVAILABLE = %format!("[b{:b}]", *CORES_AVAILABLE),
 	),
 )]
-pub fn set_affinity<I>(mut ids: I)
+pub fn set_affinity<I>(ids: I)
 where
 	I: Iterator<Item = Id> + Clone + Debug,
 {
-	use core_affinity::{CoreId, set_each_for_current, set_for_current};
-
-	let n = ids.clone().count();
-	let mask: Mask = ids.clone().fold(0, |mask, id| {
+	let mask = into_mask(ids.inspect(|&id| {
 		debug_assert!(is_core_available(id), "setting affinity to unavailable core");
-		mask | (1 << id)
-	});
+	}));
 
-	if n > 1 {
-		set_each_for_current(ids.map(|id| CoreId { id }));
-	} else if n > 0 {
-		set_for_current(CoreId { id: ids.next().expect("n > 0") });
-	}
-
-	if mask.count_ones() > 0 {
-		CORE_AFFINITY.replace(mask);
+	if mask != 0 {
+		pin(mask);
+		CORE_AFFINITY.set(mask);
 	}
 }
+
+#[cfg(feature = "cpu_affinity")]
+fn pin(mask: Mask) {
+	// set_each_for_current is a no-op off Linux and Android; set_for_current is not.
+	if mask.count_ones() > 1 {
+		set_each_for_current(from_mask(mask).map(|id| CoreId { id }));
+	} else if let Some(id) = from_mask(mask).next() {
+		set_for_current(CoreId { id });
+	}
+}
+
+#[cfg(not(feature = "cpu_affinity"))]
+fn pin(_mask: Mask) {}
 
 /// Get the core affinity for this thread.
 pub fn get_affinity() -> impl Iterator<Item = Id> {
@@ -191,12 +214,18 @@ pub fn getcpu() -> Result<usize> {
 #[inline]
 pub fn getcpu() -> Result<usize> { Err(crate::Error::Io(std::io::ErrorKind::Unsupported.into())) }
 
-#[cfg(not(target_os = "openbsd"))]
+#[cfg(all(feature = "cpu_affinity", not(target_os = "openbsd")))]
 fn query_cores_available() -> impl Iterator<Item = Id> {
-	core_affinity::get_core_ids()
+	get_core_ids()
 		.unwrap_or_default()
 		.into_iter()
 		.map(|core_id| core_id.id)
+}
+
+// Nominal IDs: without the feature nothing is pinned to them.
+#[cfg(all(not(feature = "cpu_affinity"), not(target_os = "openbsd")))]
+fn query_cores_available() -> impl Iterator<Item = Id> {
+	0..std_parallelism().map_or(1, usize::from)
 }
 
 #[cfg(target_os = "openbsd")]

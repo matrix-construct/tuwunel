@@ -20,6 +20,7 @@ crate-type = [
 [features]
 default = [
 	"brotli_compression",
+	"cpu_affinity",
 	"gzip_compression",
 	"jemalloc",
 	"jemalloc_conf",
@@ -29,6 +30,9 @@ default = [
 
 brotli_compression = [
 	"reqwest/brotli",
+]
+cpu_affinity = [
+	"dep:core_affinity",
 ]
 gzip_compression = [
 	"reqwest/gzip",
@@ -72,6 +76,7 @@ clap.workspace = true
 tuwunel-macros.workspace = true
 const-str.workspace = true
 core_affinity.workspace = true
+core_affinity.optional = true
 ctor.workspace = true
 dtor.workspace = true
 cyborgtime.workspace = true

@@ -108,11 +108,11 @@ pub struct Backup {
 	group = "true"
 )]
 pub struct Pool {
-	/// Enables database pool affinity support.
+	/// Pins database pool workers to the CPU cores that share their storage
+	/// queue.
 	///
-	/// On supporting systems, detected block device queue topology
-	/// determines `database.pool.workers` automatically and optimizes the
-	/// request pool for the hardware.
+	/// It has no effect unless tuwunel was built with the `cpu_affinity`
+	/// feature.
 	///
 	/// default: true
 	/// legacy: db_pool_affinity

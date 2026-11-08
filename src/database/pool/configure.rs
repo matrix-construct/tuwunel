@@ -1,4 +1,7 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+	path::{Path, PathBuf},
+	sync::Arc,
+};
 
 use tuwunel_core::{
 	Config, Server, at, debug,
@@ -12,9 +15,11 @@ use tuwunel_core::{
 		stream::{AMPLIFICATION_LIMIT, WIDTH_LIMIT},
 		sys::{
 			cgroup_max_tasks,
-			compute::{available_parallelism, cores_available, is_core_available},
+			compute::{
+				CORE_IDS_FROM_OS, available_parallelism, cores_available, is_core_available,
+			},
 			max_threads,
-			storage::{self, MultiDevice},
+			storage::{self, MultiDevice, md_discover},
 		},
 	},
 	warn,
@@ -61,7 +66,7 @@ pub(super) fn configure(server: &Arc<Server>) -> (Vec<usize>, Vec<usize>, Vec<us
 		.log_debug_err()
 		.ok();
 
-	let devices = storage::md_discover(&path);
+	let devices = discover_devices(&path);
 	let topology_detected = devices.md.is_empty().is_false();
 	debug!(?topology_detected, ?device_name, ?devices);
 
@@ -126,6 +131,17 @@ pub(super) fn configure(server: &Arc<Server>) -> (Vec<usize>, Vec<usize>, Vec<us
 	assert!(!queues.iter().copied().all(is_equal_to!(0)), "positive queue capacity expected");
 
 	(topology, workers, queues)
+}
+
+/// Discovers the storage queues backing `path` when core IDs can be matched
+/// against their CPU lists.
+///
+/// Nominal core IDs would match the wrong CPUs, so the topology then stays
+/// undetected and the pool takes its defaults.
+fn discover_devices(path: &Path) -> MultiDevice {
+	CORE_IDS_FROM_OS
+		.then(|| md_discover(path))
+		.unwrap_or_default()
 }
 
 /// Sum the total number of possible tags. Without hardware detection this
@@ -425,7 +441,9 @@ fn update_stream_width(
 
 #[cfg(test)]
 mod tests {
-	use super::constrain_workers;
+	use std::env::current_dir;
+
+	use super::{CORE_IDS_FROM_OS, constrain_workers, discover_devices};
 
 	#[test]
 	fn constrain_respects_the_maximum() {
@@ -438,6 +456,14 @@ mod tests {
 	#[test]
 	fn constrain_floors_populated_groups() {
 		assert_eq!(constrain_workers(vec![8, 0, 8, 8], 2), vec![1, 0, 1, 1]);
+	}
+
+	// Nominal IDs matched to queues 0 -> [2,3] and 1 -> [0,1] under a one-CPU quota give no workers.
+	#[test]
+	fn nominal_core_ids_skip_storage_discovery() {
+		let devices = discover_devices(&current_dir().expect("current directory"));
+
+		assert!(CORE_IDS_FROM_OS || devices.md.is_empty());
 	}
 
 	#[test]
