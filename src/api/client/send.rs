@@ -1,7 +1,7 @@
 use axum::extract::State;
-use futures::future::try_join4;
+use futures::future::{try_join, try_join3};
 use ruma::{
-	RoomId, UserId,
+	OwnedEventId, RoomId, UserId,
 	api::client::message::{
 		send_message_event, send_message_event::v3::Response as SendMessageResponse,
 	},
@@ -48,67 +48,8 @@ pub(crate) async fn send_message_event_route(
 	let sender_user = body.sender_user();
 	let sender_device = body.sender_device.as_deref();
 	let appservice_info = body.appservice_info.as_ref();
-
-	// Forbid m.room.encrypted if encryption is disabled
-	if body.event_type == MessageLikeEventType::RoomEncrypted && !services.config.encryption.allow
-	{
-		return Err!(Request(Forbidden("Encryption has been disabled")));
-	}
-
-	// MSC4169: clients sending m.room.redaction via /send put `redacts` in
-	// `content`. Pre-v11 auth rules read it from the top level; lift it so
-	// `redacts_id(...)` resolves regardless of room version. Mirrors the
-	// /redact handler.
-	let redaction_content = || {
-		body.body
-			.body
-			.deserialize_as_unchecked::<RoomRedactionEventContent>()
-			.inspect_err(|_| {
-				debug_warn!(
-					%sender_user,
-					event = %body.body.body.json(),
-					"Client sent invalid redaction event"
-				);
-			})
-			.ok()
-	};
-
-	let redacts_id = body
-		.event_type
-		.eq(&MessageLikeEventType::RoomRedaction)
-		.then(redaction_content)
-		.flatten()
-		.and_then(|content| content.redacts);
-
-	if body.event_type == MessageLikeEventType::RoomRedaction
-		&& services.config.rooms.redaction.disable_local
-		&& !services.admin.user_is_admin(sender_user).await
-	{
-		warn!(
-			%sender_user,
-			?redacts_id,
-			"Local redactions are disabled, non-admin user attempted to redact an event"
-		);
-
-		return Err!(Request(Forbidden("Redactions are disabled on this server.")));
-	}
-
-	if services.users.is_suspended(sender_user).await {
-		if body.event_type != MessageLikeEventType::RoomRedaction {
-			return Err!(Request(UserSuspended(
-				"Cannot send non-redaction events while suspended."
-			)));
-		}
-
-		let is_self = match &redacts_id {
-			| None => false,
-			| Some(redacts_id) => is_self_redaction(&services, sender_user, redacts_id).await,
-		};
-
-		if !is_self {
-			return Err!(Request(UserSuspended("Can only redact own events while suspended.")));
-		}
-	}
+	let redacts_id =
+		check_send_policy(&services, sender_user, &body.event_type, &body.body.body).await?;
 
 	let state_lock = services.state.mutex.lock(&body.room_id).await;
 	let event_type = body.event_type.to_cow_str();
@@ -119,13 +60,16 @@ pub(crate) async fn send_message_event_route(
 		room_id: &body.room_id,
 	};
 
-	let (existing_txnid, ..) = try_join4(
-		check_existing_txnid(&services, txn, &event_type),
-		check_duplicate_reaction(&services, &body.event_type, sender_user, &body.body.body),
-		check_public_call_invite(&services, &body.event_type, &body.room_id),
-		check_nested_thread(&services, &body.body.body),
-	)
-	.await?;
+	let content_checks = check_send_content(
+		&services,
+		sender_user,
+		&body.room_id,
+		&body.event_type,
+		&body.body.body,
+	);
+
+	let (existing_txnid, ()) =
+		try_join(check_existing_txnid(&services, txn, &event_type), content_checks).await?;
 
 	if let Some(existing_txnid) = existing_txnid {
 		return Ok(existing_txnid);
@@ -156,7 +100,104 @@ pub(crate) async fn send_message_event_route(
 
 	drop(state_lock);
 
-	Ok(send_message_event::v3::Response { event_id })
+	Ok(SendMessageResponse { event_id })
+}
+
+/// Applies the sender's policy for sending a message event, before the room
+/// lock.
+///
+/// Refuses encrypted events when encryption is disabled, local redactions
+/// when the server disables them, and a suspended sender's events other than
+/// self-redactions. Returns the target of a redaction for the top-level
+/// `redacts` field.
+#[tracing::instrument(level = "debug", skip_all)]
+pub(crate) async fn check_send_policy(
+	services: &Services,
+	sender_user: &UserId,
+	event_type: &MessageLikeEventType,
+	content: &Raw<AnyMessageLikeEventContent>,
+) -> Result<Option<OwnedEventId>> {
+	// Forbid m.room.encrypted if encryption is disabled
+	if *event_type == MessageLikeEventType::RoomEncrypted && !services.config.encryption.allow {
+		return Err!(Request(Forbidden("Encryption has been disabled")));
+	}
+
+	// MSC4169: clients sending m.room.redaction via /send put `redacts` in
+	// `content`. Pre-v11 auth rules read it from the top level; lift it so
+	// `redacts_id(...)` resolves regardless of room version. Mirrors the
+	// /redact handler.
+	let redaction_content = || {
+		content
+			.deserialize_as_unchecked::<RoomRedactionEventContent>()
+			.inspect_err(|_| {
+				debug_warn!(
+					%sender_user,
+					event = %content.json(),
+					"Client sent invalid redaction event"
+				);
+			})
+			.ok()
+	};
+
+	let redacts_id = event_type
+		.eq(&MessageLikeEventType::RoomRedaction)
+		.then(redaction_content)
+		.flatten()
+		.and_then(|content| content.redacts);
+
+	if *event_type == MessageLikeEventType::RoomRedaction
+		&& services.config.rooms.redaction.disable_local
+		&& !services.admin.user_is_admin(sender_user).await
+	{
+		warn!(
+			%sender_user,
+			?redacts_id,
+			"Local redactions are disabled, non-admin user attempted to redact an event"
+		);
+
+		return Err!(Request(Forbidden("Redactions are disabled on this server.")));
+	}
+
+	if services.users.is_suspended(sender_user).await {
+		if *event_type != MessageLikeEventType::RoomRedaction {
+			return Err!(Request(UserSuspended(
+				"Cannot send non-redaction events while suspended."
+			)));
+		}
+
+		let is_self = match &redacts_id {
+			| None => false,
+			| Some(redacts_id) => is_self_redaction(services, sender_user, redacts_id).await,
+		};
+
+		if !is_self {
+			return Err!(Request(UserSuspended("Can only redact own events while suspended.")));
+		}
+	}
+
+	Ok(redacts_id)
+}
+
+/// Applies the room's content rules for sending a message event, under the
+/// room lock.
+///
+/// Refuses a duplicate reaction, a call invite in a public room, and a thread
+/// rooted at an event that itself carries a relation.
+#[tracing::instrument(level = "debug", skip_all)]
+pub(crate) async fn check_send_content(
+	services: &Services,
+	sender_user: &UserId,
+	room_id: &RoomId,
+	event_type: &MessageLikeEventType,
+	content: &Raw<AnyMessageLikeEventContent>,
+) -> Result {
+	try_join3(
+		check_duplicate_reaction(services, event_type, sender_user, content),
+		check_public_call_invite(services, event_type, room_id),
+		check_nested_thread(services, content),
+	)
+	.await
+	.map(|((), (), ())| ())
 }
 
 async fn check_public_call_invite(
