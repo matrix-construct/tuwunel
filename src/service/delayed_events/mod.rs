@@ -151,6 +151,10 @@ impl crate::Service for Service {
 	}
 
 	async fn worker(self: Arc<Self>) -> Result {
+		if self.services.db.is_read_only() {
+			return Ok(()); // Sent events could not have their rows deleted and would repeat.
+		}
+
 		self.due_events()
 			.for_each_concurrent(SEND_WIDTH, async |(due, delay_id)| {
 				self.send_scheduled(&delay_id, due).await;

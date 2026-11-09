@@ -161,6 +161,10 @@ impl crate::Service for Service {
 	}
 
 	async fn worker(self: Arc<Self>) -> Result {
+		if self.db.db.is_read_only() {
+			return Ok(()); // Mailed notifications could not be recorded and would be mailed again.
+		}
+
 		self.email_worker().await;
 
 		Ok(())

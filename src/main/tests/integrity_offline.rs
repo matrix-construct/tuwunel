@@ -6,7 +6,8 @@
 //! this build does not describe, and later children reopen it read-only: one
 //! asks to schedule a repair, and one starts from the operator's command line
 //! with `--read-only` and `--execute`. Each boot is its own process because a
-//! booted engine holds the database lock until exit.
+//! booted engine holds the database lock until exit. An overdue delayed event
+//! seeded before the read-only boots must abort no delivery worker there.
 
 use std::{
 	env::{current_exe, var},
@@ -40,6 +41,7 @@ const CHILD_DATABASE_ENV: &str = "INTEGRITY_OFFLINE_TEST_DATABASE";
 const CHILD_PHASE_ENV: &str = "INTEGRITY_OFFLINE_TEST_PHASE";
 const FOREIGN: &str = "foreign_leftover";
 const FOREIGN_ROWS: u32 = 4096;
+const DELAY_ID: &str = "0123456789abcdefghijklmnopqrstuv";
 const READ_ONLY: [&str; 2] = ["rocksdb_read_only=true", "database_migrations=false"];
 const REPAIR: &str = "integrity repair relation-index --yes-i-know-what-im-doing";
 
@@ -70,7 +72,8 @@ impl Drop for DatabasePath {
 /// Its printed findings show the damage `columns` met in a family no build
 /// describes and `unused-columns` listing that family, with a quiescent check
 /// run rather than skipped, before the run shuts itself down. Scheduling a
-/// repair on the read-only database is refused.
+/// repair on the read-only database is refused, and neither read-only boot logs
+/// a worker abort over the overdue delayed event seeded before them.
 #[test]
 fn integrity_check_offline_walks_a_foreign_family() -> Result {
 	if let Ok(phase) = var(CHILD_PHASE_ENV) {
@@ -88,11 +91,16 @@ fn integrity_check_offline_walks_a_foreign_family() -> Result {
 	let database = DatabasePath(Args::test_database_path("integrity-offline"));
 
 	run_child(&database.0, "build")?;
+	seed_delayed_event(&database.0)?;
 	seed_damaged_family(&database.0)?;
-	run_child(&database.0, "refuse")?;
+
+	let output = run_child(&database.0, "refuse")?;
+
+	assert!(!output.contains(" aborted: "), "{output}");
 
 	let output = run_child(&database.0, "offline")?;
 
+	assert!(!output.contains(" aborted: "), "{output}");
 	assert!(output.contains(&format!("column {FOREIGN} failed a full read")), "{output}");
 	assert!(output.contains(&format!("column {FOREIGN} is unused")), "{output}");
 	assert!(output.contains("relation-index: clean"), "{output}");
@@ -155,6 +163,32 @@ fn run_child(database: &Path, phase: &str) -> Result<String> {
 	);
 
 	Ok(format!("{stdout}{stderr}"))
+}
+
+fn seed_delayed_event(database: &Path) -> Result {
+	let opts = Options::default();
+	let columns = DB::list_cf(&opts, database).map_err(storage_error)?;
+	let db = DB::open_cf(&opts, database, &columns).map_err(storage_error)?;
+	let event = br#"{"user_id":"@offline:localhost","room_id":"!offline:localhost",
+		"type":"m.room.message","content":{},"delay_ms":1,"due_ms":1}"#;
+
+	let due = [&1_u64.to_be_bytes()[..], &[0xFF], DELAY_ID.as_bytes()].concat();
+	let owner = [b"@offline:localhost".as_slice(), &[0xFF], DELAY_ID.as_bytes()].concat();
+
+	for (column, key, value) in [
+		("delayid_event", DELAY_ID.as_bytes(), event.as_slice()),
+		("dueat_delayid", due.as_slice(), &[]),
+		("userid_delayid", owner.as_slice(), &[]),
+	] {
+		let family = db
+			.cf_handle(column)
+			.ok_or_else(|| err!("column {column} missing from the test database"))?;
+
+		db.put_cf(&family, key, value)
+			.map_err(storage_error)?;
+	}
+
+	Ok(())
 }
 
 /// Adds a family this build does not describe, then damages its table file.
