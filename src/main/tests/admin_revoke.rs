@@ -15,7 +15,7 @@ use tuwunel_core::{
 	},
 };
 use tuwunel_matrix::pdu::PduBuilder;
-use tuwunel_service::Services;
+use tuwunel_service::{Services, profile::MAX_DISPLAYNAME_LENGTH, users::Register};
 
 use self::{
 	admin::{accepted, refused},
@@ -212,6 +212,39 @@ async fn put_user_requests(services: &Services, base: &str) -> Result {
 	put_user(&admin, &member_id, &malformed, 400).await?;
 
 	assert_eq!(services.profile.displayname(&member_id).await?, "Renamed");
+
+	new_account_profiles(&admin).await
+}
+
+async fn new_account_profiles(admin: &Client<'_>) -> Result {
+	let services = admin.services;
+	let server_name = services.globals.server_name();
+	let long_name = "n".repeat(MAX_DISPLAYNAME_LENGTH + 44);
+	let shortened = UserId::parse_with_server_name("shortened", server_name)?;
+
+	services
+		.users
+		.full_register(Register {
+			user_id: Some(&shortened),
+			password: Some("shortened-password"),
+			displayname: Some(&long_name),
+			..Default::default()
+		})
+		.await?;
+
+	let stored = services.profile.displayname(&shortened).await?;
+
+	assert_eq!(stored, "n".repeat(MAX_DISPLAYNAME_LENGTH));
+
+	let absent = UserId::parse_with_server_name("absent", server_name)?;
+	let long = json!({ "displayname": long_name });
+	let invalid = json!({ "avatar_url": "https://example.com/avatar.png" });
+
+	for body in [&long, &invalid] {
+		put_user(admin, &absent, body, 400).await?;
+
+		assert!(!services.users.exists(&absent).await, "a refused profile left an account");
+	}
 
 	Ok(())
 }

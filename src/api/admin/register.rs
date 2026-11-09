@@ -6,7 +6,10 @@ use ruma::{OwnedUserId, UserId};
 use sha1::Sha1;
 use synapse_admin_api::register_users::shared_secret_register as register;
 use tuwunel_core::{Err, Result, err};
-use tuwunel_service::users::{Register, device::generate_refresh_token};
+use tuwunel_service::{
+	profile::check_member_displayname,
+	users::{Register, device::generate_refresh_token},
+};
 
 use crate::{ClientIp, Ruma};
 
@@ -47,7 +50,8 @@ pub(crate) async fn admin_register_route(
 		.as_deref()
 		.filter(|_| !body.inhibit_login);
 
-	// Checked before anything is stored, so a refused ID leaves the name free.
+	// Checked before anything is stored, so a refused ID or name leaves the user ID free.
+	check_member_displayname(body.displayname.as_deref())?;
 	services
 		.users
 		.check_device_id(&user_id, device_id)

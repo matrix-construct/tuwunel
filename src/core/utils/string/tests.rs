@@ -4,12 +4,20 @@ use std::borrow::Cow;
 
 use super::{
 	contains_any, equals_any, is_opaque_id, is_unreserved, is_unreserved_byte, markdown_cell,
-	plural, single_line,
+	plural, single_line, truncate_chars,
 };
 use crate::{arrayvec::ArrayString, smallstr::SmallString};
 
 type SmallBuf = SmallString<[u8; 16]>;
 type ArrayBuf = ArrayString<16>;
+
+#[test]
+fn truncate_chars_counts_characters_not_bytes() {
+	assert_eq!(truncate_chars("héllo", 2), "hé");
+	assert_eq!(truncate_chars("héllo", 5), "héllo");
+	assert_eq!(truncate_chars("héllo", 9), "héllo");
+	assert_eq!(truncate_chars("héllo", 0), "");
+}
 
 #[test]
 fn single_line_normalizes_controls_and_separators() {

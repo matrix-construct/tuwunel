@@ -10,7 +10,11 @@ use tuwunel_core::{
 	Err, Result,
 	utils::{BoolExt, IterStream, ReadyExt, stream::automatic_width},
 };
-use tuwunel_service::{threepid::canonicalize_email, users::PASSWORD_SENTINEL};
+use tuwunel_service::{
+	profile::{check_member_avatar_url, check_member_displayname},
+	threepid::canonicalize_email,
+	users::PASSWORD_SENTINEL,
+};
 
 use super::user_details;
 use crate::{Ruma, refuse_server_user, require_admin};
@@ -58,6 +62,10 @@ pub(crate) async fn admin_create_or_modify_route(
 	}
 
 	if created {
+		// Refused before the account exists; an existing account may restate a stored value.
+		check_member_displayname(body.displayname.as_deref())?;
+		check_member_avatar_url(body.avatar_url.as_deref())?;
+
 		services
 			.users
 			.create(user_id, body.password.as_deref(), None)
