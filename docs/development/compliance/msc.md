@@ -29,13 +29,13 @@
 
 | ✅ `yes` | 🟨 `part` | 🟥 `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 285 | 66 | 447 | 312 | 1110 |
+| 288 | 63 | 447 | 312 | 1110 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
-| merged | 185 | 26 | 13 | 57 | 281 |
+| merged | 188 | 23 | 13 | 57 | 281 |
 | open | 64 | 25 | 348 | 181 | 618 |
 | closed | 36 | 15 | 86 | 74 | 211 |
 
@@ -48,11 +48,11 @@ in the [Out of scope](#out-of-scope) section.
 |---|---|---:|---|---|
 | MSC4551 | 🟨 ◐ | 40/70 | Sliding Sync Extensions: Receipts | Receipt delivery exists; initial/rescope gaps. Client application excluded. |
 | MSC4548 | 🟨 ◐ | 70/90 | Sliding Sync Extensions: Account data | Client caching excluded; first-enable and independent room-scope gaps |
-| MSC4543 | 🟨 ◐ | 60/90 | Sliding Sync Extensions: End-to-end encryption | Client processing excluded; initial device lists and key counts diverge |
-| MSC4538 | 🟨 ◐ | 50/70 | Sliding Sync Extensions: To-Device messages | To-device relay exists; limit and since checks missing; client scope excluded |
+| MSC4543 | 🟨 ◐ | 70/90 | Sliding Sync Extensions: End-to-end encryption | No-pos and count rules met; left misses departures, bans; claim race; flag held |
+| MSC4538 | ✅ ● | 90/100 | Sliding Sync Extensions: To-Device messages | Limit, ack, drain and flag per MSC; numeric since above position: 200, not 400 |
 | MSC4508 | 🟨 ◐ | 60/80 | Sliding Sync Extensions: Common format and Typing | Typing exists; joined-only filtering and scope reentry remain incomplete. |
-| MSC4458 | 🟨 ◐ | 70/100 | Handling incoming JSON in the server-server API | Federation parses before verification and stores parsed JSON. |
-| MSC4452 | 🟨 ◐ | 50/100 | Preview URL capabilities API | Merged stable preview capability absent; disabled endpoint rejects correctly |
+| MSC4458 | ✅ ● | 90/100 | Handling incoming JSON in the server-server API | Signed bodies parsed canonically before auth; refuses -0, which spec maps to 0 |
+| MSC4452 | ✅ ● | 100/100 | Preview URL capabilities API | Stable m.preview_url and unstable alias from one gate; disabled routes 403 |
 | MSC4436 | ✅ ● | 100/100 | Make server ACLs case insensitive | acl_check.rs:39 uses ruma is_allowed, which matches case insensitively |
 | MSC4423 | ✅ ● | 100/100 | Undefine order of room directory | directory.rs:331 member-count order stays valid once ordering is undefined |
 | MSC4402 | ✅ ◐ | 100/100 | Consistent redirects for .well-known-files | [→ MSC2499?] Global CORS layer covers any 30x; well-known client returns 200 ... |
@@ -98,7 +98,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4163 | ✅ ● | 100/100 | Make ACLs apply to EDUs | ACLs applied on receipt and typing EDUs |
 | MSC4156 | ✅ ● | 100/100 | Migrate `server_name` to `via` | via parameter handled via Ruma |
 | MSC4151 | ✅ ● | 100/100 | Reporting rooms (Client-Server API) | POST /rooms/{roomId}/report implemented and routed |
-| MSC4143 | 🟨 ◐ | 50/60 | MatrixRTC | Discovery exists; auth and slot upgrade gaps; client RTC excluded |
+| MSC4143 | 🟨 ◐ | 70/90 | MatrixRTC | Discovery, upgrade slot copy, delayed leave; no sticky member or transport auth |
 | MSC4140 | 🟨 ● | 60/60 | Cancellable delayed events | Full lifecycle; no finalised state, unsigned delay_id or rate limiting |
 | MSC4138 | ✅ ● | 100/100 | Update allowed HTTP methods in CORS responses | CORS METHODS list includes HEAD and PATCH; excludes CONNECT/TRACE |
 | MSC4133 | ✅ ● | 85/95 | Extending User Profile API with Custom Key:Value Pairs | endpoints + caps/errcodes; unset legacy 200 omit by choice, 404 key-scoped |
@@ -284,8 +284,9 @@ for spec compliance.
 | MSC2409 | 🟨 ● | 70/70 | 1.13 | Proposal to send typing, presence and receipts to appservices | typing+receipt EDUs sent to AS; presence not forwarded |
 | MSC3925 | 🟨 ● | 70/70 | 1.7 | m.replace aggregation with full event | Full m.replace fold; off by default (bundle_edit_relations); backfill unindexed |
 | MSC3970 | 🟨 ◐ | 70/80 | 1.7 | Scope transaction IDs to devices | txn key is user, device, txn with no path; redact untracked; echo user scoped |
+| MSC4143 | 🟨 ◐ | 70/90 |  | MatrixRTC | Discovery, upgrade slot copy, delayed leave; no sticky member or transport auth |
 | MSC4284 | 🟨 ● | 70/90 | 1.18 | Policy Servers | outbound /sign, inbound verify, fetch-on-missing, reversible soft-fail |
-| MSC4458 | 🟨 ◐ | 70/100 |  | Handling incoming JSON in the server-server API | Federation parses before verification and stores parsed JSON. |
+| MSC4543 | 🟨 ◐ | 70/90 |  | Sliding Sync Extensions: End-to-end encryption | No-pos and count rules met; left misses departures, bans; claim race; flag held |
 | MSC4548 | 🟨 ◐ | 70/90 |  | Sliding Sync Extensions: Account data | Client caching excluded; first-enable and independent room-scope gaps |
 | MSC2290 | 🟨 ● | 65/55 |  | Separate Endpoints for Binding Threepids | add endpoint (UIA+dupe) + HS email validation; IS-bind half out of scope |
 | MSC1915 | 🟨 ● | 60/55 |  | MSC 1915 - Add unbind 3PID APIs | delete + deactivate return id_server_unbind_result; IS unbind out of HS scope |
@@ -294,14 +295,10 @@ for spec compliance.
 | MSC3267 | 🟨 ◐ | 60/80 | 1.5 | reference relationships | m.reference bundle added; gated default-off; no ignore/visibility filter |
 | MSC4140 | 🟨 ● | 60/60 |  | Cancellable delayed events | Full lifecycle; no finalised state, unsigned delay_id or rate limiting |
 | MSC4508 | 🟨 ◐ | 60/80 |  | Sliding Sync Extensions: Common format and Typing | Typing exists; joined-only filtering and scope reentry remain incomplete. |
-| MSC4543 | 🟨 ◐ | 60/90 |  | Sliding Sync Extensions: End-to-end encryption | Client processing excluded; initial device lists and key counts diverge |
 | MSC1957 | 🟨 ● | 50/50 |  | Integration manager discovery | account-data passthrough only; no m.integrations key in well-known client |
 | MSC2140 | 🟨 ● | 50/60 |  | Terms of Service API for Identity Servers and Integration Managers | no 3pid/unbind or IS relay; accepted_terms and register cleanup present |
 | MSC2676 | 🟨 ● | 50/60 | 1.4 | Message editing | edits accepted/relayed; no m.replace bundle or new_content apply |
-| MSC4143 | 🟨 ◐ | 50/60 |  | MatrixRTC | Discovery exists; auth and slot upgrade gaps; client RTC excluded |
 | MSC4319 | 🟨 ● | 50/50 |  | Room member events for invite and knock rooms in the `/sync` response | state/mod.rs:464 puts inviter member in stripped state; no `state` key |
-| MSC4452 | 🟨 ◐ | 50/100 | next | Preview URL capabilities API | Merged stable preview capability absent; disabled endpoint rejects correctly |
-| MSC4538 | 🟨 ◐ | 50/70 |  | Sliding Sync Extensions: To-Device messages | To-device relay exists; limit and since checks missing; client scope excluded |
 | MSC4551 | 🟨 ◐ | 40/70 |  | Sliding Sync Extensions: Receipts | Receipt delivery exists; initial/rescope gaps. Client application excluded. |
 | MSC4195 | 🟨 ◐ | 10/10 |  | MatrixRTC Transport using LiveKit Backend | Transport advertisement only; token and leave APIs absent; client media excluded |
 | MSC2229 | 🟨 ● | 0/20 |  | Allowing 3PID Owners to Rebind | [→ MSC2290] owner exemption at 3pid/add only; requestToken still rejects the ... |
