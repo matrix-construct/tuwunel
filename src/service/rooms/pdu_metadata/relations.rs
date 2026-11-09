@@ -50,7 +50,7 @@ pub struct RelationQuery<'a> {
 	/// Direction in which relation rows are visited.
 	pub(crate) dir: Direction,
 
-	/// Requesting user used to filter transaction identifiers.
+	/// Requesting user, used to filter the unsigned fields private to a sender.
 	pub(crate) user_id: Option<&'a UserId>,
 
 	/// Maximum number of raw relation rows to visit.
@@ -271,16 +271,15 @@ async fn related_pdu_checked(
 ) -> Result<Option<(PduCount, Pdu)>> {
 	let pdu_id: RawPduId = PduId { shortroomid, count }.into();
 
-	self.services
+	let pdu = self
+		.services
 		.timeline
 		.get_from_id_checked(&pdu_id)
 		.await
 		.optional()?
-		.map(|pdu: Pdu| {
-			pdu.without_transaction_id_unless_sender(None)
-				.map(|pdu| (count, pdu))
-		})
-		.transpose()
+		.map(|pdu: Pdu| (count, pdu.without_private_unless_sender(None)));
+
+	Ok(pdu)
 }
 
 /// Walks the index keys of the events related to a target.
@@ -331,14 +330,13 @@ async fn related_pdu(
 ) -> Result<Option<(PduCount, Pdu)>> {
 	let pdu_id: RawPduId = PduId { shortroomid, count }.into();
 
-	self.services
+	let pdu = self
+		.services
 		.timeline
 		.get_pdu_from_id(&pdu_id)
 		.await
 		.optional()?
-		.map(|pdu| {
-			pdu.without_transaction_id_unless_sender(user_id)
-				.map(|pdu| (count, pdu))
-		})
-		.transpose()
+		.map(|pdu| (count, pdu.without_private_unless_sender(user_id)));
+
+	Ok(pdu)
 }

@@ -20,6 +20,18 @@ use tuwunel_core::{Result, err, implement, result::LogErr, utils::BoolExt, warn}
 
 use super::{Pdu, Unsigned};
 
+/// The unstable MSC4140 key naming the delayed event an event was sent from.
+///
+/// It is stored in the sent event's unsigned data, and only the event's sender
+/// is served it.
+pub const DELAY_ID: &str = "org.matrix.msc4140.delay_id";
+
+/// Unsigned keys served to the event's own sender and to nobody else.
+///
+/// Every serving path strips these unless the requester sent the event, and
+/// federation strips them always.
+pub(super) const PRIVATE: [&str; 2] = ["transaction_id", DELAY_ID];
+
 type BorrowedObject<'a> = BTreeMap<Cow<'a, str>, &'a RawJsonValue>;
 type JsonEntry<'a> = (JsonString<'a>, &'a RawJsonValue);
 
@@ -73,76 +85,76 @@ struct Identity {
 	sender: OwnedUserId,
 }
 
-/// Removes the transaction ID unless the event is served to its own sender.
+/// Returns the event without its private fields unless served to its sender.
 ///
-/// The token is the sending client's own idempotency value, which it matches
-/// its echo against, so the sender keeps it and nobody else sees it. A `None`
-/// requester is nobody in particular and is treated as somebody else.
+/// The by-value form of [`Pdu::remove_private_unless_sender`], for chains that
+/// own the event.
 #[implement(Pdu)]
-pub fn remove_transaction_id_unless_sender(&mut self, user_id: Option<&UserId>) -> Result {
-	user_id
-		.is_none_or(|user_id| self.sender != *user_id)
-		.then(|| self.remove_transaction_id())
-		.unwrap_or(Ok(()))
-}
+#[must_use]
+pub fn without_private_unless_sender(mut self, user_id: Option<&UserId>) -> Self {
+	self.remove_private_unless_sender(user_id);
 
-/// Returns the event without its transaction ID unless served to its sender.
-///
-/// The by-value form of [`Pdu::remove_transaction_id_unless_sender`], for
-/// chains that own the event.
-#[implement(Pdu)]
-pub fn without_transaction_id_unless_sender(mut self, user_id: Option<&UserId>) -> Result<Self> {
-	self.remove_transaction_id_unless_sender(user_id)?;
-
-	Ok(self)
+	self
 }
 
 /// Readies the event for serving to one requester.
 ///
-/// Removes the transaction ID unless the requester sent the event, and adds the
+/// Removes the private fields unless the requester sent the event, and adds the
 /// event's current age. A failed age is logged and costs one optional field.
 #[implement(Pdu)]
 #[inline]
-pub fn served_to(mut self, user_id: Option<&UserId>) -> Result<Self> {
-	self.remove_transaction_id_unless_sender(user_id)?;
+#[must_use]
+pub fn served_to(mut self, user_id: Option<&UserId>) -> Self {
+	self.remove_private_unless_sender(user_id);
 	self.add_age().log_err().ok();
 
-	Ok(self)
+	self
 }
 
-/// Removes the local transaction ID from unsigned event metadata.
+/// Removes the private unsigned fields unless the event is served to its sender.
+///
+/// The transaction ID is the sending client's own idempotency value, which it
+/// matches its echo against, and the delay ID names the delayed event the
+/// sender scheduled, so the sender keeps both and nobody else sees them. A
+/// `None` requester is nobody in particular and is treated as somebody else.
+#[implement(Pdu)]
+pub fn remove_private_unless_sender(&mut self, user_id: Option<&UserId>) {
+	if user_id.is_none_or(|user_id| self.sender != *user_id) {
+		self.remove_private();
+	}
+}
+
+/// Removes the fields private to the sender from unsigned event metadata.
 ///
 /// Other unsigned properties are retained and the object is re-encoded. An
-/// event without unsigned data, or without the key, is left unchanged. Unsigned
-/// data that holds the key but cannot be parsed is logged and dropped whole, so
+/// event without unsigned data, or without the keys, is left unchanged. Unsigned
+/// data that holds a key but cannot be parsed is logged and dropped whole, so
 /// the event is still served.
 #[implement(Pdu)]
-pub fn remove_transaction_id(&mut self) -> Result {
+pub fn remove_private(&mut self) {
 	let Some(unsigned) = &self.unsigned else {
-		return Ok(());
+		return;
 	};
 
 	let raw = unsigned.json().get();
 
-	if !raw.contains("\"transaction_id\"") {
-		return Ok(());
+	if !PRIVATE.iter().any(|key| raw.contains(key)) {
+		return;
 	}
 
-	self.unsigned = without_transaction_id(raw)
+	self.unsigned = without_private(raw)
 		.inspect_err(|error| {
 			// Only a corrupt or old remote row has this shape; repair it with `query raw put`.
 			// Stock release builds strip `debug_warn!`, and nothing else would show it.
 			warn!(event_id = %self.event_id, %error, "Omitting unreadable unsigned data.");
 		})
 		.ok();
-
-	Ok(())
 }
 
-fn without_transaction_id(raw: &str) -> Result<Unsigned> {
+fn without_private(raw: &str) -> Result<Unsigned> {
 	let mut unsigned: BTreeMap<&str, &RawJsonValue> = serde_json::from_str(raw)?;
 
-	unsigned.remove("transaction_id");
+	unsigned.retain(|key, _| !PRIVATE.contains(key));
 
 	raw_as(&unsigned)
 }

@@ -426,15 +426,13 @@ impl Service {
 			return None;
 		}
 
-		let mut pdu = self
+		let pdu = self
 			.services
 			.timeline
 			.get_pdu_from_id(&root_id)
 			.await
-			.ok()?;
-
-		pdu.remove_transaction_id_unless_sender(Some(user_id))
-			.ok()?;
+			.ok()?
+			.without_private_unless_sender(Some(user_id));
 
 		Some((count, pdu))
 	}

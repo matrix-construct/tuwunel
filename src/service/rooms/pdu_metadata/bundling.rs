@@ -61,17 +61,15 @@ pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> P
 		.await
 		.flatten();
 
-	if let Some(mut replacement) = replacement
+	if let Some(replacement) = replacement
 		&& !self
 			.services
 			.state_accessor
 			.erased_for(sender_user, &replacement)
 			.await
-		&& replacement
-			.remove_transaction_id_unless_sender(Some(sender_user))
-			.log_err()
-			.is_ok()
 	{
+		let replacement = replacement.without_private_unless_sender(Some(sender_user));
+
 		pdu.set_replacement_bundle(&replacement.into_format())
 			.log_err()
 			.ok();
@@ -244,14 +242,8 @@ async fn bundle_thread_latest_edit(&self, sender_user: &UserId, pdu: &mut Pdu) {
 		return;
 	}
 
-	let sanitized = replacement_event
-		.remove_transaction_id_unless_sender(Some(sender_user))
-		.and_then(|()| latest_event.remove_transaction_id_unless_sender(Some(sender_user)))
-		.log_err();
-
-	if thread_result_or_drop(pdu, sanitized).is_none() {
-		return;
-	}
+	replacement_event.remove_private_unless_sender(Some(sender_user));
+	latest_event.remove_private_unless_sender(Some(sender_user));
 
 	let replacement = latest_event
 		.set_replacement_bundle(&replacement_event.into_format())

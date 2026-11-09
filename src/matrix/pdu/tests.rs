@@ -1,7 +1,7 @@
 use ruma::{RoomVersionId, event_id, events::AnySyncMessageLikeEvent, serde::Raw, user_id};
 use serde_json::{json, value::to_raw_value};
 
-use super::{Count, Pdu, Unsigned};
+use super::{Count, DELAY_ID, Pdu, Unsigned};
 use crate::Event;
 
 fn message_pdu() -> Pdu {
@@ -838,10 +838,10 @@ fn reject_duplicate_thread_bundle_sibling() {
 }
 
 #[test]
-fn transaction_id_removal_keeps_other_unsigned_fields() {
-	let pdu = member_pdu(&json!({ "age": 1, "transaction_id": "secret" }))
-		.without_transaction_id_unless_sender(Some(user_id!("@bob:example.com")))
-		.expect("parsable unsigned");
+fn private_removal_keeps_other_unsigned_fields() {
+	let unsigned = json!({ "age": 1, "transaction_id": "secret", DELAY_ID: "syd_secret" });
+	let pdu =
+		member_pdu(&unsigned).without_private_unless_sender(Some(user_id!("@bob:example.com")));
 
 	let unsigned = pdu.unsigned.expect("unsigned kept");
 
@@ -849,25 +849,41 @@ fn transaction_id_removal_keeps_other_unsigned_fields() {
 }
 
 #[test]
-fn transaction_id_removal_drops_unparsable_unsigned() {
+fn delay_id_is_served_to_its_sender_only() {
+	let unsigned = json!({ "age": 1, DELAY_ID: "syd_scheduled" });
+	let served = |requester| {
+		let pdu = member_pdu(&unsigned).without_private_unless_sender(requester);
+		let unsigned = pdu.unsigned.expect("unsigned kept");
+
+		serde_json::from_str::<serde_json::Value>(unsigned.json().get()).expect("valid unsigned")
+	};
+
+	let sender = served(Some(user_id!("@alice:example.com")));
+	let other = served(Some(user_id!("@bob:example.com")));
+	let nobody = served(None);
+
+	assert_eq!(sender, unsigned, "the sender lost the delay ID");
+	assert_eq!(other, json!({ "age": 1 }), "another user saw the delay ID");
+	assert_eq!(nobody, json!({ "age": 1 }), "no requester saw the delay ID");
+}
+
+#[test]
+fn private_removal_drops_unparsable_unsigned() {
 	let requester = Some(user_id!("@bob:example.com"));
 	let unparsable = [
 		r#""transaction_id""#,
+		r#"["org.matrix.msc4140.delay_id", "syd_secret"]"#,
 		r#"["transaction_id", "secret"]"#,
 		r#"{ "\u0061ge": 1, "transaction_id": "secret" }"#,
 	];
 
 	for unsigned in unparsable {
-		let stripped = member_pdu_with_raw_unsigned(unsigned)
-			.without_transaction_id_unless_sender(requester)
-			.expect("unparsable unsigned failed the event");
+		let stripped =
+			member_pdu_with_raw_unsigned(unsigned).without_private_unless_sender(requester);
 
 		assert!(stripped.unsigned.is_none(), "kept unparsable unsigned: {unsigned}");
 
-		let served = member_pdu_with_raw_unsigned(unsigned)
-			.served_to(requester)
-			.expect("unparsable unsigned failed the event");
-
+		let served = member_pdu_with_raw_unsigned(unsigned).served_to(requester);
 		let served = served.unsigned.expect("age added");
 		let served: serde_json::Map<String, serde_json::Value> =
 			serde_json::from_str(served.json().get()).expect("valid unsigned");

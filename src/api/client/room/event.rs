@@ -84,7 +84,7 @@ pub(crate) async fn get_room_event_route(
 
 	debug_assert!(event.event_id() == event_id, "Fetched PDU must match requested");
 
-	let event = event.served_to(Some(sender_user))?;
+	let event = event.served_to(Some(sender_user));
 	let encrypted = services
 		.state_accessor
 		.is_encrypted_room(room_id)
