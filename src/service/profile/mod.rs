@@ -969,19 +969,6 @@ pub fn check_requested_fields(&self, fields: &[ProfileFieldName]) -> Result {
 	Ok(())
 }
 
-/// Bounds the canonical size of a client-supplied `m.room.member` content, in bytes.
-///
-/// Every route measures the canonical form, the one the stored event carries, so
-/// the cap means the same thing wherever a member event enters.
-pub fn check_member_size(max_bytes: usize, json_len: usize) -> Result {
-	check_field_length(json_len, max_bytes, "Membership event content", "bytes")
-}
-
-/// Bounds a member event's display name, in characters.
-pub fn check_member_displayname(displayname: Option<&str>) -> Result {
-	displayname.map_or(Ok(()), check_displayname_length)
-}
-
 /// Validates a client-supplied `m.room.member` content from any route that accepts one.
 ///
 /// `json_len` is the canonical length. `displayname` and `avatar_url` are passed
@@ -999,6 +986,22 @@ pub fn check_member_content(
 	check_member_size(max_bytes, json_len)?;
 	check_member_displayname(displayname)?;
 	check_member_avatar_url(avatar_url)
+}
+
+/// Bounds the canonical size of a client-supplied `m.room.member` content, in bytes.
+///
+/// Every route measures the canonical form, the one the stored event carries, so
+/// the cap means the same thing wherever a member event enters.
+pub fn check_member_size(max_bytes: usize, json_len: usize) -> Result {
+	check_field_length(json_len, max_bytes, "Membership event content", "bytes")
+}
+
+/// Bounds a member event's display name, in characters.
+///
+/// An absent name passes. A present one is refused over
+/// `MAX_DISPLAYNAME_LENGTH` characters.
+pub fn check_member_displayname(displayname: Option<&str>) -> Result {
+	displayname.map_or(Ok(()), check_displayname_length)
 }
 
 /// Validates a member event's avatar URL.

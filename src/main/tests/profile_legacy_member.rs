@@ -136,7 +136,6 @@ async fn stored_invalid_avatar(services: &Services, base: &str) -> Result {
 
 	let stored = member_content("before", INVALID_AVATAR);
 
-	// Before anything is stored, the invalid avatar is a new value, so it is refused.
 	expect_refused(&owner, &room, &user_id, &stored).await?;
 
 	let refused = put_profile_avatar(&owner, &user_id, INVALID_AVATAR).await?;
@@ -150,7 +149,6 @@ async fn stored_invalid_avatar(services: &Services, base: &str) -> Result {
 
 	expect_avatar(&profile, INVALID_AVATAR, "the stored profile avatar")?;
 
-	// Re-sending the stored content, or changing only the name, leaves the avatar as stored.
 	expect_accepted(&owner, &room, &user_id, &stored).await?;
 
 	let renamed = member_content("after", INVALID_AVATAR);
@@ -210,6 +208,7 @@ async fn stored_invalid_avatar(services: &Services, base: &str) -> Result {
 ///
 /// An invalid extras avatar is refused with the join. A valid one is stored on the
 /// member event.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn join_extras_invalid_avatar(services: &Services, base: &str) -> Result {
 	let user_id = register(services, "joinextras", JOIN_EXTRAS_TOKEN).await?;
 	let owner = Client { services, base, token: JOIN_EXTRAS_TOKEN };
@@ -247,6 +246,7 @@ async fn join_extras_invalid_avatar(services: &Services, base: &str) -> Result {
 ///
 /// No profile avatar is stored, so the restated write can only be accepted because it
 /// matches the member event. A different invalid avatar is still refused.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn member_only_invalid_avatar(services: &Services, base: &str) -> Result {
 	let user_id = register(services, "memberonly", MEMBER_ONLY_TOKEN).await?;
 	let owner = Client { services, base, token: MEMBER_ONLY_TOKEN };
@@ -274,6 +274,7 @@ async fn member_only_invalid_avatar(services: &Services, base: &str) -> Result {
 ///
 /// A refusal at scheduling leaves nothing to be sent when the delay ends, and a valid
 /// event is still scheduled.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn delayed_invalid_avatar(services: &Services, base: &str) -> Result {
 	let user_id = register(services, "delayedmember", DELAYED_TOKEN).await?;
 	let owner = Client { services, base, token: DELAYED_TOKEN };
@@ -364,6 +365,7 @@ async fn expect_refused(
 	expect_bad_json(response, "refused member write").await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn put_profile_avatar(
 	owner: &Client<'_>,
 	user_id: &UserId,
@@ -376,6 +378,7 @@ async fn put_profile_avatar(
 		.await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn get_member(owner: &Client<'_>, room_id: &RoomId, user_id: &UserId) -> Result<Value> {
 	owner
 		.get(&format!("rooms/{room_id}/state/m.room.member/{user_id}"))
@@ -388,6 +391,7 @@ fn expect_avatar(content: &Value, avatar: &str, subject: &str) -> Result {
 	})
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn expect_bad_json(response: Response, subject: &str) -> Result {
 	let status = response.status();
 	let body: Value = response.json().await?;

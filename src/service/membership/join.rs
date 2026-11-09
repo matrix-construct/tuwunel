@@ -58,10 +58,6 @@ use crate::{
 const RESERVED_JOIN_KEYS: [&str; 3] =
 	["reason", "third_party_signed", "join_authorised_via_users_server"];
 
-/// Whether a client's `/join` key is one the server owns.
-#[must_use]
-pub fn is_reserved_join_key(key: &str) -> bool { RESERVED_JOIN_KEYS.contains(&key) }
-
 #[derive(Debug)]
 pub struct Join<'a> {
 	pub sender_user: &'a UserId,
@@ -1081,6 +1077,13 @@ fn merge_member_content(
 
 	Ok(CanonicalJsonValue::Object(merged))
 }
+
+/// Whether a client's `/join` key is one the server owns.
+///
+/// A client value under such a key is dropped, never merged into the member
+/// event the server builds.
+#[must_use]
+pub fn is_reserved_join_key(key: &str) -> bool { RESERVED_JOIN_KEYS.contains(&key) }
 
 // A remote join sends the merged content as it is, so a non-string cannot pass here.
 fn bound_string<'a>(
