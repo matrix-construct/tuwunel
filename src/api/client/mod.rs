@@ -86,7 +86,7 @@ pub(crate) use self::{
 	context::get_context_route,
 	dehydrated_device::{
 		delete_dehydrated_device_route, get_dehydrated_device_route, get_dehydrated_events_route,
-		put_dehydrated_device_route,
+		get_dehydrated_events_v1_route, put_dehydrated_device_route,
 	},
 	delayed_events::{
 		get_delayed_event_route, get_delayed_events_route, send_delayed_event_route,

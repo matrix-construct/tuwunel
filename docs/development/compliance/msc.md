@@ -625,7 +625,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3837 | 🟥 ● | 0/0 | Cascading profile tags for push rules | no profile_tags array; only single profile_tag handled |
 | MSC3834 | 🟥 ● | 0/0 | Opportunistic user key pinning (TOFU) | TOFU signing key is client-side; no server hooks |
 | MSC3815 | ✅ ● | 100/100 | 3D Worlds | m.world.profile global account data passthrough; 3D and world state excluded |
-| MSC3814 | 🟨 ● | 75/90 | Dehydrated devices with SSSS | All four routes wired; events endpoint is the deprecated POST, not the GET |
+| MSC3814 | 🟨 ● | 90/90 | Dehydrated devices with SSSS | All four routes wired; events served over GET with `from` paging, deprecated POST kept for older clients |
 | MSC3803 | ✅ ● | 100/100 | Matrix Widget API v2 | m.widgets account data passthrough; widget protocol and room state excluded |
 | MSC3767 | 🟥 ● | 0/0 | Time based notification filtering | time_and_day push condition not present |
 | MSC3759 | 🟥 ● | 0/0 | Leave event metadata for deactivated users | deactivation leaves omit m.deactivated metadata |
