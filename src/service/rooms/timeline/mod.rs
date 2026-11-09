@@ -50,6 +50,7 @@ use tuwunel_matrix::{
 	room::state::resolution::FetchEvent,
 };
 
+pub use self::build::Collision;
 /// Re-exports the standard timeline item and count-key transformation.
 ///
 /// Timeline consumers use these alongside the service's directional streams.

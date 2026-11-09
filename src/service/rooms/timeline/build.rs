@@ -15,11 +15,12 @@ use ruma::{
 		room::member::{MembershipState, RoomMemberEventContent},
 	},
 	room_id,
+	serde::Raw,
 };
 use serde_json::value::to_raw_value;
 use tuwunel_core::{
 	Err, Result, err, implement,
-	utils::{BoolExt, IterStream, random_string},
+	utils::{BoolExt, IterStream, random_string, result::NotFound},
 };
 use tuwunel_matrix::{
 	StateKey,
@@ -29,9 +30,31 @@ use tuwunel_matrix::{
 
 use super::RoomMutexGuard;
 
-const NONCE_KEY: &str = "woof";
+const NONCE_KEY: &str = "uwu.woof";
 
 const NONCE_LENGTH: usize = 8;
+
+/// What a hashed-ID create does when its room ID is already taken.
+///
+/// The choice follows who fixed the inputs the hash is taken over: a room ID
+/// the client predicted is refused, one the server chose is rehashed.
+#[derive(Clone, Copy, Debug)]
+pub enum Collision<'a> {
+	/// The server chose the inputs, so the event is rehashed once with a nonce
+	/// key in its content, which MSC4291 allows.
+	Retry,
+
+	/// A client fixed the inputs to predict the room ID, so the create is
+	/// refused, as is a hash that misses the ID the client expects.
+	Refuse(Option<&'a str>),
+}
+
+struct CreateInputs<'a> {
+	room_id: &'a RoomId,
+	sender: &'a UserId,
+	timestamp: Option<MilliSecondsSinceUnixEpoch>,
+	state_lock: &'a RoomMutexGuard,
+}
 
 /// Builds, signs, validates, and persists a locally authored room event.
 ///
@@ -74,15 +97,8 @@ pub async fn build_and_append_pdu(
 ///
 /// A client that fixed the timestamp or named the room ID it expects has
 /// predicted the hash, so a collision is refused. A collision on a
-/// server-chosen timestamp is retried once with a nonce key in the content,
-/// which MSC4291 allows.
+/// server-chosen timestamp is retried once with a nonce key in the content.
 #[implement(super::Service)]
-#[tracing::instrument(
-	name = "build_and_append_create"
-	level = "debug",
-	skip(self, content),
-	ret,
-)]
 pub async fn build_and_append_create_pdu(
 	&self,
 	content: CanonicalJsonObject,
@@ -90,10 +106,45 @@ pub async fn build_and_append_create_pdu(
 	timestamp: Option<MilliSecondsSinceUnixEpoch>,
 	expected_room_id: Option<&str>,
 ) -> Result<OwnedEventId> {
+	let collision = match (timestamp, expected_room_id) {
+		| (None, None) => Collision::Retry,
+		| (_, expected) => Collision::Refuse(expected),
+	};
+
+	self.build_and_append_create_pdu_with(content, sender, timestamp, collision)
+		.await
+}
+
+/// Builds, signs, and persists a room's create event as
+/// `build_and_append_create_pdu` does, under an explicit collision policy.
+///
+/// A `timestamp` of `None` takes the server's clock, and `collision` decides
+/// what a room ID an earlier create already took does to this one.
+#[implement(super::Service)]
+#[tracing::instrument(
+	name = "build_and_append_create"
+	level = "debug",
+	skip(self, content),
+	ret,
+)]
+pub async fn build_and_append_create_pdu_with(
+	&self,
+	content: CanonicalJsonObject,
+	sender: &UserId,
+	timestamp: Option<MilliSecondsSinceUnixEpoch>,
+	collision: Collision<'_>,
+) -> Result<OwnedEventId> {
 	let room_id = room_id!("!thiswillbereplaced");
 	let state_lock = self.services.state.mutex.lock(room_id).await;
+	let inputs = CreateInputs {
+		room_id,
+		sender,
+		timestamp,
+		state_lock: &state_lock,
+	};
+
 	let (pdu, pdu_json) = self
-		.hash_create_unique(content, sender, timestamp, expected_room_id, room_id, &state_lock)
+		.hash_create_unique(&inputs, content, collision)
 		.boxed() // query-depth firewall
 		.await?;
 
@@ -105,32 +156,22 @@ pub async fn build_and_append_create_pdu(
 #[implement(super::Service)]
 async fn hash_create_unique(
 	&self,
+	inputs: &CreateInputs<'_>,
 	content: CanonicalJsonObject,
-	sender: &UserId,
-	timestamp: Option<MilliSecondsSinceUnixEpoch>,
-	expected_room_id: Option<&str>,
-	room_id: &RoomId,
-	state_lock: &RoomMutexGuard,
+	collision: Collision<'_>,
 ) -> Result<(PduEvent, CanonicalJsonObject)> {
-	let (pdu, pdu_json) = self
-		.hash_create_content(&content, sender, timestamp, room_id, state_lock)
-		.await?;
+	let (pdu, pdu_json) = self.hash_create_content(inputs, &content).await?;
 
-	let mismatched = expected_room_id.is_some_and(|expected| pdu.room_id.as_str() != expected);
-	if mismatched {
+	if let Collision::Refuse(Some(expected)) = collision
+		&& pdu.room_id.as_str() != expected
+	{
 		return Err!(Request(InvalidParam(
 			"The create event hashes to a different room ID than expected."
 		)));
 	}
 
-	let predicted = timestamp.is_some() || expected_room_id.is_some();
-	let collided = !predicted
-		&& self
-			.services
-			.short
-			.get_shortroomid(&pdu.room_id)
-			.await
-			.is_ok();
+	let collided =
+		matches!(collision, Collision::Retry) && self.room_id_taken(&pdu.room_id).await?;
 
 	if !collided {
 		return Ok((pdu, pdu_json));
@@ -138,24 +179,20 @@ async fn hash_create_unique(
 
 	let content = with_nonce(content);
 
-	self.hash_create_content(&content, sender, timestamp, room_id, state_lock)
-		.await
+	self.hash_create_content(inputs, &content).await
 }
 
 #[implement(super::Service)]
 async fn hash_create_content(
 	&self,
+	CreateInputs { room_id, sender, timestamp, state_lock }: &CreateInputs<'_>,
 	content: &CanonicalJsonObject,
-	sender: &UserId,
-	timestamp: Option<MilliSecondsSinceUnixEpoch>,
-	room_id: &RoomId,
-	state_lock: &RoomMutexGuard,
 ) -> Result<(PduEvent, CanonicalJsonObject)> {
 	let pdu_builder = PduBuilder {
 		event_type: TimelineEventType::RoomCreate,
-		content: to_raw_value(content)?.into(),
+		content: Raw::new(content)?,
 		state_key: Some(StateKey::new()),
-		timestamp,
+		timestamp: *timestamp,
 		..Default::default()
 	};
 
@@ -165,6 +202,7 @@ async fn hash_create_content(
 
 fn with_nonce(mut content: CanonicalJsonObject) -> CanonicalJsonObject {
 	let nonce = CanonicalJsonValue::String(random_string(NONCE_LENGTH));
+
 	content.insert(NONCE_KEY.into(), nonce);
 	content
 }
@@ -289,14 +327,27 @@ async fn with_policy_signature(
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 async fn reserve_room_id(&self, room_id: &RoomId) -> Result {
-	let short = &self.services.short;
-	if short.get_shortroomid(room_id).await.is_ok() {
+	if self.room_id_taken(room_id).await? {
 		return Err!(Request(RoomInUse("A room with this create event already exists.")));
 	}
 
-	short.get_or_create_shortroomid(room_id).await;
+	self.services
+		.short
+		.get_or_create_shortroomid(room_id)
+		.await;
 
 	Ok(())
+}
+
+#[implement(super::Service)]
+#[tracing::instrument(skip(self), level = "debug", ret)]
+async fn room_id_taken(&self, room_id: &RoomId) -> Result<bool> {
+	self.services
+		.short
+		.get_shortroomid(room_id)
+		.await
+		.optional()
+		.map(|short| short.is_some())
 }
 
 #[implement(super::Service)]

@@ -707,7 +707,6 @@ async fn create_create_event(
 		.map(expected_room_id_check)
 		.transpose()?;
 
-	// 1. The room create event, hashed under the placeholder room ID
 	let create_event_id = services
 		.timeline
 		.build_and_append_create_pdu(
@@ -726,8 +725,7 @@ async fn create_create_event(
 	Ok((room_id, state_lock))
 }
 
-/// Admits only a hash-form room ID as the one a create event is expected to
-/// produce, since a custom localpart cannot be honoured in these versions.
+// These versions derive the room ID from the create event, so only a hash-form ID is admitted.
 fn expected_room_id_check(expected: &str) -> Result<&str> {
 	let hashed = expected.starts_with('!') && !expected.contains(':');
 
