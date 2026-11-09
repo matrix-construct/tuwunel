@@ -27,7 +27,7 @@ use tuwunel_core::{
 	result::NotFound,
 	smallstr::SmallString,
 	utils::{
-		MutexMap,
+		MutexMap, MutexMapGuard,
 		rand::string_array,
 		stream::{BroadbandExt, ReadyExt, TryIgnore, WidebandExt, automatic_width},
 		time::now_millis,
@@ -53,8 +53,8 @@ pub type DelayId = SmallString<[u8; DELAY_ID_LEN]>;
 
 /// Schedules delayed events and sends them when they fall due.
 ///
-/// Every operation on one event holds that event's lock, then the room's lock
-/// when it sends, never the reverse.
+/// The lock order is the user's lock, then an event's lock, then the room's
+/// lock, never the reverse.
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
@@ -64,6 +64,9 @@ pub struct Service {
 	/// An entry lives only while held, so its size is bounded by concurrent
 	/// operations.
 	locks: MutexMap<DelayId, ()>,
+
+	/// Serializes admission and deactivation per user; an entry lives only while held.
+	user_locks: MutexMap<OwnedUserId, ()>,
 
 	/// Wakes the worker when a new event may fall due before its next pass.
 	wake: Notify,
@@ -146,6 +149,7 @@ impl crate::Service for Service {
 			services: args.services.clone(),
 			db,
 			locks: MutexMap::new(),
+			user_locks: MutexMap::new(),
 			wake: Notify::new(),
 		}))
 	}
@@ -185,10 +189,10 @@ pub fn limits(&self) -> Option<Limits> {
 
 /// Refuses a user who already has `max_scheduled` events scheduled.
 ///
-/// The count is read before the write without a lock, so concurrent requests
-/// can overshoot it slightly. At the cap, entries left by dropped records are
-/// reclaimed before refusing. The refusal's `Retry-After` is the time until the
-/// user's next event falls due, rounded up to a second.
+/// Callers hold the user's lock through the insert, so the count cannot be
+/// overshot. At the cap, entries left by dropped records are reclaimed before
+/// refusing. The refusal's `Retry-After` is the time until the user's next
+/// event falls due, rounded up to a second.
 #[implement(Service)]
 pub async fn check_capacity(&self, user_id: &UserId, max_scheduled: usize) -> Result {
 	let scheduled = self
@@ -325,17 +329,28 @@ pub async fn send(&self, delay_id: &str, owner: Option<&UserId>) -> Result<Owned
 /// Removes every event a user has scheduled.
 ///
 /// Called on deactivation, after the account's devices are removed; an index
-/// entry whose record is already gone is dropped as well. A send already
-/// holding its event's lock completes, and a request authenticated before the
-/// devices were removed can still schedule an event after this returns.
+/// entry whose record is already gone is dropped as well. A schedule holding
+/// the user's lock inserts before the sweep starts; one taking it after the
+/// sweep can still schedule. A send already holding its event's lock completes.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn remove_user(&self, user_id: &UserId) {
+	let _user_lock = self.lock_user(user_id).await;
+
 	self.owned_ids(user_id)
 		.for_each_concurrent(automatic_width(), async |delay_id| {
 			self.remove_owned(user_id, &delay_id).await;
 		})
 		.await;
+}
+
+/// Locks scheduling admission and deactivation for one user.
+///
+/// A schedule holds this lock from its capacity check through its insert,
+/// and deactivation holds it through its sweep.
+#[implement(Service)]
+pub async fn lock_user(&self, user_id: &UserId) -> MutexMapGuard<OwnedUserId, ()> {
+	self.user_locks.lock(user_id).await
 }
 
 /// Streams events as they fall due, until shutdown.

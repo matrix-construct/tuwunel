@@ -79,9 +79,10 @@ enum Kind<'a> {
 /// Schedules an event and returns its `delay_id`.
 ///
 /// A retried transaction returns the `delay_id` it first produced before the
-/// sender policy runs, so a policy change since cannot fail it. Everything
-/// after that policy runs under the room lock, as an ordinary send does, so the
-/// room auth check sees the state the event would be sent against now.
+/// sender policy runs, so a policy change since cannot fail it. The user's lock
+/// is held from the capacity check through the insert, and the room's lock
+/// from after that check as an ordinary send holds it, so room auth sees the
+/// state the event would be sent against now.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn schedule(
 	services: &Services,
@@ -138,7 +139,7 @@ async fn schedule(
 		},
 	};
 
-	let state_lock = services.state.mutex.lock(room_id).await;
+	let _user_lock = services.delayed_events.lock_user(sender).await;
 
 	// A concurrent retry may have scheduled it while the policy ran.
 	if let Some(delay_id) = existing().await.transpose()?.flatten() {
@@ -149,6 +150,8 @@ async fn schedule(
 		.delayed_events
 		.check_capacity(sender, limits.max_scheduled)
 		.await?;
+
+	let state_lock = services.state.mutex.lock(room_id).await;
 
 	if let Kind::Message { event_type, content } = kind {
 		check_send_content(services, sender, room_id, event_type, content).await?;

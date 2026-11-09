@@ -15,10 +15,10 @@ use std::{
 	time::Duration,
 };
 
-use futures::StreamExt;
+use futures::{StreamExt, future::join3};
 use reqwest::{Method, Response, StatusCode, header::RETRY_AFTER};
 use serde_json::{Value, json};
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use tuwunel::Args;
 use tuwunel_core::{
 	Err, Result, err, implement,
@@ -347,10 +347,44 @@ async fn deactivation_removes_scheduled(
 ) -> Result {
 	let room = bob.create_room(&json!({})).await?;
 
-	bob.schedule_dedicated(&room, "m.room.message", "deactivate", &json!({ "body": "x" }))
-		.await?;
+	let room_lock = services.state.mutex.lock(&room).await;
+	let url = bob
+		.client_url(UNSTABLE, &format!("rooms/{room}/delayed_event/m.room.message/deactivate"));
 
-	services.users.deactivate_account(bob_id).await?;
+	let body = json!({ "delay_ms": LONG, "content": { "body": "x" } });
+	let (reply, deactivated, released) = join3(
+		bob.request(Method::PUT, &url, &body),
+		async {
+			let held =
+				poll_until(FIRE_DEADLINE, async || admission_held(services, bob_id).await).await;
+
+			require(held, "schedule did not hold admission before deactivation")?;
+			services.users.deactivate_account(bob_id).await
+		},
+		async {
+			let held =
+				poll_until(FIRE_DEADLINE, async || admission_held(services, bob_id).await).await;
+
+			let removed = poll_until(FIRE_DEADLINE, async || {
+				services
+					.users
+					.all_device_ids(bob_id)
+					.count()
+					.await
+					.eq(&0)
+			})
+			.await;
+
+			sleep(Duration::from_millis(250)).await;
+			drop(room_lock);
+			require(held && removed, "devices were not removed under admission")
+		},
+	)
+	.await;
+
+	assert_eq!(reply?.status(), StatusCode::OK);
+	deactivated?;
+	released?;
 
 	let scheduled = services
 		.delayed_events
@@ -363,8 +397,14 @@ async fn deactivation_removes_scheduled(
 	Ok(())
 }
 
+async fn admission_held(services: &Services, user_id: &UserId) -> bool {
+	timeout(Duration::from_millis(50), services.delayed_events.lock_user(user_id))
+		.await
+		.is_err()
+}
+
 async fn limits(services: &Services, base: &str) -> Result {
-	register(services, "alice", ALICE).await?;
+	let alice_id = register(services, "alice", ALICE).await?;
 
 	let alice = Client { services, base, token: ALICE };
 	let room = alice.create_room(&json!({})).await?;
@@ -389,9 +429,52 @@ async fn limits(services: &Services, base: &str) -> Result {
 
 	refused(stable, StatusCode::BAD_REQUEST, "M_DELAY_TOO_LARGE").await?;
 
-	alice
-		.schedule_dedicated(&room, "m.room.message", "first", &json!({ "body": "x" }))
-		.await?;
+	let other_room = alice.create_room(&json!({})).await?;
+	let room_lock = services.state.mutex.lock(&room).await;
+	let other_lock = services.state.mutex.lock(&other_room).await;
+	let first =
+		alice.client_url(UNSTABLE, &format!("rooms/{room}/delayed_event/m.room.message/first"));
+
+	let rival = alice
+		.client_url(UNSTABLE, &format!("rooms/{other_room}/delayed_event/m.room.message/rival"));
+
+	let body = json!({ "delay_ms": LONG, "content": { "body": "x" } });
+	let (first, rival, released) = join3(
+		alice.request(Method::PUT, &first, &body),
+		alice.request(Method::PUT, &rival, &body),
+		async {
+			let held =
+				poll_until(FIRE_DEADLINE, async || admission_held(services, &alice_id).await)
+					.await;
+
+			sleep(Duration::from_millis(250)).await;
+			drop((room_lock, other_lock));
+			require(held, "schedule did not hold admission before room release")
+		},
+	)
+	.await;
+
+	released?;
+
+	let (first, rival) = (first?, rival?);
+
+	assert_ne!(first.status(), rival.status(), "concurrent schedules bypassed the cap");
+
+	let (winner, loser) = match first.status() {
+		| StatusCode::OK => (first, rival),
+		| _ => (rival, first),
+	};
+
+	assert_eq!(winner.status(), StatusCode::OK);
+	refused(loser, StatusCode::TOO_MANY_REQUESTS, "M_LIMIT_EXCEEDED").await?;
+
+	let scheduled = services
+		.delayed_events
+		.scheduled(&alice_id)
+		.count()
+		.await;
+
+	assert_eq!(scheduled, 1);
 
 	let second =
 		alice.client_url(UNSTABLE, &format!("rooms/{room}/delayed_event/m.room.message/second"));
