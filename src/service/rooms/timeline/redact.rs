@@ -17,7 +17,7 @@ use tuwunel_core::{
 	Result, err, implement,
 	utils::{BoolExt, OptionExt, result::NotFound, to_canonical_object},
 };
-use tuwunel_matrix::event::Event;
+use tuwunel_matrix::{event::Event, pdu::PRIVATE_UNSIGNED};
 
 use super::Position;
 use crate::{
@@ -357,6 +357,11 @@ fn already_redacted(
 	Ok(unchanged.then_some(redacted))
 }
 
+/// Redacts an event, keeping the unsigned fields private to its sender and, when
+/// asked, its thread summary.
+///
+/// The redaction rewrites `unsigned` wholesale. The private fields still go to
+/// the sender alone, since every serving path strips them for anyone else.
 fn redact_keeping_thread(
 	mut pdu: CanonicalJsonObject,
 	keep_thread: bool,
@@ -364,20 +369,27 @@ fn redact_keeping_thread(
 	because: RedactedBecause,
 ) -> Result<CanonicalJsonObject> {
 	let thread = keep_thread.and_then(|| thread_bundle_mut(&mut pdu).map(take));
+	let private = PRIVATE_UNSIGNED.map(|key| unsigned_mut(&mut pdu)?.remove_entry(key));
 
 	redact_in_place(&mut pdu, rules, Some(because))
 		.map_err(|err| err!("invalid event: {err}"))?;
 
-	if let Some((thread, unsigned)) = thread.zip(
-		pdu.get_mut("unsigned")
-			.and_then(CanonicalJsonValue::as_object_mut),
-	) {
+	let relations = thread.map(|thread| {
 		let relations = [("m.thread".into(), CanonicalJsonValue::Object(thread))].into();
 
-		unsigned.insert("m.relations".into(), CanonicalJsonValue::Object(relations));
+		("m.relations".into(), CanonicalJsonValue::Object(relations))
+	});
+
+	if let Some(unsigned) = unsigned_mut(&mut pdu) {
+		unsigned.extend(private.into_iter().flatten().chain(relations));
 	}
 
 	Ok(pdu)
+}
+
+fn unsigned_mut(pdu: &mut CanonicalJsonObject) -> Option<&mut CanonicalJsonObject> {
+	pdu.get_mut("unsigned")
+		.and_then(CanonicalJsonValue::as_object_mut)
 }
 
 /// The redaction as recorded on the event it redacts, without its own `unsigned`.
@@ -397,11 +409,15 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn recorded_redaction_drops_its_unsigned() {
+	fn redaction_keeps_the_targets_private_fields_alone() {
 		let target = object(json!({
 			"type": "m.room.message",
 			"content": { "body": "hello", "msgtype": "m.text" },
-			"unsigned": { "transaction_id": "target-txn" },
+			"unsigned": {
+				"transaction_id": "target-txn",
+				"org.matrix.msc4140.delay_id": "syd_target",
+				"foreign.reference": "$redaction",
+			},
 		}));
 
 		let reason = object(json!({
@@ -414,6 +430,8 @@ mod tests {
 			.expect("redactable event");
 
 		let expected = object(json!({
+			"transaction_id": "target-txn",
+			"org.matrix.msc4140.delay_id": "syd_target",
 			"redacted_because": {
 				"type": "m.room.redaction",
 				"content": { "redacts": "$target" },
@@ -481,7 +499,7 @@ mod tests {
 			"room_id": "!room:example.org",
 			"sender": "@alice:example.org",
 			"content": {},
-			"unsigned": { "foreign.reference": "$redaction" },
+			"unsigned": { "foreign.reference": "$redaction", "transaction_id": "target-txn" },
 		}));
 
 		let native =

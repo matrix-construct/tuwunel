@@ -40,7 +40,7 @@ pub use self::{
 	hashes::EventHashes as EventHash,
 	id::Id,
 	raw_id::*,
-	unsigned::DELAY_ID,
+	unsigned::{DELAY_ID, PRIVATE as PRIVATE_UNSIGNED},
 };
 use super::{Event, ShortRoomId, StateKey};
 
