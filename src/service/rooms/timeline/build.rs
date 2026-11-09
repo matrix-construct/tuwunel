@@ -171,6 +171,10 @@ fn with_nonce(mut content: CanonicalJsonObject) -> CanonicalJsonObject {
 
 /// Validates and persists an event built by `create_hash_and_sign_event`
 /// under the state guard it was built under.
+///
+/// The event is checked, signed by the room's policy server, and stored before
+/// it is queued for federation, so a queueing failure is returned for an event
+/// already in the room.
 #[implement(super::Service)]
 #[tracing::instrument(
 	name = "append_signed"
@@ -181,7 +185,7 @@ fn with_nonce(mut content: CanonicalJsonObject) -> CanonicalJsonObject {
 async fn append_signed_pdu(
 	&self,
 	pdu: PduEvent,
-	mut pdu_json: CanonicalJsonObject, // sign_outgoing_pdu signs in place
+	pdu_json: CanonicalJsonObject,
 	sender: &UserId,
 	state_lock: &RoomMutexGuard,
 ) -> Result<OwnedEventId> {
@@ -202,13 +206,7 @@ async fn append_signed_pdu(
 			.await?;
 	}
 
-	// MSC4284: ask the room's policy server (if any) to sign this event before
-	// federating it. Refusal aborts; fail-open on transport errors.
-	self.services
-		.event_handler
-		.sign_outgoing_pdu(&mut pdu_json, &pdu)
-		.boxed() // size firewall
-		.await?;
+	let pdu_json = self.with_policy_signature(pdu_json, &pdu).await?;
 
 	//TODO: Use proper room version here
 	if *pdu.kind() == TimelineEventType::RoomCreate && pdu.room_id().server_name().is_none() {
@@ -263,11 +261,33 @@ async fn append_signed_pdu(
 	Ok(pdu.event_id().to_owned())
 }
 
+/// Has the room's policy server, if any, sign an event before it is federated.
+///
+/// Per [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284)
+/// a refusal is an error, while a transport failure lets the event go out
+/// unsigned.
+#[implement(super::Service)]
+#[tracing::instrument(skip_all, level = "debug")]
+async fn with_policy_signature(
+	&self,
+	mut pdu_json: CanonicalJsonObject,
+	pdu: &PduEvent,
+) -> Result<CanonicalJsonObject> {
+	self.services
+		.event_handler
+		.sign_outgoing_pdu(&mut pdu_json, pdu)
+		.boxed() // size firewall
+		.await?;
+
+	Ok(pdu_json)
+}
+
 /// Allocates the short ID of a room named by its create event's hash.
 ///
 /// A short ID already present belongs to an earlier create event with the
 /// same hash, so the new room is refused rather than merged into it.
 #[implement(super::Service)]
+#[tracing::instrument(skip(self), level = "debug")]
 async fn reserve_room_id(&self, room_id: &RoomId) -> Result {
 	let short = &self.services.short;
 	if short.get_shortroomid(room_id).await.is_ok() {
