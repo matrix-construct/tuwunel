@@ -2,7 +2,7 @@ mod remote;
 #[cfg(test)]
 mod tests;
 
-use std::{borrow::Cow, collections::BTreeMap, iter::once, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 
 use futures::{
 	Stream, StreamExt, TryStreamExt,
@@ -73,7 +73,7 @@ type ChangeKeyVal<'a> = KeyVal<'a, (&'a str, u64, &'a str), &'a UserId>;
 
 /// One field of a profile write: the name and the value to store, or `None`
 /// to clear it.
-type ProfileValue = (ProfileFieldName, Option<Value>);
+pub type ProfileValue = (ProfileFieldName, Option<Value>);
 
 // A single write names one field; a combined write names both.
 type ChangedWrites<'a> = SmallVec<[&'a ProfileValue; 2]>;
@@ -577,20 +577,9 @@ async fn set_profile_keys_locked(
 		.changed_fields(user_id, profile_values)
 		.await?;
 
-	// Only a change is checked, so a stored value now refused can still be restated.
 	if local {
-		for (name, value) in profile_values {
-			check_profile_key(name.as_str())?;
-
-			if let Some(value) = value
-				.as_ref()
-				.filter(|_| changed.contains(&name.as_str()))
-			{
-				check_profile_value(name.as_str(), value)?;
-				self.enforce_profile_size(user_id, name.as_str(), value)
-					.await?;
-			}
-		}
+		self.check_changed_keys(user_id, profile_values, &changed)
+			.await?;
 	}
 
 	let propagation = propagation.unwrap_or(
@@ -638,6 +627,83 @@ async fn set_profile_keys_locked(
 		.filter(|name| local || changed.contains(name));
 
 	self.publish_update(user_id, logged, &changed, txn, rooms)
+		.await
+}
+
+/// Pairs a profile field with the string a write stores in it.
+///
+/// A `None` value clears the field. `set_profile_keys` and
+/// `set_profile_keys_after` each take a slice of these pairs.
+#[must_use]
+pub fn string_field(name: ProfileFieldName, value: Option<&str>) -> ProfileValue {
+	(name, value.map(Value::from))
+}
+
+/// Checks local profile values, runs `before_write`, then writes the values,
+/// all under the user's profile lock.
+///
+/// A caller that changes the account a profile belongs to passes that change
+/// as `before_write`, so a refused value returns before the account changes
+/// and the values checked are the values written. `before_write` must not
+/// write this user's profile, whose lock it runs under.
+#[implement(Service)]
+pub async fn set_profile_keys_after<F>(
+	&self,
+	user_id: &UserId,
+	profile_values: &[ProfileValue],
+	propagation: Option<Propagation>,
+	before_write: F,
+) -> Result
+where
+	F: Future<Output = Result>,
+{
+	let profile_lock = self.mutex.lock(user_id).await;
+	let changed = self
+		.changed_fields(user_id, profile_values)
+		.await?;
+
+	self.check_changed_keys(user_id, profile_values, &changed)
+		.await?;
+
+	before_write.await?;
+
+	if profile_values.is_empty() {
+		return Ok(());
+	}
+
+	self.set_profile_keys_locked(&profile_lock, user_id, profile_values, propagation)
+		.await
+}
+
+// Only a change is checked, so a stored value now refused can still be restated.
+#[implement(Service)]
+async fn check_changed_keys(
+	&self,
+	user_id: &UserId,
+	profile_values: &[ProfileValue],
+	changed: &ChangedFields<'_>,
+) -> Result {
+	let is_changed = |name: &ProfileFieldName| changed.contains(&name.as_str());
+
+	profile_values
+		.iter()
+		.try_for_each(|(name, value)| {
+			check_profile_key(name.as_str())?;
+			value
+				.as_ref()
+				.filter(|_| is_changed(name))
+				.map_or(Ok(()), |value| check_profile_value(name.as_str(), value))
+		})?;
+
+	let grows = profile_values
+		.iter()
+		.any(|(name, value)| value.is_some() && is_changed(name));
+
+	if !grows {
+		return Ok(());
+	}
+
+	self.enforce_profile_size(user_id, profile_values)
 		.await
 }
 
@@ -916,8 +982,23 @@ pub(super) const MAX_PROFILE_SIZE: usize = 65_536;
 /// stored field that no longer parses is logged and left out of the total, so
 /// it cannot block writes to the other fields; removals skip this check.
 #[implement(Service)]
-async fn enforce_profile_size(&self, user_id: &UserId, key: &str, value: &Value) -> Result {
-	let replacement = once((ProfileFieldName::from(key), Cow::Borrowed(value))).stream();
+async fn enforce_profile_size(
+	&self,
+	user_id: &UserId,
+	profile_values: &[ProfileValue],
+) -> Result {
+	// The write lands whole, so all its replacements and removals apply before measuring.
+	let written = |name: &ProfileFieldName| {
+		profile_values
+			.iter()
+			.any(|(field, _)| field == name)
+	};
+
+	let replacements = profile_values
+		.iter()
+		.filter_map(|(name, value)| Some((name.clone(), Cow::Borrowed(value.as_ref()?))))
+		.stream();
+
 	let profile: ProspectiveProfile<'_> = self
 		.try_all_profile_keys(user_id)
 		.ready_filter_map(|field| {
@@ -925,8 +1006,11 @@ async fn enforce_profile_size(&self, user_id: &UserId, key: &str, value: &Value)
 				.inspect_err(|e| warn!(%user_id, %e, "Skipping unreadable profile field"))
 				.ok()
 		})
-		.map(|field| (field.field_name(), Cow::Owned(field.value().into_owned())))
-		.chain(replacement)
+		.ready_filter_map(|field| {
+			let name = field.field_name();
+			(!written(&name)).then(|| (name, Cow::Owned(field.value().into_owned())))
+		})
+		.chain(replacements)
 		.collect()
 		.await;
 

@@ -2,16 +2,17 @@ use std::collections::BTreeSet;
 
 use axum::extract::State;
 use futures::StreamExt;
-use ruma::{MilliSecondsSinceUnixEpoch, MxcUri, UserId, thirdparty::Medium};
+use ruma::{MilliSecondsSinceUnixEpoch, UserId, profile::ProfileFieldName, thirdparty::Medium};
 use synapse_admin_api::users::create_or_modify::v2::{
 	self as create_or_modify, ThirdPartyIdentifier,
 };
 use tuwunel_core::{
 	Err, Result,
+	arrayvec::ArrayVec,
 	utils::{BoolExt, IterStream, ReadyExt, stream::automatic_width},
 };
 use tuwunel_service::{
-	profile::{check_member_avatar_url, check_member_displayname},
+	profile::{ProfileValue, string_field},
 	threepid::canonicalize_email,
 	users::PASSWORD_SENTINEL,
 };
@@ -20,6 +21,8 @@ use super::user_details;
 use crate::{Ruma, refuse_server_user, require_admin};
 
 type Emails = BTreeSet<String>;
+
+type ProfileWrites = ArrayVec<ProfileValue, 2>;
 
 /// # `PUT /_synapse/admin/v2/users/{user_id}`
 ///
@@ -61,45 +64,14 @@ pub(crate) async fn admin_create_or_modify_route(
 		refuse_server_user(services, user_id)?;
 	}
 
-	if created {
-		// Refused before the account exists; an existing account may restate a stored value.
-		check_member_displayname(body.displayname.as_deref())?;
-		check_member_avatar_url(body.avatar_url.as_deref())?;
+	let profile = requested_profile(&body);
+	let credentials = write_credentials(services, &body, created);
 
-		services
-			.users
-			.create(user_id, body.password.as_deref(), None)
-			.await?;
-	} else if let Some(password) = body.password.as_deref() {
-		services
-			.users
-			.set_password(user_id, Some(password))
-			.await?;
-
-		if body.logout_devices {
-			services.users.remove_devices(user_id, None).await;
-		}
-	}
-
-	if let Some(displayname) = body.displayname.as_deref() {
-		let displayname = displayname.is_empty().or_some(displayname);
-
-		services
-			.profile
-			.set_displayname(user_id, displayname, None)
-			.await?;
-	}
-
-	if let Some(avatar_url) = body.avatar_url.as_deref() {
-		let avatar_url = avatar_url
-			.is_empty()
-			.or_some(<&MxcUri>::from(avatar_url));
-
-		services
-			.profile
-			.set_avatar_url(user_id, avatar_url, None)
-			.await?;
-	}
+	// A refused profile value returns before the account or its credentials change.
+	services
+		.profile
+		.set_profile_keys_after(user_id, &profile, None, credentials)
+		.await?;
 
 	match body.admin {
 		| None => {},
@@ -166,6 +138,52 @@ fn changes_access(body: &create_or_modify::Request) -> bool {
 		|| body.locked.is_some()
 		|| body.admin.is_some()
 		|| body.threepids.is_some()
+}
+
+// An empty value clears its field.
+fn requested_profile(body: &create_or_modify::Request) -> ProfileWrites {
+	[
+		(ProfileFieldName::DisplayName, &body.displayname),
+		(ProfileFieldName::AvatarUrl, &body.avatar_url),
+	]
+	.into_iter()
+	.filter_map(|(name, value)| {
+		value
+			.as_deref()
+			.map(|value| string_field(name, value.is_empty().or_some(value)))
+	})
+	.collect()
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn write_credentials(
+	services: crate::State,
+	body: &create_or_modify::Request,
+	created: bool,
+) -> Result {
+	let user_id = &body.user_id;
+
+	if created {
+		return services
+			.users
+			.create(user_id, body.password.as_deref(), None)
+			.await;
+	}
+
+	let Some(password) = body.password.as_deref() else {
+		return Ok(());
+	};
+
+	services
+		.users
+		.set_password(user_id, Some(password))
+		.await?;
+
+	if body.logout_devices {
+		services.users.remove_devices(user_id, None).await;
+	}
+
+	Ok(())
 }
 
 /// Replaces the user's email bindings with exactly the addresses in `desired`.

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use reqwest::Method;
+use reqwest::{Method, StatusCode};
 use serde_json::{Value, json};
 use tuwunel_core::{
 	Result,
@@ -12,6 +12,7 @@ use tuwunel_core::{
 			member::{MembershipState, RoomMemberEventContent},
 			message::RoomMessageEventContent,
 		},
+		profile::ProfileFieldName,
 	},
 };
 use tuwunel_matrix::pdu::PduBuilder;
@@ -25,7 +26,7 @@ use self::{
 };
 
 mod admin;
-#[expect(dead_code)] // Only the user admin API is requested through the client harness.
+#[expect(dead_code)] // Only the user admin and MAS APIs are requested through the client harness.
 mod client;
 mod fixture;
 mod timeline;
@@ -39,6 +40,7 @@ const TARGET_TOKEN: &str = "admin-revoke-target-admin-access-token";
 const ADMIN_TOKEN: &str = "admin-revoke-put-admin-access-token";
 const MEMBER_TOKEN: &str = "admin-revoke-put-member-access-token";
 const PENDING_TOKEN: &str = "admin-revoke-put-pending-access-token";
+const MAS_SECRET: &str = "admin-revoke-mas-secret";
 
 const COMMAND_DEADLINE: Duration = Duration::from_secs(10);
 
@@ -127,14 +129,15 @@ async fn join_admin_room(services: &Services, user_id: &UserId) -> Result {
 ///
 /// That holds for an account never granted, one already demoted, and one the
 /// request creates, while a pending invite to the admin room is still revoked.
-/// A malformed email refuses the whole request before any of its fields is
-/// written.
+/// A malformed email or a refused profile value refuses the whole request,
+/// from the admin API or MAS, before any of its fields is written.
 #[test]
 fn put_user_leaves_a_non_admin_alone() -> Result {
 	let options = [
 		"admin.room.create=true",
 		"registration.grant_admin_to_first_user=false",
 		"logging.enable=false",
+		&format!("authentication.mas_secret=\"{MAS_SECRET}\""),
 	];
 
 	boot("admin-revoke-put-user", options, put_user_requests)
@@ -216,6 +219,7 @@ async fn put_user_requests(services: &Services, base: &str) -> Result {
 	new_account_profiles(&admin).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn new_account_profiles(admin: &Client<'_>) -> Result {
 	let services = admin.services;
 	let server_name = services.globals.server_name();
@@ -238,13 +242,145 @@ async fn new_account_profiles(admin: &Client<'_>) -> Result {
 
 	let absent = UserId::parse_with_server_name("absent", server_name)?;
 	let long = json!({ "displayname": long_name });
-	let invalid = json!({ "avatar_url": "https://example.com/avatar.png" });
+	let invalid = json!({ "avatar_url": oversized_avatar() });
 
 	for body in [&long, &invalid] {
 		put_user(admin, &absent, body, 400).await?;
 
 		assert!(!services.users.exists(&absent).await, "a refused profile left an account");
 	}
+
+	existing_account_profile(admin, &shortened, &long_name).await?;
+	combined_profile_size(admin).await?;
+	provisioned_profiles(admin).await
+}
+
+// One byte past the profile's 1000-byte avatar cap.
+fn oversized_avatar() -> String { format!("mxc://localhost/{}", "a".repeat(985)) }
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn existing_account_profile(
+	admin: &Client<'_>,
+	user_id: &UserId,
+	long_name: &str,
+) -> Result {
+	let password = || admin.services.users.password_hash(user_id);
+	let before = password().await?;
+	let body = json!({
+		"password": "replaced-password",
+		"logout_devices": true,
+		"displayname": long_name,
+	});
+
+	put_user(admin, user_id, &body, 400).await?;
+
+	assert_eq!(password().await?, before, "a refused profile changed the password");
+
+	Ok(())
+}
+
+/// One request's name and avatar are sized together against the profile cap.
+///
+/// The padding leaves exactly enough room for a 256-byte name, so a name and an
+/// avatar added together are refused, while clearing the name makes room for the
+/// avatar in the same request.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn combined_profile_size(admin: &Client<'_>) -> Result {
+	let services = admin.services;
+	let padded = UserId::parse_with_server_name("padded", services.globals.server_name())?;
+	let created = json!({ "password": "padded-password" });
+
+	put_user(admin, &padded, &created, 200).await?;
+
+	// 65241 bytes of padding and a 256-byte name serialize to exactly 65536.
+	let pad = [(ProfileFieldName::from("com.example.pad"), Some(json!("p".repeat(65_241))))];
+
+	services
+		.profile
+		.set_profile_keys(&padded, &pad, None)
+		.await?;
+
+	let name = "n".repeat(MAX_DISPLAYNAME_LENGTH);
+	let avatar = format!("mxc://localhost/{}", "a".repeat(84));
+	let both = json!({ "displayname": name, "avatar_url": avatar });
+
+	put_user(admin, &padded, &both, 400).await?;
+
+	assert!(
+		services
+			.profile
+			.displayname(&padded)
+			.await
+			.is_err(),
+		"a refused write set a name"
+	);
+
+	put_user(admin, &padded, &json!({ "displayname": name }), 200).await?;
+
+	let swapped = json!({ "displayname": "", "avatar_url": avatar });
+
+	put_user(admin, &padded, &swapped, 200).await?;
+
+	assert!(
+		services
+			.profile
+			.displayname(&padded)
+			.await
+			.is_err(),
+		"the name was not cleared"
+	);
+
+	assert_eq!(
+		services
+			.profile
+			.avatar_url(&padded)
+			.await?
+			.as_str(),
+		avatar
+	);
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn provisioned_profiles(admin: &Client<'_>) -> Result {
+	let services = admin.services;
+	let server_name = services.globals.server_name();
+	let mas = Client {
+		services,
+		base: admin.base,
+		token: MAS_SECRET,
+	};
+
+	let url = format!("{}/_synapse/mas/provision_user", admin.base);
+
+	// Two bytes a character, so a cut by bytes would split one or keep too few.
+	let long_name = "\u{e9}".repeat(MAX_DISPLAYNAME_LENGTH + 44);
+	let provisioned = UserId::parse_with_server_name("provisioned", server_name)?;
+	let body = json!({
+		"localpart": provisioned.localpart(),
+		"set_displayname": long_name,
+		"locked": true,
+	});
+
+	assert_eq!(mas.post_url(&url, &body).await?.status(), StatusCode::CREATED);
+
+	let stored = services.profile.displayname(&provisioned).await?;
+
+	assert_eq!(stored, "\u{e9}".repeat(MAX_DISPLAYNAME_LENGTH));
+	assert!(services.users.is_locked(&provisioned).await, "the account was left unlocked");
+
+	let unprovisioned = UserId::parse_with_server_name("unprovisioned", server_name)?;
+	let invalid = json!({
+		"localpart": unprovisioned.localpart(),
+		"set_avatar_url": oversized_avatar(),
+	});
+
+	assert_eq!(mas.post_url(&url, &invalid).await?.status(), StatusCode::BAD_REQUEST);
+	assert!(
+		!services.users.exists(&unprovisioned).await,
+		"a refused profile left an account"
+	);
 
 	Ok(())
 }
