@@ -367,7 +367,7 @@ features = [
 
 [workspace.dependencies.ruma]
 git = "https://github.com/matrix-construct/ruma"
-rev = "96bd247ce5febfd59b578d854de21fc882121c9a"
+rev = "834cbeacbf961926a83968aa16eb56f864985835"
 features = [
     "__compat",
     "appservice-api-c",
@@ -417,7 +417,7 @@ features = [
 
 [workspace.dependencies.synapse-admin-api]
 git = "https://github.com/matrix-construct/synapse-admin-api"
-rev = "a745e515b392a59bc7279623970d8ff9fec3851f"
+rev = "df608b8ae41a6987a5f27402e35c079e28580d9d"
 features = ["server"]
 
 [workspace.dependencies.rustls]
