@@ -114,7 +114,7 @@ async fn maybe_deactivate(services: &Services, user_id: &UserId, client_ip: IpAd
 		services
 			.deactivate
 			.full_deactivate(user_id, false)
-			.boxed()
+			.boxed() // cold arm
 			.await?;
 	}
 

@@ -109,7 +109,7 @@ pub async fn get_summary_and_children(
 
 			| _ =>
 				self.get_summary_and_children_federation(room_id, sender, via)
-					.boxed()
+					.boxed() // cold arm
 					.await,
 		})
 		.await

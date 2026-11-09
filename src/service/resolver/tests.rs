@@ -45,7 +45,7 @@ impl Resolve for FixedResolver {
 		let addr = self.0;
 		let addrs: Addrs = Box::new(once(addr));
 
-		Box::pin(async move { Ok(addrs) })
+		Box::pin(async move { Ok(addrs) }) // type-erasure boundary
 	}
 }
 

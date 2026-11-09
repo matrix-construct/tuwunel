@@ -50,6 +50,7 @@ use crate::{
 type Summary = Vec<Raw<AnyStrippedStateEvent>>;
 
 #[implement(Service)]
+// cross-crate codegen firewall
 #[async_noinline]
 #[tracing::instrument(
 	name = "knock",
@@ -124,11 +125,10 @@ pub async fn knock<'a>(
 
 	if local_knock {
 		self.knock_room_helper_local(sender_user, room_id, reason, &servers, state_lock)
-			.boxed()
 			.await
 	} else {
 		self.knock_room_helper_remote(sender_user, room_id, reason, &servers)
-			.boxed()
+			.boxed() // cold arm
 			.await
 	}
 }
@@ -184,7 +184,7 @@ async fn knock_room_helper_local(
 	warn!("We couldn't do the knock locally, maybe federation can help to satisfy the knock");
 
 	self.knock_room_local_federation_fallback(sender_user, room_id, reason, servers, state_lock)
-		.boxed()
+		.boxed() // cold arm
 		.await
 }
 

@@ -260,7 +260,7 @@ async fn upgrade_room_create(
 			&room_id,
 			&state_lock,
 		)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	drop(state_lock);

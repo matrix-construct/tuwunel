@@ -52,6 +52,7 @@ pub(crate) async fn admin_room_details_route(
 		.room_state_get_content(room_id, &StateEventType::RoomTombstone, "")
 		.map(|content: Result<RoomTombstoneEventContent>| content.ok());
 
+	// size firewall
 	let (row, topic, avatar, tombstone) = join4(row, topic, avatar, tombstone).boxed().await;
 
 	let joined_local_devices = local_device_count(&services, room_id).await;

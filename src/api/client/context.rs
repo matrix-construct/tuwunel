@@ -166,7 +166,7 @@ pub async fn event_context(
 
 	let (base_event, events_before, events_after): (_, Vec<_>, Vec<_>) =
 		join3(base_event, events_before, events_after)
-			.boxed()
+			.boxed() // size firewall
 			.await;
 
 	let lazy_loading_context = lazy_loading::Context {

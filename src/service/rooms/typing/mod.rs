@@ -266,7 +266,7 @@ impl Service {
 			.try_for_each(|user_id| self.federation_send(room_id, user_id, false));
 
 		try_join(appservice_send, federation_sends)
-			.boxed()
+			.boxed() // erase region
 			.await
 			.map(|_| ())
 	}

@@ -22,6 +22,7 @@ pub(super) async fn raw_keys(
 	let prefix = prefix.as_deref().map(decode);
 	let from = from.as_deref().map(decode);
 
+	// heterogeneous match arms
 	let stream = match from.as_ref().or(prefix.as_ref()) {
 		| Some(from) if !backwards => map.raw_keys_from(from).boxed(),
 		| Some(from) => map.rev_raw_keys_from(from).boxed(),

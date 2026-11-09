@@ -71,7 +71,7 @@ async fn send_to_room(&self, content: RoomMessageEventContent, room_id: &RoomId)
 	let user_id = &self.services.globals.server_user;
 
 	self.respond_to_room(content, room_id, user_id)
-		.boxed()
+		.boxed() // size firewall
 		.await
 }
 

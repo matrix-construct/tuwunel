@@ -44,7 +44,7 @@ impl Service {
 			.services
 			.state_cache
 			.local_users_in_room(room_id)
-			.boxed()
+			.boxed() // Unpin for into_future
 			.into_future()
 			.map(|(next, ..)| next.as_ref().is_some());
 
@@ -52,7 +52,7 @@ impl Service {
 			.services
 			.state_cache
 			.local_users_invited_to_room(room_id)
-			.boxed()
+			.boxed() // Unpin for into_future
 			.into_future()
 			.map(|(next, ..)| next.as_ref().is_some());
 
@@ -66,7 +66,7 @@ impl Service {
 		self.services
 			.delete
 			.delete_room(room_id, false, state_lock)
-			.boxed()
+			.boxed() // size firewall
 			.await
 			.expect("unhandled error during room deletion");
 	}

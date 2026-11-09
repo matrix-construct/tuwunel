@@ -27,7 +27,7 @@ pub(crate) async fn deactivate_route(
 	services
 		.deactivate
 		.full_deactivate(sender_user, body.erase)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	info!("User {sender_user} deactivated their account.");

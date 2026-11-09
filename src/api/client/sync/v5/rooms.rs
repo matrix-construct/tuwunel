@@ -273,7 +273,7 @@ pub(super) async fn handle_room(
 		(joined_count, invited_count),
 		(highlight_count, notification_count, _last_notification_read, thread_counts),
 	) = join4(meta, events, member_counts, notification_counts)
-		.boxed()
+		.boxed() // size firewall
 		.await;
 
 	let (room_name, room_avatar) =

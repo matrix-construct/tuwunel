@@ -1,7 +1,13 @@
 use std::collections::BTreeMap;
 
 use axum::extract::State;
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join};
+use futures::{
+	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt,
+	future::{
+		Either::{Left, Right},
+		join,
+	},
+};
 use itertools::Itertools;
 use ruma::{
 	OwnedRoomId, RoomId, UInt, UserId,
@@ -88,13 +94,14 @@ async fn category_room_events(
 		.clone()
 		.map(IntoIterator::into_iter)
 		.map(IterStream::stream)
-		.map(StreamExt::boxed)
+		.map(Left)
 		.unwrap_or_else(|| {
-			services
+			let joined = services
 				.state_cache
 				.rooms_joined(sender_user)
-				.map(ToOwned::to_owned)
-				.boxed()
+				.map(ToOwned::to_owned);
+
+			Right(joined)
 		});
 
 	let results: Vec<_> = rooms

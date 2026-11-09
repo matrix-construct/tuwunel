@@ -22,21 +22,21 @@ pub(super) async fn room_info(&self, room: OwnedRoomOrAliasId) -> Result {
 		.services
 		.state_accessor
 		.get_create(&room_id)
-		.boxed();
+		.boxed(); // size firewall
 
 	let name = self
 		.services
 		.state_accessor
 		.get_name(&room_id)
 		.unwrap_or_else(|_| "(none)".to_owned())
-		.boxed();
+		.boxed(); // size firewall
 
 	let topic = self
 		.services
 		.state_accessor
 		.get_room_topic(&room_id)
 		.unwrap_or_else(|_| "(none)".to_owned())
-		.boxed();
+		.boxed(); // size firewall
 
 	let canonical_alias = self
 		.services
@@ -44,7 +44,7 @@ pub(super) async fn room_info(&self, room: OwnedRoomOrAliasId) -> Result {
 		.room_state_get_content(&room_id, &StateEventType::RoomCanonicalAlias, "")
 		.map_ok(|content: RoomCanonicalAliasEventContent| (content.alias, content.alt_aliases))
 		.unwrap_or_default()
-		.boxed();
+		.boxed(); // size firewall
 
 	let aliases = self
 		.services
@@ -52,13 +52,13 @@ pub(super) async fn room_info(&self, room: OwnedRoomOrAliasId) -> Result {
 		.local_aliases_for_room(&room_id)
 		.map(Into::into)
 		.collect::<Vec<OwnedRoomAliasId>>()
-		.boxed();
+		.boxed(); // size firewall
 
 	let power_levels = self
 		.services
 		.state_accessor
 		.get_power_levels(&room_id)
-		.boxed();
+		.boxed(); // size firewall
 
 	let (create_event, name, topic, (canonical_alias, alt_aliases), mut aliases, power_levels) =
 		join!(create_event, name, topic, canonical_alias, aliases, power_levels);

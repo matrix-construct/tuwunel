@@ -19,7 +19,7 @@ pub(super) fn serve<'a>(
 			let acceptor = from_tcp(listener)?
 				.handle(handle.clone())
 				.serve(router.clone())
-				.boxed();
+				.boxed(); // heterogeneous Vec<BoxFuture>
 
 			Ok(acceptor)
 		})

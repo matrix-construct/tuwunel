@@ -120,8 +120,9 @@ pub async fn full_register(
 		self.services
 			.admin
 			.make_user_admin(user_id)
-			.boxed()
+			.boxed() // cold arm
 			.await?;
+
 		warn!("Granting {user_id} admin privileges as the first user");
 	}
 

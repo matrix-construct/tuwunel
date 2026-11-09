@@ -29,6 +29,7 @@ use super::Service;
 use crate::rooms::{state_cache::MembershipUpdate, timeline::RoomMutexGuard};
 
 #[implement(Service)]
+// cross-crate codegen firewall
 #[async_noinline]
 #[tracing::instrument(
     name = "leave",
@@ -104,11 +105,7 @@ async fn leave_via_remote(
 			.await;
 	}
 
-	if let Err(e) = self
-		.remote_leave(user_id, room_id, reason)
-		.boxed()
-		.await
-	{
+	if let Err(e) = self.remote_leave(user_id, room_id, reason).await {
 		warn!(%user_id, "Failed to leave room {room_id} remotely: {e}");
 	}
 

@@ -1,5 +1,5 @@
 use axum::extract::State;
-use futures::{FutureExt, join};
+use futures::join;
 use ruma::{
 	api::client::membership::invite_user::{
 		self,
@@ -59,7 +59,6 @@ pub(crate) async fn invite_user_route(
 	services
 		.membership
 		.invite(sender_user, user_id, room_id, reason.as_ref(), false)
-		.boxed()
 		.await?;
 
 	Ok(invite_user::v3::Response {})

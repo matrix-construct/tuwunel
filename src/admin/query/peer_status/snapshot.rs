@@ -12,7 +12,7 @@ pub(super) async fn peer_status_snapshot(&self, server_name: Option<OwnedServerN
 
 	let timer = Instant::now();
 	let filter = server_name.as_deref();
-	let mut snapshot = self.services.federation.peer_snapshot().boxed();
+	let mut snapshot = self.services.federation.peer_snapshot().boxed(); // Unpin for next
 	while let Some((server, bucket_start, classification)) = snapshot.next().await {
 		if filter.is_some_and(|f| server != f) {
 			continue;

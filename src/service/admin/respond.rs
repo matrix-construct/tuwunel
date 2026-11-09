@@ -88,7 +88,7 @@ pub(super) async fn handle_response(
 		.map_or_else(|| Mode::Reply(reply_id.to_owned()), Mode::Thread);
 
 	self.respond(&output, pdu.room_id(), response_sender, &mode)
-		.boxed()
+		.boxed() // size firewall
 		.await
 }
 
@@ -123,7 +123,7 @@ async fn respond(
 	match segments {
 		| Some(segments) =>
 			self.send_segments(&segments, room_id, sender, mode, markdown)
-				.boxed()
+				.boxed() // size firewall
 				.await,
 		| None => {
 			let mut content = self.attach(output).await.unwrap_or_else(|e| {
@@ -140,7 +140,7 @@ async fn respond(
 			content.relates_to = Some(mode.relation(None));
 
 			self.respond_to_room(content, room_id, sender)
-				.boxed()
+				.boxed() // cold arm
 				.await
 		},
 	}
@@ -183,7 +183,7 @@ async fn send_segments(
 
 	if let Err(e) = result {
 		self.handle_response_error(e, room_id, sender, &state_lock)
-			.boxed()
+			.boxed() // cold arm
 			.await
 			.unwrap_or_else(default_log);
 	}
@@ -209,7 +209,7 @@ pub(super) async fn respond_to_room(
 		.await
 	{
 		self.handle_response_error(e, room_id, user_id, &state_lock)
-			.boxed()
+			.boxed() // cold arm
 			.await
 			.unwrap_or_else(default_log);
 	}
@@ -234,7 +234,7 @@ async fn handle_response_error(
 	self.services
 		.timeline
 		.build_and_append_pdu(PduBuilder::timeline(&content), user_id, room_id, state_lock)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	Ok(())

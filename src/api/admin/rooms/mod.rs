@@ -143,7 +143,7 @@ async fn room_row(services: &Services, room_id: &RoomId) -> RoomDetails {
 		),
 	)
 	.map(|(head, (mid, tail))| (head, mid, tail))
-	.boxed()
+	.boxed() // size firewall
 	.await;
 
 	let (creator, federatable) = create

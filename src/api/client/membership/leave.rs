@@ -36,7 +36,7 @@ pub(crate) async fn leave_room_route(
 		services
 			.delete
 			.delete_if_empty_local(&body.room_id, state_lock)
-			.boxed()
+			.boxed() // cold arm
 			.await;
 	}
 

@@ -70,7 +70,7 @@ pub(crate) async fn create_join_event_v2_route(
 
 	let mut room_state =
 		create_join_event(&services, origin, room_id, &body.pdu, members_omitted)
-			.boxed()
+			.boxed() // size firewall
 			.await?;
 
 	room_state.members_omitted = members_omitted;
@@ -236,7 +236,7 @@ async fn create_join_event(
 	let broadcast = services.sending.send_pdu_room(room_id, &pdu_id);
 
 	let (auth_chain, state, event, ()) = try_join4(auth_chain, state, event, broadcast)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	Ok(create_join_event::v2::RoomState {

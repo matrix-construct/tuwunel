@@ -55,7 +55,7 @@ pub(super) async fn handle_login(
 
 	if cfg!(feature = "ldap") && services.config.ldap.enable {
 		ldap_login(services, &user_id, &lowercased_user_id, password, client)
-			.boxed()
+			.boxed() // cold arm
 			.await
 	} else {
 		password_login(services, &user_id, &lowercased_user_id, password, client).await

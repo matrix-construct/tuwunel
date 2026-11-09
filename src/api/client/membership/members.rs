@@ -68,7 +68,6 @@ pub(crate) async fn get_member_events_route(
 			})
 			.map(Event::into_format)
 			.collect()
-			.boxed()
 			.await,
 	})
 }
@@ -114,7 +113,6 @@ pub(crate) async fn joined_members_route(
 				})
 			})
 			.collect()
-			.boxed()
 			.await,
 	})
 }

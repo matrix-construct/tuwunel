@@ -91,7 +91,7 @@ async fn lookup_actual_dest_with_policy(
 	self.resolve_actual_dest_unchecked(server_name, true)
 		.inspect_ok(|result| self.cache.set_destination(server_name, result))
 		.map_ok(|result| (result, false))
-		.boxed()
+		.boxed() // query-depth firewall
 		.await
 }
 

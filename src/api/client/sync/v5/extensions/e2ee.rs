@@ -139,7 +139,7 @@ async fn collect_room(
 
 	let (current_shortstatehash, device_list_changed) =
 		join(current_shortstatehash, room_keys_changed)
-			.boxed()
+			.boxed() // erase region
 			.await;
 
 	let lists = (device_list_changed, HashSet::new());
@@ -202,7 +202,7 @@ async fn collect_room(
 			.ready_filter(|&user_id| user_id != sender_user)
 			.map(ToOwned::to_owned)
 			.map(|user_id| (MembershipState::Join, user_id))
-			.boxed()
+			.boxed() // Unpin for into_future
 			.into_future()
 	});
 
@@ -241,6 +241,5 @@ async fn collect_room(
 			(changed, left)
 		})
 		.map(Ok)
-		.boxed()
 		.await
 }

@@ -83,7 +83,7 @@ pub(super) async fn ldap_login(
 			services
 				.admin
 				.make_user_admin(lowercased_user_id)
-				.boxed()
+				.boxed() // cold arm
 				.await?;
 		} else if !is_ldap_admin && is_tuwunel_admin {
 			services

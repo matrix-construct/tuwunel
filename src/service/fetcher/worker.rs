@@ -141,6 +141,7 @@ fn push_attempt<'a>(
 	opts: Arc<Opts>,
 	weak: Weak<()>,
 ) {
+	// type-erasure boundary
 	futures.push(async move { (key, self.run_attempts(&opts, &weak).await) }.boxed());
 }
 

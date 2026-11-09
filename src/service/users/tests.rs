@@ -117,6 +117,7 @@ async fn password_locks_are_independent_and_cancel_safe() -> Result {
 
 	let password_guard = users.changing_password.lock(user_a).await;
 
+	// owned pin: drop(queued) cancels it
 	let mut queued = Box::pin(users.set_password_if_active(user_a, Some(NEW_PASSWORD)));
 
 	assert!(poll!(queued.as_mut()).is_pending());

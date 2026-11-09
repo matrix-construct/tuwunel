@@ -87,30 +87,33 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	services
 		.admin
 		.make_user_admin(&first)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	// The only admin is refused on the client route, on the shared deactivation,
 	// and on the account primitive the no-leave and OIDC paths call directly.
 	self_deactivation_is_forbidden(services, base, &first, FIRST_TOKEN)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
+
 	expect_forbidden(
 		services
 			.deactivate
 			.full_deactivate(&first, false)
-			.boxed()
+			.boxed() // size firewall
 			.await,
 		"full deactivation",
 	)?;
+
 	expect_forbidden(
 		services
 			.users
 			.deactivate_account(&first)
-			.boxed()
+			.boxed() // size firewall
 			.await,
 		"account deactivation",
 	)?;
+
 	expect_intact_admin(services, &first).await?;
 
 	// A second active admin lifts the refusal. The no-leave path keeps the
@@ -118,12 +121,13 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	services
 		.admin
 		.make_user_admin(&second)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
+
 	services
 		.users
 		.deactivate_account(&first)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	if !services.users.is_deactivated(&first).await? {
@@ -138,16 +142,18 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	// That deactivated member cannot sign in to act, so it is not a second admin.
 	self_deactivation_is_forbidden(services, base, &second, SECOND_TOKEN)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
+
 	expect_forbidden(
 		services
 			.deactivate
 			.full_deactivate(&second, false)
-			.boxed()
+			.boxed() // size firewall
 			.await,
 		"full deactivation beside a deactivated admin",
 	)?;
+
 	expect_intact_admin(services, &second).await?;
 
 	// Nor does it let the admins room's leave guard pass a revocation.
@@ -179,7 +185,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	services
 		.users
 		.deactivate_account(&services.globals.server_user)
-		.boxed()
+		.boxed() // size firewall
 		.await
 }
 

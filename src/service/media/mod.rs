@@ -881,7 +881,7 @@ impl Service {
 						},
 					}
 				})
-				.boxed()
+				.boxed() // Unpin for next
 				.next()
 				.await
 			{

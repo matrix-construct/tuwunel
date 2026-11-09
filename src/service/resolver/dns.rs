@@ -233,6 +233,7 @@ impl<R: Resolve + 'static> Resolve for Validating<R> {
 			return self.inner.resolve(name);
 		}
 
+		// type-erasure boundary
 		validate_addrs(self.inner.clone(), self.denylist.clone(), name).boxed()
 	}
 }
@@ -275,6 +276,7 @@ impl Resolve for Resolver {
 			&self.resolver
 		};
 
+		// type-erasure boundary
 		resolve_to_reqwest(self.server.clone(), resolver.clone(), name).boxed()
 	}
 }
@@ -296,6 +298,7 @@ impl Resolve for Hooked {
 			&self.resolver
 		};
 
+		// type-erasure boundary
 		hooked_resolve(self.cache.clone(), self.server.clone(), resolver.clone(), name).boxed()
 	}
 }
@@ -303,6 +306,7 @@ impl Resolve for Hooked {
 impl Resolve for Passthru {
 	fn resolve(&self, name: Name) -> Resolving {
 		trace!(?name, "using passthru resolver");
+		// type-erasure boundary
 		resolve_to_reqwest(self.server.clone(), self.resolver.clone(), name).boxed()
 	}
 }
@@ -330,13 +334,9 @@ async fn hooked_resolve(
 					.expect("overriding is set for this record")
 					.expect("overriding is a valid internet name"),
 			)
-			.boxed()
 			.await,
 
-		| _ =>
-			resolve_to_reqwest(server, resolver, name)
-				.boxed()
-				.await,
+		| _ => resolve_to_reqwest(server, resolver, name).await,
 	}
 }
 

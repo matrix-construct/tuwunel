@@ -187,7 +187,7 @@ async fn paginate_relations_with_filter(
 			.get_relations(shortroomid, count, from, dir, Some(sender_user))
 			.map(move |(count, pdu)| (depth, count, pdu))
 			.ready_filter(|(_, count, _)| matches!(count, PduCount::Normal(_)))
-			.boxed()
+			.boxed() // Unpin for select_all
 	};
 
 	let events = unfold(select_all(once(fetch(0, target.count))), async |mut relations| {

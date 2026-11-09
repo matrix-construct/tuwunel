@@ -495,7 +495,7 @@ where
 					source: path::Error::InvalidPath { path: path.into() },
 				})
 		})
-		.boxed();
+		.boxed(); // type-erasure boundary
 
 	self.provider
 		.delete_stream(paths)
@@ -632,7 +632,6 @@ pub async fn ping(&self) -> Result {
 		.inspect_err(|e| {
 			error!(chain = %error_chain(e), "Failed to connect to storage provider");
 		})
-		.boxed()
 		.await
 		.map(|_| ())
 }

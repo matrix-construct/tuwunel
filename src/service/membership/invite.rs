@@ -37,11 +37,10 @@ pub async fn invite(
 ) -> Result {
 	if self.services.globals.user_is_local(user_id) {
 		self.local_invite(sender_user, user_id, room_id, reason, is_direct)
-			.boxed()
 			.await?;
 	} else {
 		self.remote_invite(sender_user, user_id, room_id, reason, is_direct)
-			.boxed()
+			.boxed() // cold arm
 			.await?;
 	}
 

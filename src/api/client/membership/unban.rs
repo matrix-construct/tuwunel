@@ -1,5 +1,4 @@
 use axum::extract::State;
-use futures::FutureExt;
 use ruma::api::client::membership::unban_user;
 use tuwunel_core::Result;
 
@@ -23,7 +22,6 @@ pub(crate) async fn unban_user_route(
 			body.sender_user(),
 			&state_lock,
 		)
-		.boxed()
 		.await?;
 
 	drop(state_lock);

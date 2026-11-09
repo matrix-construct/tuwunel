@@ -1,5 +1,8 @@
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, future::join3};
+use futures::{
+	FutureExt, StreamExt, TryFutureExt,
+	future::{join3, join4, join5},
+};
 use ruma::{
 	OwnedServerName, RoomId, UserId,
 	api::{
@@ -39,7 +42,6 @@ pub(crate) async fn get_room_summary_legacy(
 	body: Ruma<get_summary::v1::Request>,
 ) -> Result<RumaResponse<Response>> {
 	get_room_summary(State(services), ClientIp(client), body)
-		.boxed()
 		.await
 		.map(RumaResponse)
 }
@@ -64,9 +66,7 @@ pub(crate) async fn get_room_summary(
 		return Err!(Request(Forbidden("This room is banned on this homeserver.")));
 	}
 
-	room_summary_response(&services, &room_id, &servers, body.sender_user.as_deref())
-		.boxed()
-		.await
+	room_summary_response(&services, &room_id, &servers, body.sender_user.as_deref()).await
 }
 
 async fn room_summary_response(
@@ -81,7 +81,7 @@ async fn room_summary_response(
 		.await
 	{
 		return local_room_summary_response(services, room_id, sender_user)
-			.boxed()
+			.boxed() // size firewall
 			.await;
 	}
 
@@ -139,11 +139,6 @@ async fn local_room_summary_response(
 		.get_room_topic(room_id)
 		.ok();
 
-	let room_type = services
-		.state_accessor
-		.get_room_type(room_id)
-		.ok();
-
 	let avatar_url = services
 		.state_accessor
 		.get_avatar(room_id)
@@ -151,6 +146,15 @@ async fn local_room_summary_response(
 		.ok()
 		.map(Option::flatten);
 
+	let room_type = services
+		.state_accessor
+		.get_room_type(room_id)
+		.ok();
+
+	let (canonical_alias, name, topic, avatar_url, room_type) =
+		join5(canonical_alias, name, topic, avatar_url, room_type).await;
+
+	// Two rounds overlay in the layout; one nine-way join holds every read at once.
 	let room_version = services.state.get_room_version(room_id).ok();
 
 	let encryption = services
@@ -170,27 +174,8 @@ async fn local_room_summary_response(
 			.map_ok_or(MembershipState::Leave, |content| content.membership)
 	});
 
-	let (
-		canonical_alias,
-		name,
-		num_joined_members,
-		topic,
-		avatar_url,
-		room_type,
-		room_version,
-		encryption,
-		membership,
-	) = futures::join!(
-		canonical_alias,
-		name,
-		num_joined_members,
-		topic,
-		avatar_url,
-		room_type,
-		room_version,
-		encryption,
-		membership,
-	);
+	let (room_version, encryption, num_joined_members, membership) =
+		join4(room_version, encryption, num_joined_members, membership).await;
 
 	Ok(Response {
 		summary: RoomSummary {

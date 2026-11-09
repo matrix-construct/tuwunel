@@ -173,7 +173,7 @@ pub(super) async fn load_room(
 		timeline_changed || full_state || initial,
 		state_after,
 	)
-	.boxed()
+	.boxed() // size firewall
 	.await?;
 
 	let UserMetadata {
@@ -195,7 +195,7 @@ pub(super) async fn load_room(
 		timeline_changed,
 		encrypted_room,
 	)
-	.boxed()
+	.boxed() // size firewall
 	.await;
 
 	let (
@@ -523,7 +523,7 @@ async fn await_join_aggregates(
 		join3(notification_count, highlight_count, thread_counts),
 		device_list_updates,
 	)
-	.boxed()
+	.boxed() // size firewall
 	.await;
 
 	JoinAggregates {

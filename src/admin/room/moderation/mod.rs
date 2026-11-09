@@ -70,7 +70,7 @@ async fn do_ban_room(services: &Services, room_id: &RoomId) {
 		.room_members(room_id)
 		.ready_filter(|user| services.globals.user_is_local(user))
 		.map(ToOwned::to_owned)
-		.boxed();
+		.boxed(); // Unpin for next
 
 	while let Some(ref user_id) = users.next().await {
 		debug!(

@@ -9,7 +9,7 @@ pub(super) async fn overrides_cache(&self, server_name: Option<String>) -> Resul
 	writeln!(self, "| Server Name | IP  | Port | Expires | Overriding |").await?;
 	writeln!(self, "| ----------- | --- | ----:| ------- | ---------- |").await?;
 
-	let mut overrides = self.services.resolver.cache.overrides().boxed();
+	let mut overrides = self.services.resolver.cache.overrides().boxed(); // Unpin for next
 
 	while let Some((name, CachedOverride { ips, port, expire, overriding })) =
 		overrides.next().await

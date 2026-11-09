@@ -1,4 +1,4 @@
-use futures::{FutureExt, StreamExt, TryFutureExt};
+use futures::{FutureExt, StreamExt, TryFutureExt, future::join5};
 use ruma::{
 	RoomId, api::federation::space::SpaceHierarchyParentSummary as ParentSummary,
 	events::space::child::HierarchySpaceChildEvent, room::RoomSummary, serde::Raw,
@@ -96,7 +96,7 @@ pub(super) async fn get_summary_and_children_local(
 
 	let summary = self
 		.get_room_summary(current_room, children_state, sender)
-		.boxed()
+		.boxed() // size firewall
 		.await;
 
 	match summary {
@@ -130,6 +130,12 @@ pub(super) async fn get_room_summary(
 		return Ok(Accessibility::Inaccessible);
 	}
 
+	let canonical_alias = self
+		.services
+		.state_accessor
+		.get_canonical_alias(room_id)
+		.ok();
+
 	let name = self
 		.services
 		.state_accessor
@@ -142,12 +148,23 @@ pub(super) async fn get_room_summary(
 		.get_room_topic(room_id)
 		.ok();
 
+	let avatar_url = self
+		.services
+		.state_accessor
+		.get_avatar(room_id)
+		.map_ok(|content| content.url)
+		.ok();
+
 	let room_type = self
 		.services
 		.state_accessor
 		.get_room_type(room_id)
 		.ok();
 
+	let (canonical_alias, name, topic, avatar_url, room_type) =
+		join5(canonical_alias, name, topic, avatar_url, room_type).await;
+
+	// Two rounds overlay in the layout; one ten-way join holds every read at once.
 	let world_readable = self
 		.services
 		.state_accessor
@@ -164,19 +181,6 @@ pub(super) async fn get_room_summary(
 		.room_joined_count(room_id)
 		.unwrap_or(0);
 
-	let canonical_alias = self
-		.services
-		.state_accessor
-		.get_canonical_alias(room_id)
-		.ok();
-
-	let avatar_url = self
-		.services
-		.state_accessor
-		.get_avatar(room_id)
-		.map_ok(|content| content.url)
-		.ok();
-
 	let room_version = self.services.state.get_room_version(room_id).ok();
 
 	let encryption = self
@@ -185,29 +189,8 @@ pub(super) async fn get_room_summary(
 		.get_room_encryption(room_id)
 		.ok();
 
-	let (
-		canonical_alias,
-		name,
-		num_joined_members,
-		topic,
-		world_readable,
-		guest_can_join,
-		avatar_url,
-		room_type,
-		room_version,
-		encryption,
-	) = futures::join!(
-		canonical_alias,
-		name,
-		num_joined_members,
-		topic,
-		world_readable,
-		guest_can_join,
-		avatar_url,
-		room_type,
-		room_version,
-		encryption,
-	);
+	let (world_readable, guest_can_join, num_joined_members, room_version, encryption) =
+		join5(world_readable, guest_can_join, num_joined_members, room_version, encryption).await;
 
 	let summary = ParentSummary {
 		children_state,

@@ -30,7 +30,7 @@ pub(super) async fn handle_command(
 	services: Arc<Services>,
 	input: &CommandInput,
 ) -> ProcessorResult {
-	AssertUnwindSafe(Box::pin(process_command(&*command, services, input)))
+	AssertUnwindSafe(Box::pin(process_command(&*command, services, input))) // size firewall
 		.catch_unwind()
 		.await
 		.map_err(Error::from_panic)
@@ -138,7 +138,7 @@ async fn process(
 	let (capture, logs) = capture_create(context);
 
 	let capture_scope = capture.start();
-	let result = Box::pin(command.dispatch(matches, context)).await;
+	let result = command.dispatch(matches, context).await;
 	drop(capture_scope);
 
 	debug!(

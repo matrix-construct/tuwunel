@@ -145,7 +145,7 @@ pub(super) async fn gather_room_metadata(
 		receipt_events,
 		encrypted_room,
 	)
-	.boxed()
+	.boxed() // erase region
 	.await;
 
 	Ok(RoomMetadata {
@@ -320,7 +320,7 @@ pub(super) async fn calculate_state_changes<'a>(
 		services
 			.state_accessor
 			.state_added((since_shortstatehash, horizon_shortstatehash))
-			.boxed()
+			.boxed() // Unpin for into_future
 			.into_future()
 	});
 
@@ -328,7 +328,7 @@ pub(super) async fn calculate_state_changes<'a>(
 		services
 			.state_accessor
 			.state_full_shortids(horizon_shortstatehash)
-			.boxed()
+			.boxed() // Unpin for into_future
 			.into_future()
 	});
 

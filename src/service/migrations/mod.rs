@@ -410,7 +410,7 @@ pub(crate) async fn fresh(services: &Services) -> Result {
 	// Create the admin room and server user on first run
 	if services.config.admin.room.create {
 		crate::admin::create_admin_room(services)
-			.boxed()
+			.boxed() // size firewall
 			.await?;
 	}
 

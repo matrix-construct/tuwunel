@@ -1,5 +1,4 @@
 use axum::extract::State;
-use futures::FutureExt;
 use ruma::{
 	OwnedRoomId, OwnedUserId,
 	api::federation::membership::create_leave_event,
@@ -130,7 +129,6 @@ pub(crate) async fn create_leave_event_v2_route(
 	services
 		.sending
 		.send_pdu_room(room_id, &pdu_id)
-		.boxed()
 		.await?;
 
 	Ok(create_leave_event::v2::Response::new())

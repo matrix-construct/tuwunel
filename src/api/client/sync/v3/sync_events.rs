@@ -387,7 +387,7 @@ async fn build_sync_events(
 		),
 		join4(joined_rooms, left_rooms, invited_rooms, knocked_rooms),
 	)
-	.boxed()
+	.boxed() // size firewall
 	.await;
 
 	device_list_updates.extend(keys_changed);
@@ -620,6 +620,5 @@ async fn process_presence_updates(
 		})
 		.map(|(user_id, event)| (user_id.to_owned(), event.content))
 		.collect()
-		.boxed()
 		.await
 }

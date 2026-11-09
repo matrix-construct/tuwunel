@@ -92,7 +92,7 @@ pub(crate) async fn get_backfill_route(
 					.map(Ok)
 			})
 			.try_collect()
-			.boxed()
+			.boxed() // size firewall
 			.await?,
 	})
 }

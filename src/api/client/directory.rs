@@ -450,7 +450,7 @@ async fn public_rooms_chunk(services: &Services, room_id: OwnedRoomId) -> Public
 		join5(avatar_url, canonical_alias, guest_can_join, join_rule, name),
 		join4(num_joined_members, room_type, topic, world_readable),
 	)
-	.boxed()
+	.boxed() // size firewall
 	.await;
 
 	PublicRoomsChunk {

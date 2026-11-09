@@ -93,6 +93,7 @@ pub(crate) async fn append_pdu(&self, pdu_id: RawPduId, pdu: &Pdu) -> Result {
 		.get_power_levels(pdu.room_id())
 		.ok();
 
+	// Send generality
 	let (mut push_target, power_levels) = join(push_target, power_levels).boxed().await;
 
 	if *pdu.kind() == TimelineEventType::RoomMember

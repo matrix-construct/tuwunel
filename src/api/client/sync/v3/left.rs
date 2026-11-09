@@ -303,7 +303,7 @@ async fn load_left_room(
 			after_shortstatehash,
 			left_shortstatehash,
 		)
-		.boxed()
+		.boxed() // erase region
 		.await;
 
 	let StateChanges { state_events, .. } =
@@ -318,7 +318,6 @@ async fn load_left_room(
 			witness: None,
 			include_heroes: true,
 		})
-		.boxed()
 		.await?;
 
 	let is_sender_membership = |event: &PduEvent| {
@@ -391,9 +390,7 @@ async fn load_left_room(
 		.collect();
 
 	let (state_events, account_data_events, timeline_events) =
-		join3(state_events, account_data_events, timeline_events)
-			.boxed()
-			.await;
+		join3(state_events, account_data_events, timeline_events).await;
 
 	let state = state_after.wrap(StateEvents { events: state_events });
 

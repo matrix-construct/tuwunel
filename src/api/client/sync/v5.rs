@@ -16,7 +16,7 @@ use std::{
 };
 
 use axum::extract::{Extension, State};
-use futures::{FutureExt, TryFutureExt, future::join};
+use futures::{TryFutureExt, future::join};
 use ruma::{
 	DeviceId, OwnedRoomId, RoomId, UserId,
 	api::client::sync::sync_events::v5::{ListId, Request, Response, response},
@@ -52,6 +52,7 @@ use self::{
 		handle as handle_extensions, to_device_pending,
 	},
 	range::collect as collect_ranges,
+	selector::selector,
 };
 use super::{joined_since, share_encrypted_room};
 use crate::{ClientIp, Ruma, utils::poll_deadline};
@@ -246,14 +247,12 @@ pub(crate) async fn sync_events_v5_route(
 			direct_rooms: &direct_rooms,
 		};
 
-		(window, response.lists) = selector::selector(&mut conn, sync_info)
-			.boxed()
-			.await;
+		(window, response.lists) = selector(&mut conn, sync_info).await;
 
 		if conn.globalsince < conn.next_batch {
 			let ranges = collect_ranges(sync_info, &conn, &window);
 			let extensions = handle_extensions(sync_info, &conn, &window);
-			let (mut ranges, extensions) = join(ranges, extensions).boxed().await;
+			let (mut ranges, extensions) = join(ranges, extensions).await;
 
 			let mut extensions = extensions?;
 
@@ -278,7 +277,7 @@ pub(crate) async fn sync_events_v5_route(
 			}
 		};
 
-		if timeout == 0 || services.server.is_stopping() || waiter().boxed().await {
+		if timeout == 0 || services.server.is_stopping() || waiter().await {
 			return respond(services, (&conn_key, &conn_val), &conn, response).await;
 		}
 

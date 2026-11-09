@@ -99,6 +99,7 @@ fn hierarchy_rejects_wrong_root_and_prefers_joined_local_state() -> Result {
 	];
 
 	boot("hierarchy-cache-authority", options, async move |services, base| {
+		// size firewall
 		Box::pin(exercise(Exercise {
 			services,
 			base,
@@ -272,6 +273,7 @@ async fn exercise(args: Exercise<'_>) -> Result {
 
 	let outcome = timeout(
 		TIMEOUT,
+		// size firewall
 		Box::pin(async {
 			let (summary, membership) = join(request, membership).await;
 

@@ -114,7 +114,7 @@ pub(crate) async fn create_room_route(
 
 	// 2. Let the room creator join
 	apply_creator_join_pdu(&services, &body, sender_user, &room_id, &state_lock)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	// 3. Power levels
@@ -127,20 +127,20 @@ pub(crate) async fn create_room_route(
 		&room_id,
 		&state_lock,
 	)
-	.boxed()
+	.boxed() // size firewall
 	.await?;
 
 	// 4. Canonical room alias
 	if let Some(room_alias_id) = &alias {
 		apply_canonical_alias_pdu(&services, room_alias_id, sender_user, &room_id, &state_lock)
-			.boxed()
+			.boxed() // cold arm
 			.await?;
 	}
 
 	// 5. Events set by preset
 	let initial_state =
 		apply_preset_state_pdus(&services, &body, &preset, sender_user, &room_id, &state_lock)
-			.boxed()
+			.boxed() // size firewall
 			.await?;
 
 	// 6. Events listed in initial_state
@@ -152,12 +152,12 @@ pub(crate) async fn create_room_route(
 		&room_id,
 		&state_lock,
 	)
-	.boxed()
+	.boxed() // size firewall
 	.await?;
 
 	// 7. Events implied by name and topic
 	apply_name_and_topic_pdus(&services, &body, sender_user, &room_id, &state_lock)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	drop(next_count);
@@ -170,7 +170,7 @@ pub(crate) async fn create_room_route(
 			.is_ok()
 	{
 		process_invites(&services, &body, sender_user, &room_id)
-			.boxed()
+			.boxed() // size firewall
 			.await;
 	}
 
@@ -379,14 +379,14 @@ async fn apply_preset_state_pdus(
 	services
 		.timeline
 		.build_and_append_pdu(join_rule_pdubuilder, sender_user, room_id, state_lock)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	// 5.2 History Visibility
 	services
 		.timeline
 		.build_and_append_pdu(history_visibility_pdubuilder, sender_user, room_id, state_lock)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	// 5.3 Guest Access
@@ -394,7 +394,7 @@ async fn apply_preset_state_pdus(
 		services
 			.timeline
 			.build_and_append_pdu(guest_access, sender_user, room_id, state_lock)
-			.boxed()
+			.boxed() // size firewall
 			.await?;
 	}
 
@@ -423,7 +423,7 @@ async fn apply_initial_state_pdus(
 		services
 			.timeline
 			.build_and_append_pdu(event.into(), sender_user, room_id, state_lock)
-			.boxed()
+			.boxed() // size firewall
 			.await?;
 	}
 
@@ -458,7 +458,7 @@ async fn apply_initial_state_pdus(
 			room_id,
 			state_lock,
 		)
-		.boxed()
+		.boxed() // cold arm
 		.await?;
 
 	Ok(())
@@ -496,7 +496,7 @@ async fn apply_name_and_topic_pdus(
 				room_id,
 				state_lock,
 			)
-			.boxed()
+			.boxed() // size firewall
 			.await?;
 	}
 
@@ -509,7 +509,7 @@ async fn apply_name_and_topic_pdus(
 				room_id,
 				state_lock,
 			)
-			.boxed()
+			.boxed() // cold arm
 			.await?;
 	}
 
@@ -533,7 +533,7 @@ async fn process_invites(
 			if let Err(e) = services
 				.membership
 				.invite(sender_user, user_id, room_id, None, body.is_direct)
-				.boxed()
+				.boxed() // size firewall
 				.await
 			{
 				warn!(%e, "Failed to send invite");
@@ -700,7 +700,7 @@ async fn create_create_event(
 			&room_id,
 			&state_lock,
 		)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	drop(state_lock);
@@ -799,7 +799,7 @@ async fn create_create_event_legacy(
 			&room_id,
 			&state_lock,
 		)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	Ok((room_id, state_lock))

@@ -6,7 +6,7 @@
 
 use std::{collections::BTreeMap, convert::identity, fmt::Debug};
 
-use futures::{FutureExt, StreamExt, TryFutureExt};
+use futures::{StreamExt, TryFutureExt};
 use ruma::{
 	OwnedServerName, OwnedServerSigningKeyId, ServerName, ServerSigningKeyId,
 	api::federation::discovery::{
@@ -145,7 +145,6 @@ where
 				"Requesting keys from notary server failed: {e}",
 			);
 		})
-		.boxed()
 		.await
 }
 

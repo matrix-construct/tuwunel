@@ -1,5 +1,4 @@
 use axum::extract::State;
-use futures::FutureExt;
 use ruma::api::client::membership::kick_user;
 use tuwunel_core::{Err, Result};
 
@@ -23,7 +22,6 @@ pub(crate) async fn kick_user_route(
 	services
 		.membership
 		.kick(&body.room_id, &body.user_id, body.reason.as_ref(), sender_user, &state_lock)
-		.boxed()
 		.await?;
 
 	drop(state_lock);

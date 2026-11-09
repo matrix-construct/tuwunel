@@ -246,7 +246,6 @@ async fn send_state_event_for_key_helper(
 			room_id,
 			&state_lock,
 		)
-		.boxed()
 		.await?;
 
 	Ok(event_id)

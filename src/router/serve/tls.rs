@@ -57,7 +57,7 @@ fn serve_dual_protocol<'a>(
 				.set_upgrade(false)
 				.handle(handle.clone())
 				.serve(app.clone())
-				.boxed();
+				.boxed(); // heterogeneous Vec<BoxFuture>
 
 			Ok(acceptor)
 		})
@@ -75,7 +75,7 @@ fn serve_tls<'a>(
 			let acceptor = from_tcp_rustls(listener, conf.clone())?
 				.handle(handle.clone())
 				.serve(app.clone())
-				.boxed();
+				.boxed(); // heterogeneous Vec<BoxFuture>
 
 			Ok(acceptor)
 		})

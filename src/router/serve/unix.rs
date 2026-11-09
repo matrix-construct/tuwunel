@@ -29,7 +29,7 @@ pub(super) async fn serve<'a>(
 			Ok(axum_server::from_unix(listener)?
 				.handle(handle.clone())
 				.serve(router.clone())
-				.boxed())
+				.boxed()) // heterogeneous Vec<BoxFuture>
 		})
 		.collect::<Result<Vec<_>>>()?;
 
@@ -72,7 +72,7 @@ pub(super) async fn serve<'a>(
 					}
 				}
 			})
-			.boxed();
+			.boxed(); // heterogeneous Vec<BoxFuture>
 
 		acceptors.push(bound_acceptor);
 	}
