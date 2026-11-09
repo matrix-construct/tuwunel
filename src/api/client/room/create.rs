@@ -352,7 +352,7 @@ async fn apply_preset_state_pdus(
 			// client/appservice workaround: if a user sends an initial_state event with a
 			// state event in there with the content of literally `{}` (not null or empty
 			// string), let's just skip it over and warn.
-			if event.content.json().get() == "{}" {
+			if is_empty_content(event) {
 				debug_warn!("skipping empty initial state event of type {}", event.event_type);
 				false
 			} else {
@@ -1070,7 +1070,14 @@ fn check_initial_member_content(services: &Services, initial_events: &[InitialEv
 	initial_events
 		.iter()
 		.filter(|event| event.event_type == StateEventType::RoomMember)
+		.filter(|event| !is_empty_content(event))
 		.try_for_each(|event| {
+			// Appending parses this too, but by then the room exists.
+			event
+				.content
+				.deserialize_as_unchecked::<RoomMemberEventContent>()
+				.map_err(|e| err!(Request(BadJson("Invalid initial member event: {e}"))))?;
+
 			let content = event.content.deserialize()?;
 			let displayname = content
 				.get("displayname")
@@ -1083,6 +1090,8 @@ fn check_initial_member_content(services: &Services, initial_events: &[InitialEv
 			check_member_content(max_bytes, serialized_len(&content)?, displayname, avatar_url)
 		})
 }
+
+fn is_empty_content(event: &InitialEvent) -> bool { event.content.json().get() == "{}" }
 
 async fn can_create_room_check(
 	services: &Services,

@@ -296,53 +296,45 @@ async fn create_initial_member_limit(owner: &Client<'_>, user_id: &UserId) -> Re
 		})
 	};
 
-	let oversized = json!({
-		"preset": "public_chat",
-		"initial_state": [initial(padded_member("join", "over", 5000))],
-	});
+	let create = async |content: Value| {
+		let body = json!({ "preset": "public_chat", "initial_state": [initial(content)] });
 
+		owner.post_url(&create_url, &body).await
+	};
+
+	let expect_refused = async |content: Value, subject: &str| {
+		expect_bad_json(create(content).await?, subject).await
+	};
+
+	let member = |key: &str, value: Value| json!({ "membership": "join", (key): value });
 	let rooms_before = joined_room_count(owner).await?;
 
-	let refused = owner.post_url(&create_url, &oversized).await?;
+	expect_refused(padded_member("join", "over", 5000), "oversized initial member event").await?;
 
-	expect_bad_json(refused, "oversized initial member event").await?;
+	expect_refused(
+		member("displayname", json!("z".repeat(257))),
+		"257-character initial member display name",
+	)
+	.await?;
 
-	let too_long = json!({
-		"preset": "public_chat",
-		"initial_state": [initial(json!({
-			"membership": "join",
-			"displayname": "z".repeat(257),
-		}))],
-	});
+	expect_refused(
+		member("avatar_url", json!("mxc://localhost/caf\u{e9}")),
+		"non-ASCII initial member avatar",
+	)
+	.await?;
 
-	let refused = owner.post_url(&create_url, &too_long).await?;
-
-	expect_bad_json(refused, "257-character initial member display name").await?;
-
-	let invalid_avatar = json!({
-		"preset": "public_chat",
-		"initial_state": [initial(json!({
-			"membership": "join",
-			"avatar_url": "mxc://localhost/caf\u{e9}",
-		}))],
-	});
-
-	let refused = owner
-		.post_url(&create_url, &invalid_avatar)
-		.await?;
-
-	expect_bad_json(refused, "non-ASCII initial member avatar").await?;
+	for key in ["displayname", "avatar_url"] {
+		expect_refused(member(key, json!(123)), key).await?;
+	}
 
 	BoolExt::ok_or_else(joined_room_count(owner).await? == rooms_before, || {
 		err!("refused createRoom left a room behind")
 	})?;
 
-	let fitting = json!({
-		"preset": "public_chat",
-		"initial_state": [initial(padded_member("join", "fits", 3000))],
-	});
+	// An entry with literally empty content is skipped, not refused.
+	accepted(create(json!({})).await?).await?;
 
-	let created = accepted(owner.post_url(&create_url, &fitting).await?).await?;
+	let created = accepted(create(padded_member("join", "fits", 3000)).await?).await?;
 	let room: OwnedRoomId = field(&created, "room_id")?.try_into()?;
 
 	expect_member(owner, &room, user_id, "fitting initial member event", &[(
