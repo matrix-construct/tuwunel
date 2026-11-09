@@ -1,5 +1,7 @@
+use std::borrow::Cow;
+
 use ruma::{
-	CanonicalJsonValue, OwnedUserId,
+	CanonicalJsonValue, DeviceId, OwnedUserId, UserId,
 	api::{
 		IncomingRequest,
 		client::uiaa::{AuthData, AuthFlow, AuthType, UiaaInfo},
@@ -9,7 +11,7 @@ use serde_json::{json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Error, Result, err, is_equal_to, utils,
 	utils::{
-		OptionExt,
+		BoolExt, OptionExt,
 		future::{OptionFutureExt, TryExtExt},
 	},
 };
@@ -49,42 +51,15 @@ where
 			.unwrap_or(false)
 			.await;
 
-	// Determine the exact IdP to bind to the UIAA session.
-	//
-	// The correct binding comes from the device that made this request, not
-	// from a heuristic scan of all user sessions.  Rules:
-	//
-	//  1. Preferred: the device is tagged with an idp_id from when it was created
-	//     via the OIDC token endpoint → use that idp_id directly. This is exact and
-	//     correct even on multi-provider servers.
-	//  2. Fallback: the device has no idp tag (pre-dates the idp_id field or was
-	//     created through a legacy path) but origin=="sso" and only one provider is
-	//     configured → routing is still unambiguous.
-	//  3. Otherwise: cannot determine provider → do NOT advertise m.login.sso.
 	let sso_flow = [AuthType::Sso];
-	let bound_idp: Option<String> = sender_user
-		.map_async(async |sender_user| {
-			body.sender_device
-				.as_deref()
-				.map_async(async |device_id| {
-					services
-						.users
-						.get_oidc_device_idp(sender_user, device_id)
-						.await
-						.filter(|s| !s.is_empty())
-				})
-				.await
-				.flatten()
-				.or_else(|| {
-					let use_sso = user_origin
-						.as_deref()
-						.is_some_and(is_equal_to!("sso"))
-						&& services.config.identity_provider.len() == 1;
-
-					use_sso
-						.then(|| services.oauth.providers.get_default_id())
-						.flatten()
-				})
+	let bound_idp = sender_user
+		.map_async(|sender_user| {
+			select_idp(
+				services,
+				sender_user,
+				body.sender_device.as_deref(),
+				user_origin.as_deref(),
+			)
 		})
 		.await
 		.flatten();
@@ -165,9 +140,7 @@ where
 				let sender_device = body.sender_device()?;
 				uiaainfo.session = Some(utils::random_string(SESSION_ID_LENGTH));
 
-				// Bind the exact IdP determined above into the UIAA session so
-				// the SSO fallback page can route re-authentication to the
-				// correct provider without any further heuristic lookups.
+				// The SSO fallback page routes re-authentication to the provider bound here.
 				if let Some(ref idp) = bound_idp {
 					uiaainfo.params = to_raw_value(&json!({
 						"m.login.sso": {
@@ -186,4 +159,49 @@ where
 			| _ => Err!(Request(NotJson("JSON body is not valid"))),
 		},
 	}
+}
+
+/// Choose the identity provider to bind to the UIAA session's SSO stage.
+///
+/// A device the OIDC token endpoint tagged binds its own provider. Otherwise an
+/// `sso` account on a single-provider server binds that provider. Failing both,
+/// it binds a configured provider that one of the account's sessions links,
+/// preferring the default. The SSO callback completes the stage only for an
+/// identity that resolves to the UIAA session's owner.
+async fn select_idp<'a>(
+	services: &'a Services,
+	sender_user: &UserId,
+	sender_device: Option<&DeviceId>,
+	user_origin: Option<&str>,
+) -> Option<Cow<'a, str>> {
+	let tagged = sender_device
+		.map_async(|device_id| {
+			services
+				.users
+				.get_oidc_device_idp(sender_user, device_id)
+		})
+		.await
+		.flatten()
+		.map(Cow::Owned)
+		.or_else(|| {
+			let single = user_origin.is_some_and(is_equal_to!("sso"))
+				&& services.config.identity_provider.len() == 1;
+
+			single
+				.and_then(|| services.oauth.providers.find_default_config())
+				.map(|provider| Cow::Borrowed(provider.id()))
+		});
+
+	tagged
+		.is_none()
+		.then_async(|| {
+			services
+				.oauth
+				.sessions
+				.linked_provider(sender_user)
+		})
+		.await
+		.flatten()
+		.map(Cow::Borrowed)
+		.or(tagged)
 }

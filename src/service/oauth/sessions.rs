@@ -2,6 +2,7 @@ mod adopt;
 pub mod association;
 
 use std::{
+	collections::BTreeSet,
 	fmt::Display,
 	iter::once,
 	sync::{Arc, Mutex},
@@ -13,7 +14,7 @@ use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{OwnedUserId, UserId};
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
-	Err, Error, Result, at, err, implement,
+	Err, Error, Result, at, debug_warn, err, implement,
 	itertools::Itertools,
 	redacted_debug,
 	result::NotFound,
@@ -423,6 +424,40 @@ pub async fn get_by_unique_id(&self, unique_id: &str) -> Result<Session> {
 	self.get_sess_id_by_unique_id(unique_id)
 		.and_then(async |sess_id| self.get(&sess_id).await)
 		.await
+}
+
+/// Choose the linked, configured provider to bind a user's re-authentication.
+///
+/// Each linked provider id resolves against the configuration, and
+/// `Providers::find_preferred_config` picks among those that remain configured.
+/// An unreadable session is skipped.
+#[implement(Sessions)]
+#[tracing::instrument(level = "debug", skip(self), ret(level = "debug"))]
+pub async fn linked_provider(&self, user_id: &UserId) -> Option<&str> {
+	let linked: BTreeSet<_> = self
+		.get_by_user(user_id)
+		.ready_filter_map(|session| {
+			session
+				.optional()
+				.inspect_err(
+					|error| debug_warn!(%user_id, %error, "Skipping unreadable session."),
+				)
+				.ok()
+				.flatten()?
+				.idp_id
+		})
+		.ready_filter_map(|idp_id| {
+			self.providers
+				.find_config(&idp_id)
+				.map(Provider::id)
+				.ok()
+		})
+		.collect()
+		.await;
+
+	self.providers
+		.find_preferred_config(|provider| linked.contains(provider.id()))
+		.map(Provider::id)
 }
 
 /// Fetch database state for one or more sessions from its associated `user_id`,

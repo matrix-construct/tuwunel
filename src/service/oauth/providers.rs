@@ -86,6 +86,26 @@ pub fn get_default_id(&self) -> Option<String> {
 		.map(ToOwned::to_owned)
 }
 
+/// Borrow the admin-configured Provider preferred among those `admit` accepts.
+///
+/// The provider `find_default_config` selects wins when accepted; otherwise the
+/// first accepted one in configured order stands in.
+#[implement(Providers)]
+pub fn find_preferred_config<Admit>(&self, admit: Admit) -> Option<&Provider>
+where
+	Admit: Fn(&Provider) -> bool,
+{
+	let providers = &self.services.config.identity_provider;
+
+	self.find_default_config()
+		.filter(|provider| admit(provider))
+		.or_else(|| {
+			providers
+				.values()
+				.find(|provider| admit(provider))
+		})
+}
+
 /// Borrow the admin-configured Provider considered "default".
 ///
 /// The provider marked `default` wins; otherwise the first configured one
