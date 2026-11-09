@@ -61,7 +61,7 @@ use self::{
 	heroes::calculate_heroes,
 };
 use super::{
-	super::{load_timeline_fallible, own_departure, stand_in_leave, strip_prev_state},
+	super::{load_timeline_fallible, own_departure, stand_in_leave, strip_state_unsigned},
 	Connection, ListIds, SyncInfo, WindowRoom, departed, stripped_content, stripped_state,
 };
 use crate::{ignored_filter, with_membership};
@@ -334,7 +334,8 @@ async fn leave_or_ban_response(
 			.optional()
 			.inspect_err(|error| warn!(%room_id, %sender_user, %error, "Unreadable member event"))
 			.ok()
-			.flatten(),
+			.flatten()
+			.map(|event| event.without_private_unless_sender(Some(sender_user))),
 		| _ => own_departure(services, room_id, sender_user).await,
 	};
 
@@ -760,7 +761,7 @@ async fn collect_required_state(
 				.map_err(unread_key)?;
 
 			let pdu = with_membership(services, pdu, sender_user, encrypted).await;
-			let pdu = strip_prev_state(pdu, sender_user, in_timeline);
+			let pdu = strip_state_unsigned(pdu, sender_user, in_timeline);
 
 			let settled = left_unread.then(|| required_state_hash(&event_type, &state_key));
 

@@ -476,6 +476,7 @@ async fn build_state_response(
 		.broad_filter_map(|event_id: &OwnedEventId| {
 			services.timeline.get_pdu(event_id.as_ref()).ok()
 		})
+		.map(|pdu| pdu.without_private_unless_sender(Some(sender_user)))
 		.broad_then(|pdu| with_membership(services, pdu, sender_user, encrypted))
 		.map(Event::into_format)
 		.collect()

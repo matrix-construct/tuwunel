@@ -250,7 +250,9 @@ pub async fn get_messages(
 		.map(IterStream::stream)
 		.into_stream()
 		.flatten()
-		.broad_filter_map(async |user_id| get_member_event(services, room_id, &user_id).await)
+		.broad_filter_map(async |user_id| {
+			get_member_event(services, sender_user, room_id, &user_id).await
+		})
 		.collect()
 		.await;
 
@@ -324,12 +326,14 @@ where
 
 async fn get_member_event(
 	services: &Services,
+	sender_user: &UserId,
 	room_id: &RoomId,
 	user_id: &UserId,
 ) -> Option<Raw<AnyStateEvent>> {
 	services
 		.state_accessor
 		.room_state_get(room_id, &StateEventType::RoomMember, user_id.as_str())
+		.map_ok(|event| event.without_private_unless_sender(Some(sender_user)))
 		.map_ok(Event::into_format)
 		.await
 		.ok()

@@ -70,6 +70,8 @@ pub(crate) async fn room_initial_sync_route(
 	let state = services
 		.state_accessor
 		.state_full_pdus_strict(shortstatehash)
+		.map_ok(Event::into_pdu)
+		.map_ok(|pdu| pdu.without_private_unless_sender(Some(sender_user)))
 		.map_ok(Event::into_format)
 		.try_collect::<Vec<_>>();
 

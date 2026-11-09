@@ -46,7 +46,7 @@ use self::notifications::{
 	in_window, send_thread_counts,
 };
 use super::{
-	super::{load_timeline, strip_prev_state, timeline_prev_batch},
+	super::{load_timeline, strip_state_unsigned, timeline_prev_batch},
 	StateAfter, StateChangeParams, StateChanges,
 	state::{
 		UserMetadata, calculate_state_changes, gather_room_metadata, gather_user_metadata,
@@ -873,7 +873,7 @@ async fn assemble_state_events(
 		.filter(include_in_state)
 		.stream()
 		.wide_then(|pdu| with_membership(services, pdu, sender_user, encrypted))
-		.map(|pdu| strip_prev_state(pdu, sender_user, &in_timeline))
+		.map(|pdu| strip_state_unsigned(pdu, sender_user, &in_timeline))
 		.map(|pdu| trim_event_fields(pdu.into_format(), event_fields))
 		.collect()
 		.await

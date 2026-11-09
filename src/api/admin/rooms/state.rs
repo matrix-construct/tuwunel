@@ -46,6 +46,7 @@ pub(crate) async fn admin_room_state_route(
 	};
 
 	let state = pdus
+		.map_ok(|pdu| pdu.without_private_unless_sender(Some(sender_user)))
 		.broad_and_then(async |pdu| {
 			Ok(with_membership(&services, pdu, sender_user, encrypted).await)
 		})

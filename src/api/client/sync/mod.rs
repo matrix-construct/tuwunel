@@ -268,18 +268,22 @@ fn invite_sender(
 		})
 }
 
-/// State sections strip the stored `prev_content`/`prev_sender` pair
-/// (Synapse injects the pair on timeline fetches only). The requester's own
-/// membership and events duplicated from the returned timeline (MSC4222,
-/// full_state) keep it: clients read membership transitions from those
-/// copies.
-fn strip_prev_state(
+/// Strips the unsigned fields a state section does not serve.
+///
+/// Fields private to the sender go unless the requester sent the event. The
+/// stored `prev_content`/`prev_sender` pair goes too (Synapse injects it on
+/// timeline fetches only), except on the requester's own membership and on
+/// events duplicated from the returned timeline (MSC4222, full_state), the
+/// copies clients read membership transitions from.
+fn strip_state_unsigned(
 	mut pdu: PduEvent,
 	sender_user: &UserId,
 	in_timeline: impl Fn(&PduEvent) -> bool,
 ) -> PduEvent {
 	let own_membership =
 		*pdu.kind() == RoomMember && pdu.state_key() == Some(sender_user.as_str());
+
+	pdu.remove_private_unless_sender(Some(sender_user));
 
 	if !own_membership && !in_timeline(&pdu) {
 		pdu.remove_prev_state().log_err().ok();
@@ -293,7 +297,9 @@ fn strip_prev_state(
 /// A ban counts, since the membership indexes file a banned user as left. Any
 /// other membership yields `None`, as a room this server left still holds the
 /// invite a later rescission withdrew. A failed read is logged and yields `None`
-/// too, so the client still learns of the departure.
+/// too, so the client still learns of the departure. A kick or ban is sent by
+/// someone else, so fields private to the sender are removed unless the user
+/// sent it.
 async fn own_departure(
 	services: &Services,
 	room_id: &RoomId,
@@ -313,6 +319,7 @@ async fn own_departure(
 				Some(MembershipState::Leave | MembershipState::Ban)
 			)
 		})
+		.map(|event| event.without_private_unless_sender(Some(user_id)))
 }
 
 /// Builds a minimal leave event for a left room whose state supplies none.

@@ -36,7 +36,7 @@ use tuwunel_service::Services;
 
 use super::{
 	super::{
-		load_timeline, own_departure, stand_in_leave, strip_prev_state, timeline_prev_batch,
+		load_timeline, own_departure, stand_in_leave, strip_state_unsigned, timeline_prev_batch,
 	},
 	StateAfter, StateChangeParams, StateChanges, missing_room_state,
 	state::calculate_state_changes,
@@ -352,7 +352,7 @@ async fn load_left_room(
 		.chain(timeline_sender_member)
 		.stream()
 		.wide_then(|pdu| with_membership(services, pdu, sender_user, encrypted))
-		.map(|pdu| strip_prev_state(pdu, sender_user, &in_timeline))
+		.map(|pdu| strip_state_unsigned(pdu, sender_user, &in_timeline))
 		.map(|pdu| trim_event_fields(pdu.into_format(), event_fields))
 		.collect();
 

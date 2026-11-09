@@ -141,7 +141,7 @@ async fn category_room_events(
 		.stream()
 		.ready_filter(|_| criteria.include_state.is_some_and(is_true!()))
 		.filter_map(async |(room_id, ..)| {
-			procure_room_state(services, room_id)
+			procure_room_state(services, sender_user, room_id)
 				.map_ok(|state| (room_id.clone(), state))
 				.await
 				.ok()
@@ -306,10 +306,16 @@ where
 		.await
 }
 
-async fn procure_room_state(services: &Services, room_id: &RoomId) -> Result<RoomState> {
+async fn procure_room_state(
+	services: &Services,
+	sender_user: &UserId,
+	room_id: &RoomId,
+) -> Result<RoomState> {
 	let state = services
 		.state_accessor
 		.room_state_full_pdus(room_id)
+		.map_ok(Event::into_pdu)
+		.map_ok(|pdu| pdu.without_private_unless_sender(Some(sender_user)))
 		.map_ok(Event::into_format)
 		.try_collect()
 		.await?;
