@@ -71,33 +71,41 @@ never execute in CI, because bake's `inherits` copies target attributes rather
 than creating a stage dependency, and both other stages derive from
 `nix-base`.
 
-`nix.yml` is the publishing path. It enumerates attributes with
-`nix flake show` rather than hardcoding a list, so outputs added to the flake
-are published without editing the workflow. Uploads come from the post-build
-hook installed by `cachix-action`, which captures every path realised during
-the job.
+### Publishing with `nix.yml`
 
-Unlike the bake targets, it runs Nix directly on the runner rather than inside
-a container, so it depends on the runner's own installation. The
+`nix.yml` enumerates attributes with `nix flake show`, so outputs added to the
+flake are published without editing the workflow. Uploads come from the
+post-build hook installed by `cachix-action`, which captures every path
+realised during the job.
+
+A full pass is expensive. The flake currently exposes 32 packages per system,
+including cross-compiled static binaries, OCI images, and debug variants. Each
+matrix entry is its own job. Use the `attrs` dispatch input to publish a subset
+and `max-parallel` to bound how much of the runner pool a run takes.
+
+### Runner requirements
+
+Unlike the bake targets, `nix.yml` runs Nix directly on the runner rather than
+inside a container, so it depends on the runner's own installation. The
 `.github/actions/install-nix` action absorbs the two ways that differs from a
 hosted runner: it reuses an existing Nix rather than installing over one, and
-it points `build-dir` at the runner's temp directory. That second part is not
-optional on the self-hosted pool. Nix 2.30 moved build directories under
-`/nix/var/nix/builds`, which is root-owned there while the rest of the store
-belongs to the runner user, so every build fails with a permission error while
-evaluation keeps working and hides the cause.
+it points `build-dir` at the runner's temp directory.
 
-Nix builds run the unit tests but not the integration ones. The targets under
-`src/main/tests` each boot a server, and a Nix builder has no network, denies
-`io_uring`, and offers no resolver configuration, so they cannot run there. The
-`unit` and `integ` CI jobs cover them with those things available. What the Nix
-check phase is for is confirming that the nixpkgs-linked build of our own crates
-works at all, and the unit tests do that.
+> [!IMPORTANT]
+> Setting `build-dir` is required on the self-hosted pool. Nix 2.30 moved build
+> directories under `/nix/var/nix/builds`, which is root-owned there while the
+> rest of the store belongs to the runner user. Without this setting, every
+> build fails with a permission error while evaluation keeps working and hides
+> the cause.
 
-A full pass is expensive. The flake currently exposes 54 packages per system,
-including cross-compiled static binaries, OCI images, and debug variants, and
-each matrix entry is its own job. Use the `attrs` dispatch input to publish a
-subset, and `max-parallel` to bound how much of the runner pool a run takes.
+Nix builds run the unit tests but not the integration tests. The targets under
+`src/main/tests` each boot a server. A Nix builder has no network, denies
+`io_uring`, and offers no resolver configuration, so these tests cannot run
+there. The `unit` and `integ` CI jobs run them with those facilities available.
+The Nix check phase uses unit tests to confirm that the nixpkgs-linked build
+of our own crates works.
+
+### Cache contents
 
 The producers upload build closures rather than only final outputs, and the two
 caches then keep different amounts of that. Cachix skips any path already served
