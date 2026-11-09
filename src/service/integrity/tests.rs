@@ -791,6 +791,42 @@ async fn thread_summaries_report_a_short_relation_key() -> Result {
 }
 
 #[tokio::test]
+async fn thread_summaries_report_an_undecodable_reply_and_continue() -> Result {
+	let config = Figment::new().merge(("admin.room.create", false));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let reply = event_id!("$reply:localhost");
+	let room = room_id!("!thread:localhost");
+	let latest = json!({ "count": 1, "latest_event": { "event_id": reply } });
+	let thread = json!({ "m.relations": { "m.thread": latest } });
+	let root = json!({ "room_id": room, "unsigned": thread });
+	let stale = json!({ "m.relations": { "m.thread": { "count": 2 } } });
+	let stale = json!({ "room_id": room, "unsigned": stale });
+	let relation =
+		[PduCount::Normal(1).to_be_bytes(), PduCount::Normal(2).to_be_bytes()].concat();
+
+	fresh(services).await?;
+	services.db["pduid_pdu"].raw_put(pdu_id(1), Json(root));
+	services.db["pduid_pdu"].insert(&pdu_id(2), b"{");
+	services.db["eventid_pduid"].insert(reply.as_bytes(), pdu_id(2));
+	services.db["tofrom_relation"].insert(&relation, []);
+	services.db["pduid_pdu"].raw_put(pdu_id(3), Json(stale));
+	services.db["threadid_userids"].insert(&pdu_id(1), "@alice:localhost");
+	services.db["threadid_userids"].insert(&pdu_id(3), "@alice:localhost");
+
+	let summary = walk(services, "thread-summaries").await?;
+
+	assert_eq!(summary.counts.get("malformed-relation"), Some(&1));
+	assert_eq!(summary.counts.get("stale-summary"), Some(&1));
+	assert_eq!(summary.findings(), 2);
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn thread_activity_repair_clears_the_finding() -> Result {
 	let config = Figment::new().merge(("admin.room.create", false));
 	let Some(fixture) = fixture(config).await? else {

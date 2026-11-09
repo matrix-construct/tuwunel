@@ -24,14 +24,14 @@ use tuwunel_database::keyval::Key;
 use tuwunel_matrix::{Event, Pdu, PduCount, PduId, RawPduId, event::RelationTypeEqual};
 
 use super::Service;
-use crate::rooms::short::ShortRoomId;
+use crate::{integrity::undecodable_as, rooms::short::ShortRoomId};
 
 type StartKey = ArrayVec<u8, 16>;
 
 /// One row of a checked relation walk.
 ///
 /// It is a related event at its position, or `None` for an index key too short
-/// to hold a position.
+/// to hold a position or for a related event whose row does not decode.
 type Checked = Option<(PduCount, Pdu)>;
 
 /// Parameters controlling a relation-row query.
@@ -230,9 +230,9 @@ pub fn relation_counts(
 ///
 /// It walks as [`Service::try_get_relations_limited`] does from the end `dir`
 /// leads away from, with no limit, except that a key under the target too short
-/// to hold a position comes back as `None` where that walk panics, and a child
-/// is decoded as a release build decodes it. Missing children are skipped, and
-/// other load errors are yielded.
+/// to hold a position comes back as `None` where that walk panics, and so does a
+/// child whose row a release build cannot decode. Missing children are skipped,
+/// and storage errors are yielded.
 #[implement(Service)]
 pub fn try_get_relations_checked(
 	&self,
@@ -251,7 +251,8 @@ pub fn try_get_relations_checked(
 			| None => Left(ready(Ok(Some(None)))),
 			| Some(count) => Right(
 				self.related_pdu_checked(shortroomid, count)
-					.map_ok(|related| related.map(Some)),
+					.map_ok(|related| related.map(Some))
+					.or_else(|error| ready(undecodable_as(error, Some(None)))),
 			),
 		})
 		.ready_try_filter_map(Ok)

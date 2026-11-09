@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, iter::once, pin::pin, sync::Arc};
 
-use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, future::join3};
+use futures::{
+	Stream, StreamExt, TryFutureExt, TryStreamExt,
+	future::{join3, ready},
+};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedUserId, RoomId, UInt,
 	UserId,
@@ -32,9 +35,12 @@ use self::summary::{
 	counts_replies, omit_thread_latest, set_thread_count, set_thread_latest, thread_bundle,
 	thread_count, thread_latest, thread_reply_json, update_thread_bundle,
 };
-use crate::rooms::{
-	pdu_metadata::RelationQuery,
-	timeline::{ExtractRelatesTo, Mapped},
+use crate::{
+	integrity::undecodable_as,
+	rooms::{
+		pdu_metadata::RelationQuery,
+		timeline::{ExtractRelatesTo, Mapped},
+	},
 };
 
 mod summary;
@@ -98,17 +104,19 @@ pub(crate) struct Recount {
 	/// The newest reply, to replace a stale latest reply, or none to drop the summary.
 	pub(crate) newest: Option<CanonicalJsonValue>,
 
-	/// Relation index keys under the root too short to hold a position, left uncounted.
+	/// Relations under the root left uncounted, their index key too short to hold
+	/// a position or their reply's row undecodable.
 	pub(crate) malformed: usize,
 
-	/// Whether the summary's latest reply has a timeline mapping that does not decode.
+	/// Whether the summary's latest reply has a timeline mapping or row that
+	/// does not decode.
 	pub(crate) malformed_latest: bool,
 }
 
 /// What became of a summary's latest reply.
 ///
-/// The recount replaces a stale latest reply, and leaves one whose mapping does
-/// not decode for its caller to report.
+/// The recount replaces a stale latest reply, and leaves one whose mapping or
+/// row does not decode for its caller to report.
 enum Latest {
 	/// The reply is stored and unredacted, or the summary names none.
 	Current,
@@ -116,7 +124,7 @@ enum Latest {
 	/// The reply is gone or redacted.
 	Stale,
 
-	/// The reply's timeline mapping does not decode as a PDU id.
+	/// The reply's timeline mapping is not a PDU id, or its row does not decode.
 	Malformed,
 }
 
@@ -769,7 +777,8 @@ async fn rebuild_thread_summary(&self, root_id: RawPduId) -> Result<bool> {
 		.is_some_and(|recount| recount.malformed_latest)
 	{
 		return Err!(Database(
-			"Thread root {root_id:?} names a latest reply whose timeline mapping does not decode"
+			"Thread root {root_id:?} names a latest reply whose timeline mapping or row does \
+			 not decode"
 		));
 	}
 
@@ -778,7 +787,7 @@ async fn rebuild_thread_summary(&self, root_id: RawPduId) -> Result<bool> {
 		.is_some_and(|recount| recount.malformed > 0)
 	{
 		return Err!(Database(
-			"Thread root {root_id:?} has relation keys too short to count its replies by"
+			"Thread root {root_id:?} has relation keys or reply rows that do not decode"
 		));
 	}
 
@@ -806,9 +815,10 @@ async fn rebuild_thread_summary(&self, root_id: RawPduId) -> Result<bool> {
 ///
 /// A root with no summary gives `None`. A backfilled root's replies are not in
 /// the relation index, so it keeps its count, and a stored latest reply that is
-/// gone or redacted gives way to the newest reply. Relation keys and the latest
-/// reply's timeline mapping are read without trusting them, so damage to either
-/// is reported rather than panicking.
+/// gone or redacted gives way to the newest reply. Relation keys, the replies'
+/// rows, and the latest reply's mapping and row are read without trusting them,
+/// so damage to any of them is reported rather than panicking or failing the
+/// recount.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self, root))]
 pub(crate) async fn recount_summary(
@@ -864,7 +874,8 @@ pub(crate) async fn recount_summary(
 /// Reads what became of a root summary's latest reply.
 ///
 /// The reply is looked up as the timeline's event reader does, but with its
-/// mapping decoded untrusted, so a damaged one is reported rather than panicking.
+/// mapping and row decoded untrusted, so damage to either is reported rather
+/// than panicking or failing.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn latest_reply(&self, root: &CanonicalJsonObject) -> Result<Latest> {
@@ -872,7 +883,13 @@ async fn latest_reply(&self, root: &CanonicalJsonObject) -> Result<Latest> {
 		return Ok(Latest::Current);
 	};
 
-	let reply: Result<Mapped<PduEvent>> = self.services.timeline.get_checked(latest).await;
+	let reply: Result<Mapped<PduEvent>> = self
+		.services
+		.timeline
+		.get_checked(latest)
+		.or_else(|error| ready(undecodable_as(error, Mapped::Damaged)))
+		.await;
+
 	let latest = match reply.optional()? {
 		| None => Latest::Stale,
 		| Some(Mapped::Damaged) => Latest::Malformed,

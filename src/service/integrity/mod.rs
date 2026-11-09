@@ -239,6 +239,15 @@ where
 	T::deserialize(&mut serde_json::Deserializer::from_slice(record)).map_err(Into::into)
 }
 
+/// Answers `damage` for a failed read that found its data but could not decode
+/// it, and keeps any other failure.
+///
+/// A check reports such a row as damage and moves on, while a storage fault still
+/// ends it.
+pub(crate) fn undecodable_as<T>(error: Error, damage: T) -> Result<T> {
+	undecodable(&error).then_some(damage).ok_or(error)
+}
+
 /// Whether a failed read found its data but could not decode it.
 ///
 /// A row that is not JSON, or content that does not fit, fails this way, and a

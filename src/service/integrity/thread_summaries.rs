@@ -31,9 +31,9 @@ pub(super) static CHECK: Check = Check {
 /// read.
 ///
 /// The summary rebuild rewrites a disagreeing summary, and leaves the rest. A
-/// root whose relation index holds a damaged key, or whose latest reply has a
-/// damaged timeline mapping, is reported for that alone, since its recount is
-/// incomplete.
+/// root whose relation index holds a damaged key or reply, or whose latest reply
+/// has a damaged timeline mapping or row, is reported for that alone, since its
+/// recount is incomplete.
 pub enum Finding {
 	/// The summary's count, or its latest reply, disagrees with the replies.
 	Stale {
@@ -50,16 +50,18 @@ pub enum Finding {
 		latest: bool,
 	},
 
-	/// The root's relation index holds keys too short to name a reply.
+	/// The root's relation index holds keys too short to name a reply, or names
+	/// replies whose rows do not decode.
 	MalformedRelation {
 		/// The root.
 		root_id: RawPduId,
 
-		/// How many such keys the recount skipped.
+		/// How many such relations the recount skipped.
 		malformed: usize,
 	},
 
-	/// The summary's latest reply has a timeline mapping that is not a PDU id.
+	/// The summary's latest reply has a timeline mapping that is not a PDU id,
+	/// or a row that does not decode.
 	MalformedLatest {
 		/// The root.
 		root_id: RawPduId,
@@ -82,9 +84,9 @@ pub enum Finding {
 ///
 /// A root no longer stored, or holding no summary, is skipped as the rebuild skips
 /// it. The rebuild re-reads each root under its room lock and decides through the
-/// same recount, so the two agree. A reply or latest reply whose row cannot be
-/// read ends the stream with its error, while a latest reply's mapping that does
-/// not decode is a finding.
+/// same recount, so the two agree. A reply or latest reply whose row the storage
+/// engine cannot read ends the stream with its error, while one whose row or
+/// mapping does not decode is a finding.
 #[tracing::instrument(level = "trace", skip_all)]
 pub fn scan(services: &Services) -> impl Stream<Item = Result<Finding>> + Send + '_ {
 	let pdus = &services.db["pduid_pdu"];
@@ -126,13 +128,14 @@ impl fmt::Display for Finding {
 			},
 			| Self::MalformedLatest { root_id } => write!(
 				f,
-				"latest reply of thread root {root_id:?} has a timeline mapping that is not a \
-				 PDU id"
+				"latest reply of thread root {root_id:?} has a timeline mapping or row that \
+				 does not decode"
 			),
 			| Self::MalformedRelation { root_id, malformed } => {
 				write!(
 					f,
-					"thread root {root_id:?} has {malformed} relation keys too short to read"
+					"thread root {root_id:?} has {malformed} relation keys or replies that do \
+					 not decode"
 				)
 			},
 			| Self::Stale { root_id, stored, counted, latest } => {
