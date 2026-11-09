@@ -1,6 +1,6 @@
 use axum::extract::State;
 use futures::StreamExt;
-use ruma::api::client::dehydrated_device::get_events::unstable as get_events;
+use ruma::api::client::dehydrated_device::get_events::unstable::{Request, Response};
 use tuwunel_core::{Err, Result, at, utils::result::IsErrOr};
 
 use crate::{ClientIp, Ruma};
@@ -10,12 +10,18 @@ const MAX_BATCH_EVENTS: usize = 50;
 /// # `POST /_matrix/client/../dehydrated_device/{device_id}/events`
 ///
 /// Paginates the events of the dehydrated device.
-#[tracing::instrument(skip_all, fields(%client))]
+#[tracing::instrument(
+	level = "debug",
+	skip_all,
+	fields(
+		%client,
+	),
+)]
 pub(crate) async fn get_dehydrated_events_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
-	body: Ruma<get_events::Request>,
-) -> Result<get_events::Response> {
+	body: Ruma<Request>,
+) -> Result<Response> {
 	let sender_user = body.sender_user();
 
 	let device_id = &body.body.device_id;
@@ -50,7 +56,7 @@ pub(crate) async fn get_dehydrated_events_route(
 		.collect()
 		.await;
 
-	Ok(get_events::Response {
+	Ok(Response {
 		events,
 		next_batch: next_batch.as_ref().map(ToString::to_string),
 	})
