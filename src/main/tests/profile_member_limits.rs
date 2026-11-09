@@ -144,6 +144,7 @@ async fn avatar_url_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 
 fn avatar_url(len: usize) -> String { format!("mxc://localhost/{}", "a".repeat(len)) }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn member_event_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 	let room = create_public_room(owner).await?;
 	let before = owner.member_content(&room, user_id).await?;
@@ -232,6 +233,7 @@ async fn member_displayname_limit(owner: &Client<'_>, user_id: &UserId) -> Resul
 }
 
 // A join's client extras are capped alone; the profile's fields ride along unmeasured.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn join_extra_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 	let room = create_public_room(owner).await?;
 
@@ -260,26 +262,25 @@ async fn join_extra_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 		expect_bad_json(refused, path).await?;
 	}
 
-	// Extras under the cap join beside a full-size profile.
 	let fitting = "p".repeat(3300);
 
 	expect_size(&json!({ (PAD): fitting }), 3000, MEMBER_MAX, "join extras")?;
 
-	accepted(
-		owner
-			.post_url(&join_url, &json!({ (PAD): fitting }))
-			.await?,
-	)
-	.await?;
+	let joined = owner
+		.post_url(&join_url, &json!({ (PAD): fitting }))
+		.await?;
+
+	accepted(joined).await?;
 
 	let avatar = avatar_url(984);
 
-	expect_member(owner, &room, user_id, "fitting join extras", &[
+	let expected = [
 		("membership", Some(&json!("join"))),
 		(PAD, Some(&json!(fitting))),
 		("avatar_url", Some(&json!(avatar))),
-	])
-	.await?;
+	];
+
+	expect_member(owner, &room, user_id, "fitting join extras", &expected).await?;
 
 	// The merged event is over the cap, so the stored avatar and name are not counted.
 	let content = owner.member_content(&room, user_id).await?;

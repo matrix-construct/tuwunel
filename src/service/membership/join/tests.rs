@@ -122,12 +122,14 @@ fn stored_profile_fields_pass_beside_small_extras() -> Result {
 #[test]
 fn extras_past_the_cap_are_refused() {
 	let extra = extras(json!({ "com.example.pad": "p".repeat(MAX_BYTES) }));
+
 	assert!(refused(&extra));
 }
 
 #[test]
 fn a_client_supplied_name_is_bounded_by_characters() -> Result {
 	let long = extras(json!({ "displayname": "n".repeat(257) }));
+
 	assert!(refused(&long));
 
 	let fitting = extras(json!({ "displayname": "n".repeat(256) }));
