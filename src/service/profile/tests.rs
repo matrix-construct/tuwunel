@@ -209,6 +209,14 @@ fn avatar_url_budget_counts_bytes_not_characters() {
 }
 
 #[test]
+fn profile_avatar_url_need_not_be_an_mxc_uri() {
+	for url in ["https://localhost/abc", "not a URI", "mxc://localhost/caf\u{e9}"] {
+		check_profile_value(AVATAR_URL, &json!(url))
+			.unwrap_or_else(|e| panic!("{url} refused: {e}"));
+	}
+}
+
+#[test]
 fn avatar_url_empty_or_null_is_accepted() {
 	check_profile_value(AVATAR_URL, &json!("")).unwrap();
 	check_profile_value(AVATAR_URL, &json!(null)).unwrap();

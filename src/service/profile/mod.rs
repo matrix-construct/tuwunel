@@ -1201,19 +1201,24 @@ fn check_displayname_length(name: &str) -> Result {
 	check_field_length(len, MAX_DISPLAYNAME_LENGTH, "Display name", "characters")
 }
 
+// As in Synapse's default, the profile takes any avatar string within the cap.
 fn check_avatar_url(value: &Value) -> Result {
 	let Some(url) = value.as_str() else {
 		return Err!(Request(BadJson("Avatar URL must be a string.")));
 	};
 
-	check_avatar_mxc(url)
+	check_avatar_url_length(url)
 }
 
 fn check_avatar_mxc(url: &str) -> Result {
-	check_field_length(url.len(), MAX_AVATAR_URL_LENGTH, "Avatar URL", "bytes")?;
+	check_avatar_url_length(url)?;
 
 	// An empty value clears the avatar, so it is not a URI.
 	BoolExt::ok_or_else(url.is_empty() || <&MxcUri>::from(url).is_valid(), || {
 		err!(Request(BadJson("Avatar URL must be a valid mxc:// URI.")))
 	})
+}
+
+fn check_avatar_url_length(url: &str) -> Result {
+	check_field_length(url.len(), MAX_AVATAR_URL_LENGTH, "Avatar URL", "bytes")
 }

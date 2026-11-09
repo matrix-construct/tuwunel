@@ -11,7 +11,6 @@ use tuwunel_core::{
 	ruma::{RoomId, UserId, events::room::member::RoomMemberEventContent},
 	utils::BoolExt,
 };
-use tuwunel_database::Json;
 use tuwunel_matrix::pdu::PduBuilder;
 use tuwunel_service::Services;
 
@@ -120,8 +119,10 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 /// A stored avatar that is not a valid mxc URI can be kept, but a new one is refused.
 ///
-/// The seeded member event and profile avatar predate the format check. The new value
-/// is refused on the member and profile routes, and the stored one is kept on each.
+/// The seeded member event predates the format check, which applies to member events
+/// alone: the profile route takes any avatar string, so its value reaches the room by
+/// propagation while a client's own new member event with such a value is refused.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn stored_invalid_avatar(services: &Services, base: &str) -> Result {
 	let user_id = register(services, "invalidavatar", INVALID_AVATAR_TOKEN).await?;
 	let owner = Client {
@@ -138,12 +139,10 @@ async fn stored_invalid_avatar(services: &Services, base: &str) -> Result {
 
 	expect_refused(&owner, &room, &user_id, &stored).await?;
 
-	let refused = put_profile_avatar(&owner, &user_id, INVALID_AVATAR).await?;
+	let written = put_profile_avatar(&owner, &user_id, INVALID_AVATAR).await?;
 
-	expect_bad_json(refused, "new profile write of the invalid avatar").await?;
-
+	accepted(written).await?;
 	seed_member(services, &room, &user_id, &stored).await?;
-	seed_profile_avatar(services, &user_id, INVALID_AVATAR);
 
 	let profile = owner.get(&format!("profile/{user_id}")).await?;
 
@@ -166,10 +165,6 @@ async fn stored_invalid_avatar(services: &Services, base: &str) -> Result {
 	let profile = owner.get(&format!("profile/{user_id}")).await?;
 
 	expect_avatar(&profile, INVALID_AVATAR, "the profile avatar after a restating PUT")?;
-
-	let refused = put_profile_avatar(&owner, &user_id, ESCAPED_AVATAR).await?;
-
-	expect_bad_json(refused, "profile write of a new invalid avatar").await?;
 
 	let valid = member_content("after", &avatar_url('o', 40));
 
@@ -331,11 +326,7 @@ async fn seed_member(
 	Ok(())
 }
 
-// Seeds a profile avatar without the write checks, as a value stored before them.
-fn seed_profile_avatar(services: &Services, user_id: &UserId, avatar: &str) {
-	services.db["useridprofilekey_value"].put((user_id, "avatar_url"), Json(avatar));
-}
-
+#[tracing::instrument(level = "debug", skip_all)]
 async fn expect_accepted(
 	owner: &Client<'_>,
 	room_id: &RoomId,
