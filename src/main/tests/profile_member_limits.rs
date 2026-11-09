@@ -258,6 +258,15 @@ async fn join_extra_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 	)])
 	.await?;
 
+	// No server can answer for this room, so only a check made first can refuse the body.
+	for path in ["rooms/!unreachable:remote.invalid/join", "join/!unreachable:remote.invalid"] {
+		let refused = owner
+			.post_url(&owner.url(path), &json!({ (PAD): "p".repeat(5000) }))
+			.await?;
+
+		expect_bad_json(refused, path).await?;
+	}
+
 	// Extras under the cap join beside a full-size profile.
 	let fitting = "p".repeat(3300);
 
@@ -282,7 +291,16 @@ async fn join_extra_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 	// The merged event is over the cap, so the stored avatar and name are not counted.
 	let content = owner.member_content(&room, user_id).await?;
 
-	expect_size(&content, MEMBER_MAX + 1, usize::MAX, "merged join beside a full profile")
+	expect_size(&content, MEMBER_MAX + 1, usize::MAX, "merged join beside a full profile")?;
+
+	// A join by a member changes nothing, so its extras are not refused.
+	let rejoined = owner
+		.post_url(&join_url, &json!({ (PAD): "p".repeat(5000) }))
+		.await?;
+
+	accepted(rejoined).await?;
+
+	Ok(())
 }
 
 // Client member events in `initial_state` are bounded before the room is created.

@@ -1,12 +1,9 @@
 use axum::extract::State;
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, RoomId,
-	api::{
-		client::membership::{join_room_by_id, join_room_by_id_or_alias},
-		error::ErrorKind,
-	},
+	api::client::membership::{join_room_by_id, join_room_by_id_or_alias},
 };
-use tuwunel_core::{Error, Result, warn};
+use tuwunel_core::{Result, warn};
 use tuwunel_service::membership::{Join, is_reserved_join_key};
 
 use super::banned_room_check;
@@ -34,6 +31,11 @@ pub(crate) async fn join_room_by_id_route(
 
 	let extra_content = extra_member_content(body.json_body.as_ref());
 
+	services
+		.membership
+		.check_extra_content(sender_user, room_id, extra_content.as_ref())
+		.await?;
+
 	let mut errors = 0_usize;
 	while let Err(e) = services
 		.membership
@@ -49,10 +51,6 @@ pub(crate) async fn join_room_by_id_route(
 		.await
 	{
 		errors = errors.saturating_add(1);
-		if is_refused_body(&e) {
-			return Err(e);
-		}
-
 		if services
 			.config
 			.rooms
@@ -99,6 +97,11 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 
 	let extra_content = extra_member_content(body.json_body.as_ref());
 
+	services
+		.membership
+		.check_extra_content(sender_user, &room_id, extra_content.as_ref())
+		.await?;
+
 	let mut errors = 0_usize;
 	while let Err(e) = services
 		.membership
@@ -114,10 +117,6 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 		.await
 	{
 		errors = errors.saturating_add(1);
-		if is_refused_body(&e) {
-			return Err(e);
-		}
-
 		if services
 			.config
 			.rooms
@@ -135,9 +134,6 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 
 	Ok(join_room_by_id_or_alias::v3::Response { room_id: room_id.clone() })
 }
-
-// A refused body fails the same way on every attempt, so the join is not retried.
-fn is_refused_body(e: &Error) -> bool { matches!(e.kind(), ErrorKind::BadJson) }
 
 // Drop recognized and server-owned keys the client must not set.
 fn extra_member_content(json_body: Option<&CanonicalJsonValue>) -> Option<CanonicalJsonObject> {

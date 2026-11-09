@@ -165,6 +165,58 @@ pub async fn join<'a>(
 	Ok(())
 }
 
+/// Refuses `/join` extras that a join would refuse once it is under way.
+///
+/// The route retries a failed join on other servers, and a refused body fails
+/// the same way on every attempt, so it is refused here before one is made. A
+/// join by a member changes nothing, so a member's extras pass.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn check_extra_content(
+	&self,
+	sender_user: &UserId,
+	room_id: &RoomId,
+	extra_content: Option<&CanonicalJsonObject>,
+) -> Result {
+	if extra_content.is_none()
+		|| self
+			.services
+			.state_cache
+			.is_joined(sender_user, room_id)
+			.await
+	{
+		return Ok(());
+	}
+
+	let content = RoomMemberEventContent::new(MembershipState::Join);
+
+	self.merged_join_content(sender_user, content, extra_content)
+		.await
+		.map(drop)
+}
+
+#[implement(Service)]
+async fn merged_join_content(
+	&self,
+	sender_user: &UserId,
+	content: RoomMemberEventContent,
+	extra_content: Option<&CanonicalJsonObject>,
+) -> Result<CanonicalJsonValue> {
+	let content = self
+		.services
+		.profile
+		.fill_content(sender_user, content)
+		.await;
+
+	let max_bytes = self
+		.services
+		.config
+		.profile
+		.member_event_max_bytes;
+
+	merge_member_content(max_bytes, content, extra_content)
+}
+
 #[implement(Service)]
 async fn check_room_ban(&self, sender_user: &UserId, room_id: &RoomId) -> Result {
 	if self.services.metadata.is_banned(room_id).await
@@ -811,23 +863,15 @@ async fn join_local(
 		.map(Option::flatten)
 		.await;
 
+	let content = RoomMemberEventContent {
+		reason: reason.clone(),
+		join_authorized_via_users_server,
+		..RoomMemberEventContent::new(MembershipState::Join)
+	};
+
 	let content = self
-		.services
-		.profile
-		.fill_content(sender_user, RoomMemberEventContent {
-			reason: reason.clone(),
-			join_authorized_via_users_server,
-			..RoomMemberEventContent::new(MembershipState::Join)
-		})
-		.await;
-
-	let max_bytes = self
-		.services
-		.config
-		.profile
-		.member_event_max_bytes;
-
-	let content = merge_member_content(max_bytes, content, extra_content.as_ref())?;
+		.merged_join_content(sender_user, content, extra_content.as_ref())
+		.await?;
 
 	let pdu_builder = PduBuilder {
 		event_type: StateEventType::RoomMember.into(),
@@ -948,23 +992,15 @@ async fn create_join_event(
 		})
 		.and_then(|s| OwnedUserId::try_from(s.as_str().unwrap_or_default()).ok());
 
+	let content = RoomMemberEventContent {
+		reason,
+		join_authorized_via_users_server: join_authorized_via_users_server.clone(),
+		..RoomMemberEventContent::new(MembershipState::Join)
+	};
+
 	let content = self
-		.services
-		.profile
-		.fill_content(sender_user, RoomMemberEventContent {
-			reason,
-			join_authorized_via_users_server: join_authorized_via_users_server.clone(),
-			..RoomMemberEventContent::new(MembershipState::Join)
-		})
-		.await;
-
-	let max_bytes = self
-		.services
-		.config
-		.profile
-		.member_event_max_bytes;
-
-	let content = merge_member_content(max_bytes, content, extra_content.as_ref())?;
+		.merged_join_content(sender_user, content, extra_content.as_ref())
+		.await?;
 
 	event.insert("content".into(), content);
 
