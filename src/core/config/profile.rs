@@ -127,9 +127,11 @@ pub struct Profile {
 	/// Limits the content size of membership events a client sends.
 	///
 	/// A client state event for `m.room.member` whose content exceeds this many
-	/// bytes is refused with `M_BAD_JSON`. Events the server builds, including
-	/// the profile changes it propagates into member events, are not limited by
-	/// this setting.
+	/// bytes is refused with `M_BAD_JSON`, unless it restates the sender's own
+	/// current member event unchanged. On a join, only the extra keys the client
+	/// supplies are measured. Events the server builds, including the profile
+	/// changes it propagates into member events, are not limited by this
+	/// setting.
 	///
 	/// reloadable: yes
 	/// default: 4096

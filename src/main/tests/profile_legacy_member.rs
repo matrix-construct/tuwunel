@@ -78,6 +78,7 @@ fn stored_over_limit_profile_can_be_resent_but_not_extended() -> Result {
 	result
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn exercise(services: &Services, base: &str) -> Result {
 	wait_until_ready(services, base).await?;
 
@@ -310,6 +311,7 @@ fn avatar_url(fill: char, len: usize) -> String {
 	format!("mxc://localhost/{}", repeat_n(fill, len).collect::<String>())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn seed_member(
 	services: &Services,
 	room_id: &RoomId,
@@ -348,6 +350,7 @@ async fn expect_accepted(
 	Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn expect_refused(
 	owner: &Client<'_>,
 	room_id: &RoomId,
@@ -397,6 +400,7 @@ async fn expect_bad_json(response: Response, subject: &str) -> Result {
 }
 
 #[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn put_state_response(
 	&self,
 	room_id: &RoomId,

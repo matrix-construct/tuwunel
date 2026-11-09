@@ -1069,14 +1069,17 @@ fn merge_member_content(
 
 	check_member_content(max_bytes, serialized_len(&extra)?, displayname, avatar_url)?;
 
-	// Only the vacant keys are cloned; the server's fields move in as they are.
-	let vacant: CanonicalJsonObject = extra
-		.iter()
-		.filter(|(key, _)| !server.contains_key(**key))
-		.map(|(key, value)| ((*key).into(), (*value).clone()))
-		.collect();
+	let merged = extra
+		.into_iter()
+		.fold(server, |mut merged, (key, value)| {
+			if !merged.contains_key(key) {
+				merged.insert(key.into(), value.clone());
+			}
 
-	Ok(CanonicalJsonValue::Object(vacant.into_iter().chain(server).collect()))
+			merged
+		});
+
+	Ok(CanonicalJsonValue::Object(merged))
 }
 
 // A remote join sends the merged content as it is, so a non-string cannot pass here.
