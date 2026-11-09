@@ -20,7 +20,7 @@ use tuwunel_matrix::{PduCount, PduId, RawPduId};
 use super::{Summary, checks, find};
 use crate::{
 	Services,
-	migrations::{DATABASE_VERSION, MARKERS, fresh, marker_present, migrate},
+	migrations::{DATABASE_VERSION, MARKERS, fresh, marker_present, migrate, rerun},
 	rooms::{short::ShortRoomId, state::version_absent, timeline::bias_count},
 	test_utils::{compress_state, fixture, pdu_id, pdu_json, save_room_state, with_state_key},
 	users::PASSWORD_SENTINEL,
@@ -707,29 +707,46 @@ async fn thread_summaries_repair_clears_the_finding() -> Result {
 	let roots = &services.db["threadid_userids"];
 	let thread = json!({ "m.relations": { "m.thread": { "count": 3 } } });
 	let root = json!({ "room_id": "!thread:localhost", "unsigned": thread });
+	let id = RawPduId::from(PduId {
+		shortroomid: 1,
+		count: PduCount::Backfilled(-1),
+	});
 
 	fresh(services).await?;
-	services.db["pduid_pdu"].raw_put(pdu_id(1), Json(root));
+	services.db["pduid_pdu"].raw_put(pdu_id(1), Json(&root));
+	services.db["pduid_pdu"].raw_put(id, Json(&root));
 	services.db["pduid_pdu"].insert(&pdu_id(5), b"not json");
 	roots.insert(&pdu_id(1), "@alice:localhost");
 	roots.insert(&pdu_id(5), "@alice:localhost");
+	roots.insert(&id, "@alice:localhost");
+	roots.insert(b"short", "@alice:localhost");
 
 	let summary = walk(services, "thread-summaries").await?;
 
 	assert_eq!(summary.counts.get("stale-summary"), Some(&1));
 	assert_eq!(summary.counts.get("unreadable-root"), Some(&1));
+	assert_eq!(summary.counts.get("unparsable-key"), Some(&1));
 
-	services.db["global"].remove("rebuild_thread_summaries");
+	let stamps = rerun(services, "thread-summaries").await?;
+
+	assert_eq!(stamps.filter(|stamp| stamp.cleared).count(), 2);
 	migrate(services, false).await?;
 
-	// The summary rebuild decodes keys without checking them, so this one comes after it.
-	roots.insert(b"short", "@alice:localhost");
+	assert!(marker_present(services, "rebuild_thread_summaries").await?);
+	assert!(marker_present(services, "rebuild_live_thread_activity").await?);
+	let listed = services.db["threadrootid_latestcount"]
+		.exists(&id)
+		.await
+		.is_ok();
+
+	assert!(listed);
 
 	let summary = walk(services, "thread-summaries").await?;
 
 	assert_eq!(summary.counts.get("unreadable-root"), Some(&1));
 	assert_eq!(summary.counts.get("unparsable-key"), Some(&1));
 	assert_eq!(summary.findings(), 2);
+	assert_eq!(services.threads.rebuild_thread_summaries().await, (0, 2));
 
 	Ok(())
 }

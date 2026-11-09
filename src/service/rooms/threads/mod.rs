@@ -508,7 +508,8 @@ impl Service {
 	/// Clears first so a partial or stale index is replaced wholesale, and leaves
 	/// out a root whose summary counts no reply. A root or key the storage engine
 	/// could not read fails the rebuild so a marker-gated caller retries; any
-	/// other failed root is logged and skipped.
+	/// other failed root or malformed key is logged and skipped without failing
+	/// the rebuild.
 	pub async fn rebuild_thread_activity(&self) -> Result {
 		self.db.threadactivityid_rootid.clear().await;
 		self.db.threadrootid_latestcount.clear().await;
@@ -517,7 +518,7 @@ impl Service {
 			.db
 			.threadid_userids
 			.raw_keys()
-			.map_ok(RawPduId::from)
+			.ready_try_filter_map(|key| Ok(root_id(key).log_err().ok()))
 			.broad_and_then(async |root_id| {
 				self.index_thread_activity(root_id)
 					.inspect_err(|error| error!(?root_id, %error, "Thread activity not indexed."))
@@ -573,7 +574,7 @@ impl Service {
 	///
 	/// Each root is locked and walked once; an unredacted stored latest is kept,
 	/// and a backfilled root keeps its count. Returns the numbers of rewritten
-	/// and failed roots, skipping missing bundles.
+	/// and failed roots, counting malformed keys as failed and skipping missing bundles.
 	#[tracing::instrument(skip_all, level = "debug")]
 	pub async fn rebuild_thread_summaries(&self) -> (usize, usize) {
 		// get_relations already fans out per root, so a concurrent outer stage nests fan-outs.
@@ -581,12 +582,9 @@ impl Service {
 			.threadid_userids
 			.raw_keys()
 			.ignore_err()
-			.map(RawPduId::from)
-			.then(async |root_id| {
-				self.rebuild_thread_summary(root_id)
-					.await
-					.log_err()
-			})
+			.map(root_id)
+			.and_then(|root_id| self.rebuild_thread_summary(root_id))
+			.map(LogErr::log_err)
 			.ready_fold((0_usize, 0_usize), |(changed, failed), result| match result {
 				| Ok(rewritten) => (changed.saturating_add(usize::from(rewritten)), failed),
 				| Err(_) => (changed, failed.saturating_add(1)),
@@ -892,6 +890,11 @@ async fn latest_reply(&self, root: &CanonicalJsonObject) -> Result<Latest> {
 #[inline]
 #[must_use]
 pub(crate) fn changed(&self) -> bool { self.stale_latest || self.stored != self.counted }
+
+fn root_id(key: &[u8]) -> Result<RawPduId> {
+	RawPduId::try_from_bytes(key)
+		.ok_or_else(|| err!(Database("Malformed thread root key: {key:?}")))
+}
 
 /// Keeps a failed root's error only when the storage engine could not read it.
 ///
