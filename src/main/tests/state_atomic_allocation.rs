@@ -28,9 +28,7 @@ fn state_hash_allocation_persists_an_atomic_pair() -> Result {
 	let db_path = DatabasePath(Args::test_database_path("state-atomic-allocation"));
 
 	// Prevent presence startup from consuming the global count under test.
-	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_maintenance()
-		.with_database_path(&db_path.0)
+	let args = Args::maintenance_test(&db_path.0)
 		.with_option("presence.allow_local=false")
 		.with_option("presence.allow_outgoing=false");
 

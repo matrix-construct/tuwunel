@@ -50,9 +50,7 @@ impl Drop for DatabasePath {
 fn still_request_is_never_answered_with_an_animated_file() -> Result {
 	let db_path = DatabasePath(Args::test_database_path("media-thumbnail-still"));
 
-	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_maintenance()
-		.with_database_path(&db_path.0);
+	let args = Args::maintenance_test(&db_path.0);
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

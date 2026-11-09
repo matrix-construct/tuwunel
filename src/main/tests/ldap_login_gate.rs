@@ -26,9 +26,7 @@ impl Drop for DatabasePath {
 fn ldap_login_gate_rejects_only_deactivated_accounts() -> Result {
 	let db_path = DatabasePath(Args::test_database_path("ldap-login-gate"));
 
-	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_maintenance()
-		.with_database_path(&db_path.0);
+	let args = Args::maintenance_test(&db_path.0);
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

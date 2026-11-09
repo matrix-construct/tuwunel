@@ -333,6 +333,19 @@ pub fn default_test(name: &[&str]) -> Self {
 		.with_database_path(&test_database_root().join(random_string(32)))
 }
 
+/// Returns arguments for a maintenance-mode test on its own database.
+///
+/// The `fresh` and `cleanup` harnesses clear the database before the boot and
+/// remove it afterwards. The server boots without listening, so the test drives
+/// the services directly.
+#[implement(Args)]
+#[must_use]
+pub fn maintenance_test(database_path: &Path) -> Self {
+	Self::default_test(&["fresh", "cleanup"])
+		.with_maintenance()
+		.with_database_path(database_path)
+}
+
 /// Returns these arguments with an IPv4 loopback listener configured.
 ///
 /// The address and port overrides are appended together, preserving existing

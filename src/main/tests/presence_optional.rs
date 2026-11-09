@@ -14,9 +14,7 @@ use tuwunel_service::Services;
 fn optional_presence_preserves_data_errors() -> Result {
 	let path = Args::test_database_path("presence-optional");
 
-	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_maintenance()
-		.with_database_path(&path);
+	let args = Args::maintenance_test(&path);
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

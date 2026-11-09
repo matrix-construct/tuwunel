@@ -40,9 +40,7 @@ mod tests {
 		let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 		let certificate = source.join(CERTIFICATE);
 		let private_key = source.join(PRIVATE_KEY);
-		let args = Args::default_test(&["fresh", "cleanup"])
-			.with_maintenance()
-			.with_database_path(&database.0)
+		let args = Args::maintenance_test(&database.0)
 			.with_option(format!("server_name=\"127.0.0.1:{port}\""))
 			.with_loopback_listener(port)
 			.with_option("listening=true")

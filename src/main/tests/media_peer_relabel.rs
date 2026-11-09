@@ -176,9 +176,7 @@ fn a_peers_mislabelled_thumbnail_is_cached_under_its_container() -> Result {
 	let certificate = manifest.join(CERTIFICATE);
 	let private_key = manifest.join(PRIVATE_KEY);
 
-	let base = Args::default_test(&["fresh", "cleanup"])
-		.with_maintenance()
-		.with_database_path(&db_path.0);
+	let base = Args::maintenance_test(&db_path.0);
 
 	let args = [
 		"network.http.allow_invalid_tls_certificates=true".to_owned(),

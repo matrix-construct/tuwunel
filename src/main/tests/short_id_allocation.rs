@@ -23,9 +23,7 @@ impl Drop for DatabasePath {
 fn batch_duplicates_share_one_shorteventid() -> Result {
 	let db_path = DatabasePath(Args::test_database_path("short-id-allocation"));
 
-	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_maintenance()
-		.with_database_path(&db_path.0);
+	let args = Args::maintenance_test(&db_path.0);
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;
