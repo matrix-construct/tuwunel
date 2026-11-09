@@ -6,7 +6,7 @@
 //! rows whatever the outcome, so events overdue at startup go out on its first
 //! pass and a crash between the two steps can send one twice.
 
-use std::{pin::pin, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, pin::pin, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures::{
@@ -37,7 +37,7 @@ use tuwunel_core::{
 use tuwunel_database::{Deserialized, Ignore, Interfix, Json, Map};
 use tuwunel_matrix::{
 	StateKey,
-	pdu::{Content, PduBuilder},
+	pdu::{Content, DELAY_ID, PduBuilder},
 };
 
 use crate::{
@@ -453,7 +453,7 @@ async fn send_scheduled(&self, delay_id: &DelayId, due: u64) {
 async fn send_and_remove(&self, delay_id: &str, event: Event) -> Result<OwnedEventId> {
 	let user_id = event.user_id.clone();
 	let due = event.due_ms;
-	let result = self.append(event).await;
+	let result = self.append(delay_id, event).await;
 
 	self.remove(delay_id, &user_id, due);
 
@@ -463,10 +463,11 @@ async fn send_and_remove(&self, delay_id: &str, event: Event) -> Result<OwnedEve
 /// Appends an event through the ordinary local send path.
 ///
 /// A suspended sender is refused here, since the suspension may postdate the
-/// scheduling.
+/// scheduling. The event names its delay ID in its unsigned data, which the
+/// serving paths show to its sender alone (MSC4140).
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all)]
-async fn append(&self, event: Event) -> Result<OwnedEventId> {
+async fn append(&self, delay_id: &str, event: Event) -> Result<OwnedEventId> {
 	let Event {
 		user_id,
 		room_id,
@@ -485,7 +486,7 @@ async fn append(&self, event: Event) -> Result<OwnedEventId> {
 	let pdu = PduBuilder {
 		event_type,
 		content,
-		unsigned: None,
+		unsigned: Some(BTreeMap::from([(DELAY_ID.to_owned(), delay_id.into())])),
 		state_key,
 		redacts,
 		timestamp,

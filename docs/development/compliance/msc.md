@@ -99,7 +99,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4156 | ✅ ● | 100/100 | Migrate `server_name` to `via` | via parameter handled via Ruma |
 | MSC4151 | ✅ ● | 100/100 | Reporting rooms (Client-Server API) | POST /rooms/{roomId}/report implemented and routed |
 | MSC4143 | 🟨 ◐ | 70/90 | MatrixRTC | Discovery, upgrade slot copy, delayed leave; no sticky member or transport auth |
-| MSC4140 | 🟨 ● | 60/60 | Cancellable delayed events | Full lifecycle; no finalised state, unsigned delay_id or rate limiting |
+| MSC4140 | 🟨 ● | 60/70 | Cancellable delayed events | Full lifecycle, sender-only delay_id; no finalised state or rate limiting |
 | MSC4138 | ✅ ● | 100/100 | Update allowed HTTP methods in CORS responses | CORS METHODS list includes HEAD and PATCH; excludes CONNECT/TRACE |
 | MSC4133 | ✅ ● | 85/95 | Extending User Profile API with Custom Key:Value Pairs | endpoints + caps/errcodes; unset legacy 200 omit by choice, 404 key-scoped |
 | MSC4127 | 🟥 ● | 0/0 | Removal of query string auth | src/api/router/auth.rs:78 still falls back to request.query.access_token |
@@ -293,7 +293,7 @@ for spec compliance.
 | MSC2324 | 🟨 ◐ | 60/100 |  | Facilitating early releases of software dependent on spec | two MUST misses: unprefixed unstable SSO callback; stable v1/auth_issuer |
 | MSC2675 | 🟨 ◐ | 60/75 | 1.3 | Serverside aggregations of message relationships | thread+edit+reference bundled (edit/ref gated); reactions unbundled |
 | MSC3267 | 🟨 ◐ | 60/80 | 1.5 | reference relationships | m.reference bundle added; gated default-off; no ignore/visibility filter |
-| MSC4140 | 🟨 ● | 60/60 |  | Cancellable delayed events | Full lifecycle; no finalised state, unsigned delay_id or rate limiting |
+| MSC4140 | 🟨 ● | 60/70 |  | Cancellable delayed events | Full lifecycle, sender-only delay_id; no finalised state or rate limiting |
 | MSC4508 | 🟨 ◐ | 60/80 |  | Sliding Sync Extensions: Common format and Typing | Typing exists; joined-only filtering and scope reentry remain incomplete. |
 | MSC1957 | 🟨 ● | 50/50 |  | Integration manager discovery | account-data passthrough only; no m.integrations key in well-known client |
 | MSC2140 | 🟨 ● | 50/60 |  | Terms of Service API for Identity Servers and Integration Managers | no 3pid/unbind or IS relay; accepted_terms and register cleanup present |

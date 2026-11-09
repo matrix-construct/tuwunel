@@ -4,8 +4,8 @@
 //!
 //! The cases cover discovery, scheduling through every request form, firing
 //! no earlier than the delay, management by path and by body, a tokenless
-//! send, owner checks, limits, deactivation, and a scheduled event surviving a
-//! restart.
+//! send, owner checks, the delay ID shown to the sender alone, limits,
+//! deactivation, and a scheduled event surviving a restart.
 
 use std::{
 	env::{current_exe, var},
@@ -21,10 +21,13 @@ use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
 use tuwunel::Args;
 use tuwunel_core::{
-	Err, Result, err, implement,
+	Err, Result, err, implement, is_equal_to,
 	ruma::{
 		RoomAliasId, RoomId, UserId,
-		events::{StateEventType, room::topic::RoomTopicEventContent},
+		events::{
+			StateEventType,
+			room::{member::RoomMemberEventContent, topic::RoomTopicEventContent},
+		},
 	},
 	utils::time::now_millis,
 };
@@ -48,6 +51,7 @@ const BOB: &str = "delayed-events-bob-token-00000000";
 const QUIET: [&str; 2] = ["logging.enable=false", "database.pool.max_workers=64"];
 const UNSTABLE: &str = "unstable/org.matrix.msc4140/";
 const CALL_MEMBER: &str = "org.matrix.msc3401.call.member";
+const DELAY_ID: &str = "org.matrix.msc4140.delay_id";
 const FLAGS: [&str; 2] = ["org.matrix.msc4140", "org.matrix.msc4140.stable"];
 const CAPABILITIES: [&str; 2] = ["m.delayed_events", "org.matrix.msc4140.delayed_events"];
 const CHILD_DATABASE_ENV: &str = "DELAYED_EVENTS_TEST_DATABASE";
@@ -116,6 +120,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	owner_mismatch_is_not_found(&alice, &bob, &room).await?;
 	transaction_retry_returns_one_delay(services, &alice, &room, &alice_id).await?;
 	room_auth_checked_at_schedule(&bob, &room).await?;
+	delay_id_reaches_only_its_sender(services, &alice, &bob, &alice_id).await?;
 	deactivation_removes_scheduled(services, &bob, &bob_id).await
 }
 
@@ -338,6 +343,80 @@ async fn room_auth_checked_at_schedule(bob: &Client<'_>, room: &RoomId) -> Resul
 		.await?;
 
 	refused(response, StatusCode::FORBIDDEN, "M_FORBIDDEN").await
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn delay_id_reaches_only_its_sender(
+	services: &Services,
+	alice: &Client<'_>,
+	bob: &Client<'_>,
+	alice_id: &UserId,
+) -> Result {
+	let room = alice
+		.create_room(&json!({ "preset": "public_chat" }))
+		.await?;
+
+	bob.post_json(&bob.url(&format!("rooms/{room}/join")), &json!({}))
+		.await?;
+
+	let path =
+		format!("rooms/{room}/state/m.room.member/{alice_id}?org.matrix.msc4140.delay=300");
+
+	let content = json!({ "membership": "join", "displayname": "later" });
+	let reply = alice
+		.put_json(&alice.url(&path), &content)
+		.await?;
+
+	let delay_id = field(&reply, "delay_id")?;
+	let fired = poll_until(FIRE_DEADLINE, async || {
+		displayname(services, &room, alice_id)
+			.await
+			.is_some_and(is_equal_to!("later"))
+	})
+	.await;
+
+	require(fired, "the delayed member event was never sent")?;
+
+	let event_id = services
+		.state_accessor
+		.room_state_get(&room, &StateEventType::RoomMember, alice_id.as_str())
+		.await?
+		.event_id;
+
+	let named = format!(r#""{DELAY_ID}":"{delay_id}""#);
+	let paths = [
+		format!("rooms/{room}/event/{event_id}"),
+		format!("rooms/{room}/state/m.room.member/{alice_id}?format=event"),
+		format!("rooms/{room}/state"),
+		format!("rooms/{room}/members"),
+		format!("rooms/{room}/messages?dir=b"),
+	];
+
+	for path in &paths {
+		let sender = alice
+			.get_json(&alice.url(path))
+			.await?
+			.to_string();
+
+		let member = bob.get_json(&bob.url(path)).await?.to_string();
+
+		assert!(sender.contains(event_id.as_str()), "{path}: {sender}");
+		assert!(member.contains(event_id.as_str()), "{path}: {member}");
+		assert!(sender.contains(&named), "{path}: {sender}");
+		assert!(!member.contains(DELAY_ID), "{path}: {member}");
+	}
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn displayname(services: &Services, room: &RoomId, user_id: &UserId) -> Option<String> {
+	services
+		.state_accessor
+		.room_state_get_content(room, &StateEventType::RoomMember, user_id.as_str())
+		.await
+		.ok()
+		.and_then(|content: RoomMemberEventContent| content.displayname)
 }
 
 async fn deactivation_removes_scheduled(
