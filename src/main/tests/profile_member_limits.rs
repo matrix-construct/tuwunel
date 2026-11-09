@@ -80,6 +80,7 @@ fn profile_and_member_writes_are_bounded() -> Result {
 	result
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn exercise(services: &Services, base: &str) -> Result {
 	wait_until_ready(services, base).await?;
 
@@ -95,6 +96,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	padded_room_propagates(&owner, &user_id).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn displayname_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 	owner
 		.put_profile(user_id, "displayname", "start")
@@ -118,6 +120,7 @@ async fn displayname_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 		.await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn avatar_url_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 	let longest = avatar_url(984);
 	let oversized = avatar_url(985);
@@ -168,11 +171,9 @@ async fn member_event_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 		.put_state(&room, "m.room.member", user_id.as_str(), &fitting)
 		.await?;
 
-	expect_member(owner, &room, user_id, "fitting member event", &[(
-		"displayname",
-		Some(&json!("fits")),
-	)])
-	.await?;
+	let expected = [("displayname", Some(&json!("fits")))];
+
+	expect_member(owner, &room, user_id, "fitting member event", &expected).await?;
 
 	let leaving = padded_member("leave", "over", 5000);
 
@@ -184,13 +185,12 @@ async fn member_event_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 
 	expect_bad_json(refused, "oversized self-leave").await?;
 
-	expect_member(owner, &room, user_id, "member after refused leave", &[(
-		"membership",
-		Some(&json!("join")),
-	)])
-	.await
+	let expected = [("membership", Some(&json!("join")))];
+
+	expect_member(owner, &room, user_id, "member after refused leave", &expected).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn member_displayname_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 	let room = create_public_room(owner).await?;
 	let too_long = json!({ "membership": "join", "displayname": "y".repeat(257) });
@@ -207,11 +207,9 @@ async fn member_displayname_limit(owner: &Client<'_>, user_id: &UserId) -> Resul
 		.put_state(&room, "m.room.member", user_id.as_str(), &fitting)
 		.await?;
 
-	expect_member(owner, &room, user_id, "256-character member display name", &[(
-		"displayname",
-		Some(&json!(longest)),
-	)])
-	.await?;
+	let expected = [("displayname", Some(&json!(longest)))];
+
+	expect_member(owner, &room, user_id, "256-character member display name", &expected).await?;
 
 	// Two bytes each, so 256 of them are 512 bytes and only a character count admits them.
 	let too_wide = json!({ "membership": "join", "displayname": "é".repeat(257) });
@@ -228,23 +226,20 @@ async fn member_displayname_limit(owner: &Client<'_>, user_id: &UserId) -> Resul
 		.put_state(&room, "m.room.member", user_id.as_str(), &wide)
 		.await?;
 
-	expect_member(owner, &room, user_id, "256 two-byte member display name", &[(
-		"displayname",
-		Some(&json!(widest)),
-	)])
-	.await
+	let expected = [("displayname", Some(&json!(widest)))];
+
+	expect_member(owner, &room, user_id, "256 two-byte member display name", &expected).await
 }
 
 // A join's client extras are capped alone; the profile's fields ride along unmeasured.
 async fn join_extra_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 	let room = create_public_room(owner).await?;
 
-	accepted(
-		owner
-			.post_url(&owner.url(&format!("rooms/{room}/leave")), &json!({}))
-			.await?,
-	)
-	.await?;
+	let left = owner
+		.post_url(&owner.url(&format!("rooms/{room}/leave")), &json!({}))
+		.await?;
+
+	accepted(left).await?;
 
 	let join_url = owner.url(&format!("rooms/{room}/join"));
 	let refused = owner
@@ -252,11 +247,9 @@ async fn join_extra_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 		.await?;
 
 	expect_bad_json(refused, "oversized join extras").await?;
-	expect_member(owner, &room, user_id, "member after refused join", &[(
-		"membership",
-		Some(&json!("leave")),
-	)])
-	.await?;
+	let expected = [("membership", Some(&json!("leave")))];
+
+	expect_member(owner, &room, user_id, "member after refused join", &expected).await?;
 
 	// No server can answer for this room, so only a check made first can refuse the body.
 	for path in ["rooms/!unreachable:remote.invalid/join", "join/!unreachable:remote.invalid"] {
@@ -304,6 +297,7 @@ async fn join_extra_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 }
 
 // Client member events in `initial_state` are bounded before the room is created.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn create_initial_member_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 	let create_url = owner.url("createRoom");
 	let initial = |content: Value| {
@@ -355,22 +349,23 @@ async fn create_initial_member_limit(owner: &Client<'_>, user_id: &UserId) -> Re
 	let created = accepted(create(padded_member("join", "fits", 3000)).await?).await?;
 	let room: OwnedRoomId = field(&created, "room_id")?.try_into()?;
 
-	expect_member(owner, &room, user_id, "fitting initial member event", &[(
-		"displayname",
-		Some(&json!("fits")),
-	)])
-	.await
+	let expected = [("displayname", Some(&json!("fits")))];
+
+	expect_member(owner, &room, user_id, "fitting initial member event", &expected).await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn joined_room_count(owner: &Client<'_>) -> Result<usize> {
 	let joined = owner.get("joined_rooms").await?;
-
-	Ok(joined
+	let count = joined
 		.get("joined_rooms")
 		.and_then(Value::as_array)
-		.map_or(0, Vec::len))
+		.map_or(0, Vec::len);
+
+	Ok(count)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn padded_room_propagates(owner: &Client<'_>, user_id: &UserId) -> Result {
 	let padded_content = padded_member("join", "before", 3850);
 
@@ -406,6 +401,7 @@ async fn padded_room_propagates(owner: &Client<'_>, user_id: &UserId) -> Result 
 		.await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn create_public_room(owner: &Client<'_>) -> Result<OwnedRoomId> {
 	owner
 		.create_room(&json!({ "preset": "public_chat" }))
@@ -420,6 +416,7 @@ fn padded_member(membership: &str, displayname: &str, pad: usize) -> Value {
 	})
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn member_room(
 	owner: &Client<'_>,
 	user_id: &UserId,
@@ -434,6 +431,7 @@ async fn member_room(
 	Ok(room)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn expect_member(
 	owner: &Client<'_>,
 	room_id: &RoomId,
@@ -448,6 +446,7 @@ async fn expect_member(
 		.try_for_each(|(key, value)| expect_field(&content, key, *value, subject))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn expect_profile(
 	owner: &Client<'_>,
 	user_id: &UserId,
@@ -462,6 +461,7 @@ async fn expect_profile(
 	expect_field(&content, field, Some(expected), subject)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn expect_bad_json(response: Response, subject: &str) -> Result {
 	let status = response.status();
 	let body: Value = response.json().await?;
@@ -483,6 +483,7 @@ fn expect_size(content: &Value, min: usize, max: usize, subject: &str) -> Result
 }
 
 #[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn put_profile(&self, user_id: &UserId, field: &str, value: &str) -> Result {
 	self.put_profile_response(user_id, field, value)
 		.await?
@@ -492,6 +493,7 @@ async fn put_profile(&self, user_id: &UserId, field: &str, value: &str) -> Resul
 }
 
 #[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn put_profile_response(
 	&self,
 	user_id: &UserId,
@@ -505,6 +507,7 @@ async fn put_profile_response(
 }
 
 #[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn put_state_response(
 	&self,
 	room_id: &RoomId,
@@ -517,6 +520,7 @@ async fn put_state_response(
 }
 
 #[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn member_content(&self, room_id: &RoomId, user_id: &UserId) -> Result<Value> {
 	self.get(&format!("rooms/{room_id}/state/m.room.member/{user_id}"))
 		.await

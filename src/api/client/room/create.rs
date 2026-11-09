@@ -64,6 +64,7 @@ pub(crate) async fn create_room_route(
 	can_create_room_check(&services, &body).await?;
 	can_publish_directory_check(&services, &body).await?;
 	let initial_events = parse_initial_state(&body)?;
+
 	check_initial_member_content(&services, &initial_events)?;
 
 	// Figure out preset. We need it for preset specific events
@@ -150,14 +151,13 @@ pub(crate) async fn create_room_route(
 	// 5. Events set by preset
 	let initial_state = apply_preset_state_pdus(
 		&services,
-		&body,
 		initial_events,
 		&preset,
 		sender_user,
 		&room_id,
 		&state_lock,
 	)
-	.boxed()
+	.boxed() // size firewall
 	.await?;
 
 	// 6. Events listed in initial_state
@@ -335,8 +335,7 @@ async fn apply_canonical_alias_pdu(
 
 async fn apply_preset_state_pdus(
 	services: &Services,
-	body: &Ruma<create_room::v3::Request>,
-	initial_events: Vec<InitialEvent>,
+	initial_events: impl IntoIterator<Item = InitialEvent>,
 	preset: &RoomPreset,
 	sender_user: &UserId,
 	room_id: &RoomId,
@@ -344,11 +343,10 @@ async fn apply_preset_state_pdus(
 ) -> Result<Vec<InitialEvent>> {
 	let mut initial_state = initial_events
 		.into_iter()
-		.map(Ok)
-		.filter_ok(|event| {
+		.filter(|event| {
 			services.config.encryption.allow || event.event_type != StateEventType::RoomEncryption
 		})
-		.filter_ok(|event| {
+		.filter(|event| {
 			// client/appservice workaround: if a user sends an initial_state event with a
 			// state event in there with the content of literally `{}` (not null or empty
 			// string), let's just skip it over and warn.
@@ -359,9 +357,7 @@ async fn apply_preset_state_pdus(
 				true
 			}
 		})
-		.filter_ok(|event| body.name.is_none() || event.event_type != StateEventType::RoomName)
-		.filter_ok(|event| body.topic.is_none() || event.event_type != StateEventType::RoomTopic)
-		.collect::<Result<Vec<_>>>()?;
+		.collect::<Vec<_>>();
 
 	let join_rule_pdubuilder =
 		take_initial(&mut initial_state, &StateEventType::RoomJoinRules, "")
@@ -1058,10 +1054,11 @@ fn parse_initial_state(body: &Ruma<create_room::v3::Request>) -> Result<Vec<Init
 	body.initial_state
 		.iter()
 		.map(|state| Ok(state.deserialize_as_unchecked::<InitialEvent>()?))
+		.filter_ok(|event| body.name.is_none() || event.event_type != StateEventType::RoomName)
+		.filter_ok(|event| body.topic.is_none() || event.event_type != StateEventType::RoomTopic)
 		.collect::<Result<Vec<_>>>()
 }
 
-// Client member events in `initial_state` are bounded by their canonical size.
 fn check_initial_member_content(services: &Services, initial_events: &[InitialEvent]) -> Result {
 	let max_bytes = services.config.profile.member_event_max_bytes;
 

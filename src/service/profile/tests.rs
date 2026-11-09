@@ -163,7 +163,6 @@ fn displayname_past_its_budget_is_bad_json() {
 	assert!(bad_json(&check_profile_value(DISPLAYNAME, &json!(name)).unwrap_err()));
 }
 
-// 800 bytes is over 256.
 #[test]
 fn displayname_budget_counts_characters_not_bytes() {
 	let name = PALM.repeat(200);
@@ -201,7 +200,6 @@ fn avatar_url_past_its_budget_is_bad_json() {
 	assert!(bad_json(&check_profile_value(AVATAR_URL, &json!(url)).unwrap_err()));
 }
 
-// 1002 bytes is over 1000.
 #[test]
 fn avatar_url_budget_counts_bytes_not_characters() {
 	let url = EURO.repeat(334);
@@ -504,8 +502,6 @@ fn typed_member(content: Value) -> RoomMemberEventContent {
 
 #[test]
 fn member_content_cap_counts_bytes() {
-	// Each "é" is two bytes, so 2048 of them fill the 4096-byte cap exactly. A
-	// character count would admit the one extra byte as well.
 	let at_cap = "é".repeat(2048);
 	let over_cap = format!("{at_cap}a");
 

@@ -77,6 +77,7 @@ fn profile_writes_copy_member_content_per_msc4466() -> Result {
 	result
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn exercise(services: &Services, base: &str) -> Result {
 	wait_until_ready(services, base).await?;
 
@@ -108,19 +109,18 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.put_profile(&user_id, "displayname", "renamed", None)
 		.await?;
 
-	expect_member(&owner, &unknown, &user_id, "unknown keys", &[
+	let expected = [
 		("membership", Some(&json!("join"))),
 		("displayname", Some(&json!("renamed"))),
 		("com.example.flag", Some(&flag)),
 		("reason", None),
-	])
-	.await?;
+	];
 
-	expect_member(&owner, &empty_avatar, &user_id, "empty avatar", &[
-		("displayname", Some(&json!("renamed"))),
-		("avatar_url", Some(&json!(""))),
-	])
-	.await?;
+	expect_member(&owner, &unknown, &user_id, "unknown keys", &expected).await?;
+
+	let expected = [("displayname", Some(&json!("renamed"))), ("avatar_url", Some(&json!("")))];
+
+	expect_member(&owner, &empty_avatar, &user_id, "empty avatar", &expected).await?;
 
 	// Created after the global rename, so the rename cannot overwrite it.
 	let overridden_member = json!({
@@ -134,32 +134,27 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.put_profile(&user_id, "displayname", "global-2", Some("unchanged"))
 		.await?;
 
-	expect_member(&owner, &overridden, &user_id, "unchanged override", &[(
-		"displayname",
-		Some(&json!("per-room")),
-	)])
-	.await?;
+	let expected = [("displayname", Some(&json!("per-room")))];
 
-	expect_member(&owner, &unknown, &user_id, "unchanged match", &[
-		("displayname", Some(&json!("global-2"))),
-		("com.example.flag", Some(&flag)),
-	])
-	.await?;
+	expect_member(&owner, &overridden, &user_id, "unchanged override", &expected).await?;
+
+	let expected = [("displayname", Some(&json!("global-2"))), ("com.example.flag", Some(&flag))];
+
+	expect_member(&owner, &unknown, &user_id, "unchanged match", &expected).await?;
 
 	owner
 		.delete_profile(&user_id, "displayname", Some("unchanged"))
 		.await?;
 
-	expect_member(&owner, &overridden, &user_id, "unchanged delete override", &[(
-		"displayname",
-		Some(&json!("per-room")),
-	)])
-	.await?;
+	let expected = [("displayname", Some(&json!("per-room")))];
+
+	expect_member(&owner, &overridden, &user_id, "unchanged delete override", &expected).await?;
 
 	expect_member(&owner, &unknown, &user_id, "unchanged delete match", &[("displayname", None)])
 		.await
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn member_room(
 	owner: &Client<'_>,
 	user_id: &UserId,
@@ -176,6 +171,7 @@ async fn member_room(
 	Ok(room)
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn expect_member(
 	owner: &Client<'_>,
 	room_id: &RoomId,
@@ -191,6 +187,7 @@ async fn expect_member(
 }
 
 #[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn put_profile(
 	&self,
 	user_id: &UserId,
@@ -205,6 +202,7 @@ async fn put_profile(
 }
 
 #[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn delete_profile(
 	&self,
 	user_id: &UserId,
@@ -216,6 +214,7 @@ async fn delete_profile(
 }
 
 #[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn profile_request(
 	&self,
 	method: Method,
@@ -245,6 +244,7 @@ async fn profile_request(
 }
 
 #[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn member_content(&self, room_id: &RoomId, user_id: &UserId) -> Result<Value> {
 	self.get(&format!("rooms/{room_id}/state/m.room.member/{user_id}"))
 		.await
