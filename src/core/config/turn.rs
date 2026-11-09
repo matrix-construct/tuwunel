@@ -174,8 +174,8 @@ pub struct Turn {
 /// ```
 ///
 /// Tips:
-/// - Query parameters already in `url` are kept, for a service that takes
-///   its API key in the query.
+/// - Query parameters already in `url`, other than `service` and `ttl`,
+///   are kept, for a service that takes its API key in the query.
 /// - One set of credentials is shared by every user and renewed after
 ///   half its lifetime, so the endpoint sees about two requests per
 ///   credential lifetime however many clients ask. No Matrix user ID is

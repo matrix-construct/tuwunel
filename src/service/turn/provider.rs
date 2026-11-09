@@ -118,12 +118,24 @@ async fn fetch_endpoint(
 }
 
 fn with_query(mut url: Url, ttl: Duration) -> Url {
+	if url.query_pairs().any(|(key, _)| reserved(&key)) {
+		let original = url.clone();
+
+		url.query_pairs_mut().clear().extend_pairs(
+			original
+				.query_pairs()
+				.filter(|(key, _)| !reserved(key)),
+		);
+	}
+
 	url.query_pairs_mut()
 		.append_pair("service", "turn")
 		.append_pair("ttl", &ttl.as_secs().to_string());
 
 	url
 }
+
+fn reserved(key: &str) -> bool { matches!(key, "service" | "ttl") }
 
 #[implement(Service)]
 async fn fetch_cloudflare(

@@ -171,15 +171,25 @@ fn port_53_is_found_with_or_without_a_query() {
 }
 
 #[test]
-fn endpoint_query_keeps_existing_parameters() {
-	let url = "https://relay.example/api/v1/turn/credentials?apiKey=k"
-		.parse()
-		.expect("url");
+fn endpoint_query_keeps_other_parameters() {
+	for (input, expected) in [
+		(
+			"https://relay.example/?apiKey=k==",
+			"https://relay.example/?apiKey=k==&service=turn&ttl=86400",
+		),
+		(
+			"https://relay.example/?service=turn",
+			"https://relay.example/?service=turn&ttl=86400",
+		),
+		(
+			"https://relay.example/?ttl=5&api_key=x",
+			"https://relay.example/?api_key=x&service=turn&ttl=86400",
+		),
+	] {
+		let url = input.parse().expect("url");
 
-	assert_eq!(
-		with_query(url, DAY).as_str(),
-		"https://relay.example/api/v1/turn/credentials?apiKey=k&service=turn&ttl=86400"
-	);
+		assert_eq!(with_query(url, DAY).as_str(), expected);
+	}
 }
 
 fn answer(value: Value) -> Answer { from_value(value).expect("answer should deserialize") }
