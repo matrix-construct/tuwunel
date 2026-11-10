@@ -23,6 +23,12 @@ use {
 	},
 	tracing_flame::FlameLayer,
 };
+#[cfg(feature = "sentry_telemetry")]
+use {
+	sentry_tracing::{BreadcrumbLayer, ErrorLayer, SpanLayer},
+	tracing::{Level, Metadata},
+	tracing_subscriber::filter::{LevelFilter, filter_fn},
+};
 
 #[cfg(feature = "perf_measurements")]
 pub(crate) type TracingFlameGuard =
@@ -135,11 +141,21 @@ where
 	let filter = EnvFilter::try_new(&config.telemetry.sentry.filter)
 		.map_err(|e| err!(Config("telemetry.sentry.filter", "{e}.")))?;
 
-	let layer = sentry_tracing::layer();
+	// Same levels as sentry_tracing's default span and event filters.
+	let layer = SpanLayer::new()
+		.with_filter(LevelFilter::INFO)
+		.and_then(BreadcrumbLayer::new().with_filter(filter_fn(is_breadcrumb)))
+		.and_then(ErrorLayer::new().with_filter(LevelFilter::ERROR));
+
 	let (reload_filter, reload_handle) = reload::Layer::new(filter);
 
 	reload_handles.add("sentry", Box::new(reload_handle));
 	Ok(layer.with_filter(reload_filter))
+}
+
+#[cfg(feature = "sentry_telemetry")]
+fn is_breadcrumb(metadata: &Metadata<'_>) -> bool {
+	matches!(*metadata.level(), Level::WARN | Level::INFO)
 }
 
 #[cfg(feature = "perf_measurements")]
