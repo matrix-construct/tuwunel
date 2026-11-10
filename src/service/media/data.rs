@@ -9,7 +9,7 @@ use tuwunel_core::{
 	Err, Result, at, debug, debug_info, err,
 	utils::{
 		ReadyExt, str_from_bytes,
-		stream::{TryExpect, TryIgnore},
+		stream::{TryExpect, TryIgnore, TryReadyExt},
 		string_from_bytes,
 	},
 };
@@ -312,17 +312,16 @@ impl Data {
 		let (wanted, other) = self
 			.mediaid_file
 			.keys_prefix_raw(&prefix)
-			.ignore_err()
-			.ready_fold((None, None), |(wanted, other), key: &[u8]| {
+			.ready_try_fold((None, None), |(wanted, other), key: &[u8]| {
 				// owning only what is retained; the rest of the prefix is walked
 				// past and never copied
-				match animate.prefers_type(key_content_type(key)) {
+				Ok(match animate.prefers_type(key_content_type(key)) {
 					| true if wanted.is_none() => (Some(key.to_owned()), other),
 					| false if other.is_none() => (wanted, Some(key.to_owned())),
 					| _ => (wanted, other),
-				}
+				})
 			})
-			.await;
+			.await?;
 
 		let key = wanted
 			.or(other)
