@@ -7,7 +7,7 @@
 %global selinuxtype targeted
 
 Name:           tuwunel
-Version:        1.9.4
+Version:        2.0.0
 Release:        1%{?dist}
 Summary:        High performance Matrix homeserver written in Rust
 License:        Apache-2.0
