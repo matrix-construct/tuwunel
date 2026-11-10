@@ -157,13 +157,14 @@ jobs:
       machines: ${{inputs.machines || (fromJSON(env.is_fat) && vars.MACHINES) || env.default_machines}}
       pipeline: ${{inputs.pipeline || github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
       checkout: ${{inputs.checkout || github.sha}}
-      enable_lint: ${{fromJSON(inputs.enable_lint || 'true')}}
-      enable_audit: ${{fromJSON(inputs.enable_audit || env.is_branch || env.is_fat || 'false')}}
-      enable_test: ${{fromJSON(inputs.enable_test || 'true')}}
+      # Checkbox inputs read github.event.inputs, where false is the string 'false'.
+      enable_lint: ${{fromJSON(github.event.inputs.enable_lint || 'true')}}
+      enable_audit: ${{fromJSON(inputs.enable_audit || env.is_branch || 'false')}}
+      enable_test: ${{fromJSON(github.event.inputs.enable_test || 'true')}}
       enable_test_doc: ${{fromJSON(inputs.enable_test_doc || 'true')}}
       enable_test_unit: ${{fromJSON(inputs.enable_test_unit || 'true')}}
       enable_test_bench: ${{fromJSON(inputs.enable_test_bench || 'true')}}
-      enable_test_memcheck: ${{fromJSON(inputs.enable_test_memcheck || env.is_test)}}
+      enable_test_memcheck: ${{fromJSON(inputs.enable_test_memcheck || vars.ENABLE_MEMCHECK || env.is_test)}}
       enable_test_smoke: ${{fromJSON(inputs.enable_test_smoke || env.is_fat || 'false')}}
       enable_test_nix: ${{fromJSON(inputs.enable_test_nix || 'true')}}
       enable_test_rustsdk: ${{fromJSON(inputs.enable_test_rustsdk || 'true')}}
@@ -172,30 +173,30 @@ jobs:
       complement_verbose: ${{fromJSON(inputs.complement_verbose || 'false')}}
       enable_test_complement_crypto: ${{fromJSON(inputs.enable_test_complement_crypto || 'true')}}
       complement_crypto_verbose: ${{fromJSON(inputs.complement_crypto_verbose || 'false')}}
-      enable_test_complement_interop: ${{fromJSON(inputs.enable_test_complement_interop || 'true')}}
-      enable_test_complement_interop_inverse: ${{fromJSON(inputs.enable_test_complement_interop_inverse || 'true')}}
+      enable_test_complement_interop: ${{fromJSON(github.event.inputs.enable_test_complement_interop || 'true')}}
+      enable_test_complement_interop_inverse: ${{fromJSON(github.event.inputs.enable_test_complement_interop_inverse || 'true')}}
       complement_interop_run: ${{inputs.complement_interop_run || '.*'}}
       enable_test_mas: ${{fromJSON(inputs.enable_test_mas || 'true')}}
       mas_verbose: ${{fromJSON(inputs.mas_verbose || 'false')}}
       enable_test_playwright: ${{fromJSON(inputs.enable_test_playwright || env.is_branch || 'false')}}
       playwright_shards: ${{inputs.playwright_shards || vars.PLAYWRIGHT_SHARDS || env.default_playwright_shards}}
       playwright_workers: ${{inputs.playwright_workers || vars.PLAYWRIGHT_WORKERS || env.default_playwright_workers}}
-      enable_package: ${{fromJSON(inputs.enable_package || 'true')}}
+      enable_package: ${{fromJSON(github.event.inputs.enable_package || 'true')}}
       enable_package_book: ${{fromJSON(inputs.enable_package_book || 'true')}}
       enable_package_docs: ${{fromJSON(inputs.enable_package_docs || 'true')}}
-      enable_package_binary: ${{fromJSON(inputs.enable_package_binary || env.is_fat || env.is_pull || 'false')}}
-      enable_package_container: ${{fromJSON(inputs.enable_package_container || env.is_fat || 'true')}}
+      enable_package_binary: ${{fromJSON(inputs.enable_package_binary || fromJSON(env.is_fat) || fromJSON(env.is_pull))}}
+      enable_package_container: ${{fromJSON(inputs.enable_package_container || env.is_fat || 'false')}}
       package_containers: ${{inputs.package_containers || env.default_package_containers}}
       enable_package_distro: ${{fromJSON(inputs.enable_package_distro || env.is_fat || 'false')}}
       package_distros: ${{inputs.package_distros || env.default_package_distros}}
       enable_package_checks: ${{fromJSON(inputs.enable_package_checks || env.is_fat || 'false')}}
-      enable_publish: ${{fromJSON(inputs.enable_publish || 'true')}}
+      enable_publish: ${{fromJSON(github.event.inputs.enable_publish || 'true')}}
       is_release: ${{fromJSON(env.is_release || 'false')}}
       is_main: ${{fromJSON(env.is_main || 'false')}}
       is_test: ${{fromJSON(env.is_test || 'false')}}
       is_pull: ${{fromJSON(env.is_pull || 'false')}}
       is_fat: ${{fromJSON(env.is_fat || 'false')}}
-      is_dev: ${{fromJSON(env.is_dev || 'true')}}
+      is_dev: ${{fromJSON(env.is_dev || 'false')}}
       pages_url: 'https://matrix-construct.github.io/tuwunel'
       release_url: ${{steps.release.outputs.upload_url}}
       docker_repo: ${{vars.DOCKER_REPO}}
@@ -222,15 +223,15 @@ jobs:
         runner: ${{matrix.runner}}
         pipeline: ${{inputs.pipeline || github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
         seed_builder: ${{vars.SEED_BUILDER || 'jevolk'}}
-        reserved_space:    '{"het": "60GB",  "aws": "12GB", "ec2": "120GB", "gcp": "20GB"}'
+        reserved_space:    '{"het": "60GB",  "aws": "12GB", "ec2": "120GB",  "gcp": "20GB"}'
         max_used_space:    '{"het": "250GB", "aws": "32GB", "ec2": "1000GB", "gcp": "100GB"}'
-        cachemount_max:    '{"het": "80GB",  "aws": "12GB", "ec2": "160GB", "gcp": "30GB"}'
-        min_free_space:    '{"het": "200GB", "aws": "16GB", "ec2": "400GB", "gcp": "40GB"}'
-        safety_free_space: '{"het": "64GB",  "aws": "8GB",  "ec2": "128GB", "gcp": "16GB"}'
-        reap_idle_hours:   '{"het": "24",    "aws": "24",   "ec2": "24", "gcp": "24"}'
+        cachemount_max:    '{"het": "80GB",  "aws": "12GB", "ec2": "160GB",  "gcp": "30GB"}'
+        min_free_space:    '{"het": "200GB", "aws": "16GB", "ec2": "400GB",  "gcp": "40GB"}'
+        safety_free_space: '{"het": "64GB",  "aws": "8GB",  "ec2": "128GB",  "gcp": "16GB"}'
+        reap_idle_hours:   '{"het": "24",    "aws": "24",   "ec2": "24",     "gcp": "24"}'
         reap_min_free:     '{"het": "500GB", "aws": "40GB", "ec2": "1000GB", "gcp": "60GB"}'
-        seed_budget:       '{"het": "300GB", "aws": "0GB",  "ec2": "600GB", "gcp": "140GB"}'
-        builder_memory:    '{"het": "76GB",  "aws": "",     "ec2": "224GB", "gcp": "13GB"}'
+        seed_budget:       '{"het": "300GB", "aws": "0GB",  "ec2": "600GB",  "gcp": "140GB"}'
+        builder_memory:    '{"het": "76GB",  "aws": "",     "ec2": "224GB",  "gcp": "13GB"}'
       run: |
         .github/workflows/init.sh
 
