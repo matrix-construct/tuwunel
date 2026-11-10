@@ -4,15 +4,15 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 224. Passing: **86.2%**
-  - ✅ `pass`: 193
+- Test groups: 224. Passing: **86.6%**
+  - ✅ `pass`: 194
   - 🟨 `some`: 9
-  - 🟥 `fail`: 22
+  - 🟥 `fail`: 21
   - ⬛ `skip`: 0
 
-- Subtests: 627. Passing: **83.4%**
-  - ✅ `pass`: 523
-  - 🟥 `fail`: 96
+- Subtests: 627. Passing: **83.7%**
+  - ✅ `pass`: 525
+  - 🟥 `fail`: 94
   - ⬛ `skip`: 8
 
 ## All Top-Level Tests
@@ -140,7 +140,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | – | `MSC4297StateResolutionV2_1_starts_from_empty_set` |
 | 🟥 | 0/2/0 | `MSC4308ThreadSubscriptionsSlidingSync` |
 | ✅ | 3/0/0 | `MSC4311FullEventsOnStrippedStateFederation` |
-| 🟥 | 0/2/0 | `MSC4311RejectInvalidStrippedStateFederation` |
+| ✅ | 2/0/0 | `MSC4311RejectInvalidStrippedStateFederation` |
 | ✅ | 5/0/0 | `MSC4311StrippedStateClientAPI` |
 | 🟥 | 0/6/0 | `MSC4429ProfileUpdates` |
 | ✅ | – | `MediaConfig` |

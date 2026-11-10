@@ -63,10 +63,10 @@ pub fn enforce_stripped_create(
 
 	match verdict {
 		| Valid => false,
-		// A complete create PDU bound to a different room must fail for v12+
-		// rooms even during the migration window (MSC4311 Migration).
-		| WrongRoom => v12_room_ids || enforce,
-		| Missing | NotPdu | BadSignature => enforce,
+		// A v12+ room's stripped state must carry a create event, and a full PDU
+		// must bind to this room, even during the migration window (MSC4311).
+		| Missing | WrongRoom => v12_room_ids || enforce,
+		| NotPdu | BadSignature => enforce,
 	}
 }
 
@@ -293,8 +293,19 @@ mod tests {
 	use serde_json::{Value as JsonValue, json, value::RawValue as RawJsonValue};
 
 	use super::{
-		dedup_stripped_state, entry_json, is_legacy, occupies_cell, state_cell, without_member,
+		StrippedCreateVerdict::{Missing, NotPdu, WrongRoom},
+		dedup_stripped_state, enforce_stripped_create, entry_json, is_legacy, occupies_cell,
+		state_cell, without_member,
 	};
+
+	#[test]
+	fn a_missing_create_rejects_in_v12_rooms_without_enforcement() {
+		assert!(enforce_stripped_create(Missing, true, false));
+		assert!(enforce_stripped_create(WrongRoom, true, false));
+		assert!(!enforce_stripped_create(NotPdu, true, false));
+		assert!(!enforce_stripped_create(Missing, false, false));
+		assert!(enforce_stripped_create(Missing, false, true));
+	}
 
 	#[test]
 	fn a_cells_first_pdu_wins_over_an_earlier_legacy_entry() {

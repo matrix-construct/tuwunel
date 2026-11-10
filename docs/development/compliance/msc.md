@@ -66,7 +66,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4323 | ✅ ● | 100/100 | User suspension &amp; locking endpoints | src/api/client/admin.rs four routes at stable v1 paths; m.account_moderation ... |
 | MSC4319 | 🟨 ● | 50/50 | Room member events for invite and knock rooms in the `/sync` response | state/mod.rs:464 puts inviter member in stripped state; no `state` key |
 | MSC4312 | ✅ ● | 85/85 | Resetting cross-signing keys in the OAuth world | cross-signing reset via OAuth account deep-link; dual-stage advertise deferred |
-| MSC4311 | ✅ ● | 85/95 | Ensuring the create event is available on invites | full-PDU invite/knock state; create-event validation + M_MISSING_PARAM + 5xx |
+| MSC4311 | ✅ ● | 80/90 | Ensuring the create event is available on invites | 4-field client create; v12 missing/wrong-room create rejects; rest knob-gated |
 | MSC4307 | ✅ ● | 100/100 | Validate that `auth_events` are in the correct room | auth_event room_id mismatch rejected |
 | MSC4304 | ✅ ● | 100/100 | Room Version 12 | V12 stable and the default room version |
 | MSC4297 | ✅ ● | 100/100 | State Resolution v2.1 | src/service/rooms/state_res/resolve.rs:257 conflicted state subgraph; tests pass |

@@ -1673,11 +1673,11 @@
 # missing, not a full PDU, bound to a different room, or fails signature
 # checks, and such events are dropped from knock stripped state. When
 # disabled, as by default, failures are logged but tolerated for
-# ecosystem interoperability; a full PDU bound cryptographically to a
-# different room is always rejected for room versions 12 and later. A
-# full PDU in knock stripped state that fails validation is always
-# omitted, so this setting governs only legacy stripped creates for
-# knocks.
+# ecosystem interoperability, except that for room versions 12 and later
+# a missing create event, or a full PDU bound cryptographically to a
+# different room, is always rejected. A full PDU in knock stripped state
+# that fails validation is always omitted, so this setting governs only
+# legacy stripped creates for knocks.
 #
 # reloadable: yes
 #

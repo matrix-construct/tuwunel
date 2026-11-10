@@ -370,9 +370,9 @@
 {"Action":"pass","Test":"TestMSC4311FullEventsOnStrippedStateFederation/parallel"}
 {"Action":"pass","Test":"TestMSC4311FullEventsOnStrippedStateFederation/parallel/`invite_room_state`"}
 {"Action":"pass","Test":"TestMSC4311FullEventsOnStrippedStateFederation/parallel/`knock_room_state`"}
-{"Action":"fail","Test":"TestMSC4311RejectInvalidStrippedStateFederation"}
-{"Action":"fail","Test":"TestMSC4311RejectInvalidStrippedStateFederation/parallel"}
-{"Action":"fail","Test":"TestMSC4311RejectInvalidStrippedStateFederation/parallel/`m.room.create`_event_missing_from_`invite_room_state`"}
+{"Action":"pass","Test":"TestMSC4311RejectInvalidStrippedStateFederation"}
+{"Action":"pass","Test":"TestMSC4311RejectInvalidStrippedStateFederation/parallel"}
+{"Action":"pass","Test":"TestMSC4311RejectInvalidStrippedStateFederation/parallel/`m.room.create`_event_missing_from_`invite_room_state`"}
 {"Action":"pass","Test":"TestMSC4311StrippedStateClientAPI"}
 {"Action":"pass","Test":"TestMSC4311StrippedStateClientAPI/parallel"}
 {"Action":"pass","Test":"TestMSC4311StrippedStateClientAPI/parallel/`invite_state`_on_`/sync`_(local_invite)"}
