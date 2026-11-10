@@ -123,6 +123,11 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
+		name: "delayid_finalised",
+		ttl: 60 * 60 * 24 * 7, // MSC4140 lookup; about a week, less at the size cap
+		..descriptor::RANDOM_SMALL_CACHE
+	},
+	Descriptor {
 		name: "disabledroomids",
 		..descriptor::RANDOM_SMALL
 	},

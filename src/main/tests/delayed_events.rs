@@ -4,8 +4,9 @@
 //!
 //! The cases cover discovery, scheduling through every request form, firing
 //! no earlier than the delay, management by path and by body, a tokenless
-//! send, owner checks, the delay ID shown to the sender alone, limits,
-//! deactivation, and a scheduled event surviving a restart.
+//! send, owner checks, finalised records and their replay, the delay ID shown
+//! to the sender alone, limits, deactivation, and a scheduled event surviving
+//! a restart.
 
 use std::{
 	env::{current_exe, var},
@@ -29,7 +30,7 @@ use tuwunel_core::{
 			room::{member::RoomMemberEventContent, topic::RoomTopicEventContent},
 		},
 	},
-	utils::time::now_millis,
+	utils::{BoolExt, stream::ReadyExt, time::now_millis},
 };
 use tuwunel_matrix::Event;
 use tuwunel_service::Services;
@@ -115,10 +116,11 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	empty_key_query_fires(services, &alice, &room).await?;
 	every_form_schedules(&alice, &room).await?;
 	bare_delay_refused(&alice, &room).await?;
-	restart_and_cancel(&alice, &room).await?;
+	restart_and_cancel(services, &alice, &room).await?;
 	tokenless_send_on_unstable_only(services, &alice, &room, &alice_id).await?;
 	owner_mismatch_is_not_found(&alice, &bob, &room).await?;
 	transaction_retry_returns_one_delay(services, &alice, &room, &alice_id).await?;
+	failed_sends_are_kept(services, &alice, &room, &alice_id).await?;
 	room_auth_checked_at_schedule(&bob, &room).await?;
 	delay_id_reaches_only_its_sender(services, &alice, &bob, &alice_id).await?;
 	deactivation_removes_scheduled(services, &bob, &bob_id).await
@@ -204,10 +206,22 @@ async fn every_form_schedules(alice: &Client<'_>, room: &RoomId) -> Result {
 			.post_json(&event_url, &json!({ "action": "cancel" }))
 			.await?;
 
-		refused(alice.fetch(&event_url).await?, StatusCode::NOT_FOUND, "M_NOT_FOUND").await?;
+		require(cancelled(&alice.delayed(delay_id).await?), "a cancelled event was not kept")?;
 	}
 
 	Ok(())
+}
+
+/// Whether a finalised event reads as cancelled.
+///
+/// A cancelled outcome carries its timestamp and neither an event ID nor an
+/// error.
+fn cancelled(event: &Value) -> bool {
+	let finalised = &event["finalised"];
+
+	finalised["finalised_ts"].is_u64()
+		&& finalised.get("event_id").is_none()
+		&& finalised.get("error").is_none()
 }
 
 async fn bare_delay_refused(alice: &Client<'_>, room: &RoomId) -> Result {
@@ -219,7 +233,7 @@ async fn bare_delay_refused(alice: &Client<'_>, room: &RoomId) -> Result {
 	refused(response, StatusCode::BAD_REQUEST, "M_INVALID_PARAM").await
 }
 
-async fn restart_and_cancel(alice: &Client<'_>, room: &RoomId) -> Result {
+async fn restart_and_cancel(services: &Services, alice: &Client<'_>, room: &RoomId) -> Result {
 	let delay_id = alice
 		.schedule_dedicated(room, "m.room.message", "restart", &json!({ "body": "x" }))
 		.await?;
@@ -248,13 +262,66 @@ async fn restart_and_cancel(alice: &Client<'_>, room: &RoomId) -> Result {
 	assert_eq!(listed["delayed_events"][0]["delay_id"], delay_id.as_str(), "{listed}");
 	assert_eq!(listed["delayed_events"][0]["delay"], json!(LONG), "{listed}");
 
+	let cancelled_at = now_millis();
+
 	alice.act(&delay_id, "cancel").await?;
 
-	let response = alice
-		.fetch(&alice.client_url(UNSTABLE, &format!("delayed_events/{delay_id}")))
+	let event = alice.delayed(&delay_id).await?;
+
+	require(cancelled(&event), "a cancelled event was not kept")?;
+	require(
+		event["finalised"]["finalised_ts"]
+			.as_u64()
+			.ge(&Some(cancelled_at)),
+		"finalised_ts predates the cancel",
+	)?;
+
+	alice.act(&delay_id, "cancel").await?;
+	conflicting(alice, &delay_id, ["send", "restart"]).await?;
+
+	let rescheduled = scheduled_rows(services, &delay_id).await;
+
+	require(rescheduled.is_false(), "a conflicting action rescheduled a finalised event")?;
+
+	let listed = alice
+		.get_json(&alice.client_url(UNSTABLE, "delayed_events"))
 		.await?;
 
-	refused(response, StatusCode::NOT_FOUND, "M_NOT_FOUND").await
+	require(
+		listed.to_string().contains(&delay_id).is_false(),
+		"a finalised event is listed as scheduled",
+	)
+}
+
+async fn conflicting<const N: usize>(
+	client: &Client<'_>,
+	delay_id: &str,
+	actions: [&str; N],
+) -> Result {
+	for action in actions {
+		let response = client.attempt(delay_id, action).await?;
+
+		refused(response, StatusCode::CONFLICT, "M_UNKNOWN").await?;
+	}
+
+	Ok(())
+}
+
+/// Whether an event still has a scheduled record or due-time entry.
+///
+/// Listing reads the owner index alone, so these two rows are read directly.
+async fn scheduled_rows(services: &Services, delay_id: &str) -> bool {
+	let record = services.db["delayid_event"]
+		.exists(delay_id)
+		.await
+		.is_ok();
+
+	let due = services.db["dueat_delayid"]
+		.keys()
+		.ready_any(|key: Result<(u64, &str)>| key.is_ok_and(|(_, id)| id == delay_id))
+		.await;
+
+	record || due
 }
 
 async fn tokenless_send_on_unstable_only(
@@ -282,9 +349,32 @@ async fn tokenless_send_on_unstable_only(
 	let unstable = alice.client_url(UNSTABLE, &action);
 
 	accepted(tokenless(services, &unstable).await?).await?;
-	require(call_member_sent(services, room, &state_key).await, "the send did not land")?;
 
-	refused(tokenless(services, &unstable).await?, StatusCode::NOT_FOUND, "M_NOT_FOUND").await
+	let sent = call_member_id(services, room, &state_key).await?;
+
+	accepted(tokenless(services, &unstable).await?).await?;
+
+	let cancel = alice.client_url(UNSTABLE, &format!("delayed_events/{delay_id}/cancel"));
+
+	refused(tokenless(services, &cancel).await?, StatusCode::CONFLICT, "M_UNKNOWN").await?;
+	let resent = call_member_id(services, room, &state_key).await?;
+
+	require(resent.eq(&sent), "a repeated send sent again")?;
+
+	let event = alice.delayed(delay_id).await?;
+
+	assert_eq!(event["finalised"]["event_id"], sent.as_str(), "{event}");
+
+	Ok(())
+}
+
+async fn call_member_id(services: &Services, room: &RoomId, state_key: &str) -> Result<String> {
+	let event = services
+		.state_accessor
+		.room_state_get(room, &CALL_MEMBER.into(), state_key)
+		.await?;
+
+	Ok(event.event_id.to_string())
 }
 
 async fn owner_mismatch_is_not_found(
@@ -305,8 +395,16 @@ async fn owner_mismatch_is_not_found(
 		.await?;
 
 	refused(cancel, StatusCode::NOT_FOUND, "M_NOT_FOUND").await?;
+	alice.act(&delay_id, "cancel").await?;
+	refused(bob.fetch(&url).await?, StatusCode::NOT_FOUND, "M_NOT_FOUND").await?;
 
-	alice.act(&delay_id, "cancel").await
+	for action in ["cancel", "send"] {
+		let response = bob.attempt(&delay_id, action).await?;
+
+		refused(response, StatusCode::NOT_FOUND, "M_NOT_FOUND").await?;
+	}
+
+	Ok(())
 }
 
 async fn transaction_retry_returns_one_delay(
@@ -334,6 +432,58 @@ async fn transaction_retry_returns_one_delay(
 	assert_eq!(retry?, first, "a retried transaction scheduled twice");
 
 	alice.act(&first, "cancel").await
+}
+
+/// Keeps each failed send as a finalised record with its error (MSC4140).
+///
+/// One event is refused when it falls due and one on an explicit send, both
+/// for a suspended sender; neither may be sent or restarted afterwards.
+async fn failed_sends_are_kept(
+	services: &Services,
+	alice: &Client<'_>,
+	room: &RoomId,
+	alice_id: &UserId,
+) -> Result {
+	let path = format!("rooms/{room}/send/m.room.message/fails?org.matrix.msc4140.delay=300");
+	let reply = alice
+		.put_json(&alice.url(&path), &json!({ "body": "x" }))
+		.await?;
+
+	let due = field(&reply, "delay_id")?;
+	let explicit = alice
+		.schedule_dedicated(room, "m.room.message", "explicit", &json!({ "body": "x" }))
+		.await?;
+
+	services
+		.users
+		.set_suspended(alice_id, &services.globals.server_user);
+
+	let fired = poll_until(FIRE_DEADLINE, async || {
+		alice
+			.delayed(due)
+			.await
+			.is_ok_and(|event| event.get("finalised").is_some())
+	})
+	.await;
+
+	let refusal = alice.attempt(&explicit, "send").await;
+
+	services.users.clear_suspended(alice_id);
+	require(fired, "the suspended sender's event was never finalised")?;
+	refused(refusal?, StatusCode::FORBIDDEN, "M_USER_SUSPENDED").await?;
+
+	for delay_id in [due, explicit.as_str()] {
+		let event = alice.delayed(delay_id).await?;
+		let finalised = &event["finalised"];
+
+		assert_eq!(finalised["error"]["errcode"], "M_USER_SUSPENDED", "{event}");
+		assert_eq!(finalised.get("event_id"), None, "{event}");
+
+		conflicting(alice, delay_id, ["send", "restart"]).await?;
+		alice.act(delay_id, "cancel").await?;
+	}
+
+	Ok(())
 }
 
 async fn room_auth_checked_at_schedule(bob: &Client<'_>, room: &RoomId) -> Result {
@@ -461,7 +611,8 @@ async fn deactivation_removes_scheduled(
 	)
 	.await;
 
-	assert_eq!(reply?.status(), StatusCode::OK);
+	let reply = accepted(reply?).await?;
+
 	deactivated?;
 	released?;
 
@@ -473,7 +624,14 @@ async fn deactivation_removes_scheduled(
 
 	assert_eq!(scheduled, 0, "deactivation left scheduled events behind");
 
-	Ok(())
+	let delay_id = field(&reply, "delay_id")?;
+	let kept = services
+		.delayed_events
+		.get(delay_id, None)
+		.await
+		.is_ok();
+
+	require(kept.is_false(), "deactivation kept a finalised record")
 }
 
 async fn admission_held(services: &Services, user_id: &UserId) -> bool {
@@ -758,10 +916,15 @@ async fn delayed(&self, delay_id: &str) -> Result<Value> {
 
 #[implement(Client, params = "<'_>")]
 async fn act(&self, delay_id: &str, action: &str) -> Result {
-	let url = self.client_url(UNSTABLE, &format!("delayed_events/{delay_id}/{action}"));
-
-	self.post_json(&url, &json!({}))
+	accepted(self.attempt(delay_id, action).await?)
 		.await
 		.map(|_| ())
 		.map_err(|e| err!("{action} {delay_id}: {e}"))
+}
+
+#[implement(Client, params = "<'_>")]
+async fn attempt(&self, delay_id: &str, action: &str) -> Result<Response> {
+	let url = self.client_url(UNSTABLE, &format!("delayed_events/{delay_id}/{action}"));
+
+	self.post_url(&url, &json!({})).await
 }

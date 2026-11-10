@@ -170,6 +170,7 @@ async fn schedule(
 		timestamp,
 		delay_ms,
 		due_ms: now_millis().saturating_add(delay_ms),
+		finalised: None,
 	};
 
 	check_room_auth(services, &event, &state_lock).await?;

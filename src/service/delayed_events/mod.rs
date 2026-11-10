@@ -2,22 +2,27 @@
 //!
 //! A scheduled event is three rows written in one batch: its record, a
 //! due-time index entry, and an owner index entry. The worker sends each event
-//! when it falls due through the ordinary append path and then deletes its
-//! rows whatever the outcome, so events overdue at startup go out on its first
-//! pass and a crash between the two steps can send one twice.
+//! when it falls due through the ordinary append path, so events overdue at
+//! startup go out on its first pass. Whatever the outcome, one batch then
+//! replaces the three rows with a finalised record, and a crash between the
+//! two steps can send an event twice. Finalised records are kept for about a
+//! week, or less once their column reaches its size cap.
 
 use std::{collections::BTreeMap, pin::pin, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures::{
-	Stream, StreamExt,
+	Stream, StreamExt, TryFutureExt,
 	future::{Either, select},
 	stream::unfold,
 };
 use http::StatusCode;
 use ruma::{
 	MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, OwnedUserId, UserId,
-	api::error::{ErrorKind, LimitExceededErrorData, RetryAfter},
+	api::{
+		client::delayed_events::get_delayed_event::v1::Finalized,
+		error::{ErrorKind, LimitExceededErrorData, RetryAfter, StandardErrorBody},
+	},
 	events::TimelineEventType,
 };
 use serde::{Deserialize, Serialize};
@@ -44,6 +49,9 @@ use crate::{
 	service::make_name,
 	transaction_ids::{RoomScope, RoomTxn},
 };
+
+#[cfg(test)]
+mod tests;
 
 /// A `delay_id`, as this server issues it or a client names it.
 ///
@@ -74,11 +82,13 @@ pub struct Service {
 
 struct Data {
 	delayid_event: Arc<Map>,
+	delayid_finalised: Arc<Map>,
 	dueat_delayid: Arc<Map>,
 	userid_delayid: Arc<Map>,
 }
 
-/// A scheduled event as stored, and as reported to its owner.
+/// A delayed event as stored, scheduled or finalised, and as reported to its
+/// owner.
 ///
 /// Fields are additive: a record missing a later field reads with its default.
 #[derive(Debug, Deserialize, Serialize)]
@@ -113,6 +123,10 @@ pub struct Event {
 
 	/// When the event falls due, as Unix time in milliseconds.
 	pub due_ms: u64,
+
+	/// The outcome of a finalised event, absent while it is scheduled.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub finalised: Option<Finalized>,
 }
 
 /// The limits a client is told about and held to.
@@ -141,6 +155,7 @@ impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		let db = Data {
 			delayid_event: args.db["delayid_event"].clone(),
+			delayid_finalised: args.db["delayid_finalised"].clone(),
 			dueat_delayid: args.db["dueat_delayid"].clone(),
 			userid_delayid: args.db["userid_delayid"].clone(),
 		};
@@ -250,17 +265,20 @@ pub fn schedule(&self, event: &Event, txn: Option<RoomTxn<'_>>) -> DelayId {
 	delay_id
 }
 
-/// Reads a scheduled event, as missing unless `owner` scheduled it.
+/// Reads a scheduled or finalised event, as missing unless `owner` scheduled
+/// it.
 ///
 /// A tokenless management request passes no owner; anything that names one
-/// is held to it.
+/// is held to it. The finalised record is read only when no scheduled one is
+/// found, since one batch writes it and deletes the scheduled rows.
 #[implement(Service)]
 pub async fn get(&self, delay_id: &str, owner: Option<&UserId>) -> Result<Event> {
 	self.get_event(delay_id)
+		.or_else(|_| read_event(&self.db.delayid_finalised, delay_id))
 		.await
 		.ok()
 		.filter(|event| owner.is_none_or(|owner| owner == event.user_id))
-		.ok_or_else(|| err!(Request(NotFound("No scheduled delayed event with this ID."))))
+		.ok_or_else(|| err!(Request(NotFound("No delayed event with this ID."))))
 }
 
 /// Streams the events a user has scheduled, with their `delay_id`s.
@@ -282,12 +300,17 @@ pub fn scheduled<'a>(
 /// Counts a scheduled event's delay again from now.
 ///
 /// The event keeps its `delay_id` and content; only its due time and its
-/// due-time index entry move.
+/// due-time index entry move. A finalised event conflicts (MSC4140).
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn restart(&self, delay_id: &str, owner: Option<&UserId>) -> Result {
 	let _lock = self.locks.lock(&DelayId::from(delay_id)).await;
 	let event = self.get(delay_id, owner).await?;
+
+	if let Some(finalised) = &event.finalised {
+		return Err(conflict(finalised));
+	}
+
 	let old_due = event.due_ms;
 	let event = Event {
 		due_ms: now_millis().saturating_add(event.delay_ms),
@@ -299,31 +322,48 @@ pub async fn restart(&self, delay_id: &str, owner: Option<&UserId>) -> Result {
 	Ok(())
 }
 
-/// Cancels a scheduled event.
+/// Cancels a scheduled event, so it can no longer be sent.
 ///
-/// Its rows are deleted in one batch, so it can no longer be read or sent.
+/// An event already cancelled, or whose send failed, cancels again without
+/// effect; one already sent conflicts (MSC4140).
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn cancel(&self, delay_id: &str, owner: Option<&UserId>) -> Result {
 	let _lock = self.locks.lock(&DelayId::from(delay_id)).await;
 	let event = self.get(delay_id, owner).await?;
 
-	self.remove(delay_id, &event.user_id, event.due_ms);
+	match event.finalised {
+		| Some(Finalized::Error { .. } | Finalized::Canceled { .. }) => Ok(()),
+		| Some(ref finalised @ Finalized::Sent { .. }) => Err(conflict(finalised)),
+		| None => {
+			let finalized_ts = MilliSecondsSinceUnixEpoch::now();
+			let finalised = Some(Finalized::Canceled { finalized_ts });
 
-	Ok(())
+			self.finalise(delay_id, &Event { finalised, ..event });
+
+			Ok(())
+		},
+	}
 }
 
-/// Sends a scheduled event now and removes it whatever the outcome.
+/// Sends a scheduled event now and finalises it whatever the outcome.
 ///
 /// An append can fail after the event is stored, so a failed send is never
 /// kept for another attempt. The error is the one an ordinary send returns.
+/// An event already sent answers with its event ID again; one cancelled, or
+/// whose send failed, conflicts (MSC4140).
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn send(&self, delay_id: &str, owner: Option<&UserId>) -> Result<OwnedEventId> {
 	let _lock = self.locks.lock(&DelayId::from(delay_id)).await;
 	let event = self.get(delay_id, owner).await?;
 
-	self.send_and_remove(delay_id, event).await
+	match event.finalised {
+		| None => self.send_and_finalise(delay_id, event).await,
+		| Some(Finalized::Sent { event_id, .. }) => Ok(event_id),
+		| Some(ref finalised @ (Finalized::Error { .. } | Finalized::Canceled { .. })) =>
+			Err(conflict(finalised)),
+	}
 }
 
 /// Removes every event a user has scheduled.
@@ -436,7 +476,7 @@ async fn send_scheduled(&self, delay_id: &DelayId, due: u64) {
 
 	let user_id = event.user_id.clone();
 
-	self.send_and_remove(delay_id, event)
+	self.send_and_finalise(delay_id, event)
 		.await
 		.inspect_err(|e| match e.status_code().is_server_error() {
 			| true => warn!(%delay_id, %user_id, %e, "Delayed event not sent"),
@@ -445,17 +485,16 @@ async fn send_scheduled(&self, delay_id: &DelayId, due: u64) {
 		.ok();
 }
 
-/// Sends an event, then deletes its rows whatever the outcome.
+/// Sends an event, then finalises it with the outcome.
 ///
 /// Sending first means a crash between the two steps repeats the event rather
 /// than losing it.
 #[implement(Service)]
-async fn send_and_remove(&self, delay_id: &str, event: Event) -> Result<OwnedEventId> {
-	let user_id = event.user_id.clone();
-	let due = event.due_ms;
-	let result = self.append(delay_id, event).await;
+async fn send_and_finalise(&self, delay_id: &str, event: Event) -> Result<OwnedEventId> {
+	let result = self.append(delay_id, &event).await;
+	let finalised = Some(outcome(&result));
 
-	self.remove(delay_id, &user_id, due);
+	self.finalise(delay_id, &Event { finalised, ..event });
 
 	result
 }
@@ -467,36 +506,27 @@ async fn send_and_remove(&self, delay_id: &str, event: Event) -> Result<OwnedEve
 /// serving paths show to its sender alone (MSC4140).
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all)]
-async fn append(&self, delay_id: &str, event: Event) -> Result<OwnedEventId> {
-	let Event {
-		user_id,
-		room_id,
-		event_type,
-		state_key,
-		content,
-		redacts,
-		timestamp,
-		..
-	} = event;
+async fn append(&self, delay_id: &str, event: &Event) -> Result<OwnedEventId> {
+	let Event { user_id, room_id, .. } = event;
 
-	if self.services.users.is_suspended(&user_id).await {
+	if self.services.users.is_suspended(user_id).await {
 		return Err!(Request(UserSuspended("Cannot send delayed events while suspended.")));
 	}
 
 	let pdu = PduBuilder {
-		event_type,
-		content,
+		event_type: event.event_type.clone(),
+		content: event.content.clone(),
 		unsigned: Some(BTreeMap::from([(DELAY_ID.to_owned(), delay_id.into())])),
-		state_key,
-		redacts,
-		timestamp,
+		state_key: event.state_key.clone(),
+		redacts: event.redacts.clone(),
+		timestamp: event.timestamp,
 	};
 
-	let state_lock = self.services.state.mutex.lock(&room_id).await;
+	let state_lock = self.services.state.mutex.lock(room_id).await;
 
 	self.services
 		.timeline
-		.build_and_append_pdu(pdu, &user_id, &room_id, &state_lock)
+		.build_and_append_pdu(pdu, user_id, room_id, &state_lock)
 		.await
 }
 
@@ -584,9 +614,11 @@ fn owned_ids<'a>(&'a self, user_id: &'a UserId) -> impl Stream<Item = DelayId> +
 #[implement(Service)]
 #[tracing::instrument(level = "trace", skip(self))]
 async fn get_event(&self, delay_id: &str) -> Result<Event> {
-	self.db
-		.delayid_event
-		.get(delay_id)
+	read_event(&self.db.delayid_event, delay_id).await
+}
+
+async fn read_event(map: &Arc<Map>, delay_id: &str) -> Result<Event> {
+	map.get(delay_id)
 		.await
 		.deserialized()
 		.map(|Json(event): Json<Event>| event)
@@ -620,6 +652,21 @@ fn reschedule(&self, delay_id: &str, event: &Event, old_due: u64) {
 	batch.raw_put(&self.db.delayid_event, delay_id, Json(event));
 	batch.del(&self.db.dueat_delayid, (old_due, delay_id));
 	batch.put_raw(&self.db.dueat_delayid, (event.due_ms, delay_id), []);
+	batch.execute();
+}
+
+/// Replaces a scheduled event's rows with its finalised record in one batch.
+///
+/// A reader that misses the scheduled record therefore finds the finalised
+/// one, and the worker, which reads scheduled records alone, never sends it.
+#[implement(Service)]
+fn finalise(&self, delay_id: &str, event: &Event) {
+	let mut batch = self.services.db.txn();
+
+	batch.raw_put(&self.db.delayid_finalised, delay_id, Json(event));
+	batch.del_raw(&self.db.delayid_event, delay_id);
+	batch.del(&self.db.dueat_delayid, (event.due_ms, delay_id));
+	batch.del(&self.db.userid_delayid, (&event.user_id, delay_id));
 	batch.execute();
 }
 
@@ -657,4 +704,27 @@ fn limit_exceeded(retry_after: Option<Duration>) -> Error {
 	let message = "The maximum number of delayed events has been reached.";
 
 	Error::Request(kind, message.into(), StatusCode::TOO_MANY_REQUESTS)
+}
+
+fn conflict(finalised: &Finalized) -> Error {
+	match finalised {
+		| Finalized::Sent { .. } => err!(Conflict("The delayed event has already been sent.")),
+		| Finalized::Error { .. } | Finalized::Canceled { .. } =>
+			err!(Conflict("The delayed event has already been cancelled.")),
+	}
+}
+
+/// Records a send's outcome with the time it was finalised.
+///
+/// A failure keeps the error body an ordinary send answers with.
+fn outcome(result: &Result<OwnedEventId>) -> Finalized {
+	let finalized_ts = MilliSecondsSinceUnixEpoch::now();
+
+	match result {
+		| Ok(event_id) => Finalized::Sent { finalized_ts, event_id: event_id.clone() },
+		| Err(e) => Finalized::Error {
+			finalized_ts,
+			error: StandardErrorBody::new(e.kind(), e.sanitized_message()),
+		},
+	}
 }

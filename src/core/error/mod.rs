@@ -362,12 +362,10 @@ pub enum Error {
 	#[error("There was a problem with the '{0}' directive in your configuration: {1}")]
 	Config(&'static str, Cow<'static, str>),
 
-	/// Reports a resource conflict.
-	///
-	/// This variant currently represents an already occupied room alias. HTTP
-	/// response mapping emits a conflict status.
+	/// Reports a resource conflict, such as an occupied room alias or an action
+	/// on a finalised delayed event, which answers with a conflict status.
 	#[error("{0}")]
-	Conflict(Cow<'static, str>), // This is only needed for when a room alias already exists
+	Conflict(Cow<'static, str>),
 
 	/// Reports an invalid Matrix content-disposition header.
 	///
@@ -604,7 +602,7 @@ impl Error {
 
 		match self {
 			| Self::AuthCheck(..) => StatusCode::FORBIDDEN,
-			| Self::Conflict(_) => StatusCode::CONFLICT, // room alias exists
+			| Self::Conflict(_) => StatusCode::CONFLICT,
 			| Self::Federation(_, error) | Self::Ruma(error) => error.status_code,
 			| Self::FeatureDisabled(..)
 			| Self::CanonicalJson(..)
