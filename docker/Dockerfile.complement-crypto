@@ -6,9 +6,9 @@ FROM input AS complement-crypto-deps
 ARG RUSTUP_HOME
 ARG CARGO_HOME
 ARG rust_toolchain
-# matrix-sdk-ffi-0.18.0 release; carries SqliteStoreBuilder::key for complement-crypto.
-ARG mrsdk_ref="1c44fb66214667c6d00acaf72ab592493653708b"
-ARG complement_crypto_ref="623ad352b54ea8ddd06d181f6ec59dab23d27173"
+# matrix-sdk-ffi-0.19.1 release; the SDK renames complement-crypto's rust.go follows.
+ARG mrsdk_ref="b18166c68bb958a21f0bca8b2d8320cb53583362"
+ARG complement_crypto_ref="d6225af49e84d700ad6208b77afc9899f0f03bfb"
 ARG MRSDK_TARGET_DIR="/usr/src/matrix-rust-sdk/target"
 # Building the FFI crate and the bindgen tool are compile jobs.
 ARG sched_policy="--batch"
@@ -32,7 +32,8 @@ ADD --link https://github.com/matrix-construct/matrix-rust-sdk.git#${mrsdk_ref} 
 
 SHELL ["/bin/bash", "-c"]
 
-# uniffi-bindgen-go (tag pinned to match upstream install_uniffi_bindgen_go.sh).
+# uniffi-bindgen-go (rev pinned to match the install-uniffi-bindgen recipe in
+# complement-crypto's justfile).
 RUN \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/git,sharing=shared \
@@ -41,21 +42,37 @@ RUN \
     rustup run ${rust_toolchain} sched_wrap.sh \
         cargo install uniffi-bindgen-go \
             --git https://github.com/NordSecurity/uniffi-bindgen-go \
-            --tag v0.7.0+v0.31.0 \
+            --rev 4f79e52bd8f518e5fa4d7acff9e586aee21e12a0 \
             ;
 EOF
 
 # Build matrix-sdk-ffi and generate Go bindings into
-# /usr/src/complement-crypto/internal/api/rust. The script also patches in the
-# `-lmatrix_sdk_ffi` LDFLAGS the cgo wrapper needs.
-WORKDIR /usr/src/complement-crypto
+# /usr/src/complement-crypto/internal/api/rust, then patch in the
+# `-lmatrix_sdk_ffi` LDFLAGS the cgo wrapper needs. These are the steps of the
+# rebuild-rust-sdk recipe in complement-crypto's justfile.
+WORKDIR /usr/src/matrix-rust-sdk
 RUN \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/git,sharing=shared \
 --mount=type=cache,dst=${MRSDK_TARGET_DIR},sharing=locked \
 <<EOF
     set -eux
-    rustup run ${rust_toolchain} sched_wrap.sh ./rebuild_rust_sdk.sh /usr/src/matrix-rust-sdk
+    # matrix-sdk-ffi's build script reads the commit from git, which ADD leaves
+    # out; give rustc the pinned commit for the SDK's env!("VERGEN_GIT_SHA").
+    export VERGEN_GIT_SHA="${mrsdk_ref}"
+    rustup run ${rust_toolchain} sched_wrap.sh \
+        cargo build \
+            -p matrix-sdk-ffi \
+            --features 'sentry, _only-for-testing-disable-megolm-minimum-rotation-period-ms' \
+            ;
+    rustup run ${rust_toolchain} \
+        uniffi-bindgen-go \
+            -o /usr/src/complement-crypto/internal/api/rust \
+            --config /usr/src/complement-crypto/uniffi.toml \
+            --library "${MRSDK_TARGET_DIR}/debug/libmatrix_sdk_ffi.a" \
+            ;
+    sed -i 's^// #include <matrix_sdk_ffi.h>^// #include <matrix_sdk_ffi.h>\n// #cgo LDFLAGS: -lmatrix_sdk_ffi^' \
+        /usr/src/complement-crypto/internal/api/rust/matrix_sdk_ffi/matrix_sdk_ffi.go
     # MRSDK_TARGET_DIR is a cache mount and disappears at the end of this RUN.
     # Persist the FFI shared+static libs into the image so downstream stages
     # (complement-crypto-base's `go test`, complement-crypto-tester's runtime)

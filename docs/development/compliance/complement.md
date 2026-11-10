@@ -4,15 +4,15 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 218. Passing: **88.1%**
+- Test groups: 224. Passing: **85.7%**
   - ✅ `pass`: 192
   - 🟨 `some`: 9
-  - 🟥 `fail`: 17
+  - 🟥 `fail`: 23
   - ⬛ `skip`: 0
 
-- Subtests: 610. Passing: **83.3%**
-  - ✅ `pass`: 508
-  - 🟥 `fail`: 94
+- Subtests: 627. Passing: **82.6%**
+  - ✅ `pass`: 518
+  - 🟥 `fail`: 101
   - ⬛ `skip`: 8
 
 ## All Top-Level Tests
@@ -44,7 +44,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | 🟥 | – | `CorruptedAuthChain` |
 | ✅ | – | `CumulativeJoinLeaveJoinSync` |
 | ✅ | 4/0/0 | `DeactivateAccount` |
-| ✅ | 17/0/1 | `DelayedEvents` |
+| ✅ | 24/0/1 | `DelayedEvents` |
 | ✅ | 1/0/0 | `DeletingDeviceRemovesDeviceLocalNotificationSettings` |
 | ✅ | – | `DemotingUsersViaUsersDefault` |
 | 🟨 | 8/2/0 | `DeviceListUpdates` |
@@ -121,6 +121,10 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | – | `MSC3389RedactionStripsRelationInOlderVersions` |
 | 🟥 | – | `MSC3757OwnedState` |
 | ✅ | – | `MSC3967` |
+| 🟥 | – | `MSC4242JoinLeaveRejoinPublicRoom` |
+| 🟥 | – | `MSC4242JoinPublicRoomWithRejectedStateDAGEvents` |
+| 🟥 | – | `MSC4242RejectionCascadesOnRejoin` |
+| 🟥 | – | `MSC4242RejoinMergesOldAndNewStateDAGBranches` |
 | ✅ | 11/0/0 | `MSC4289PrivilegedRoomCreators` |
 | ✅ | – | `MSC4289PrivilegedRoomCreators_Additional` |
 | ✅ | – | `MSC4289PrivilegedRoomCreators_AdditionalCreatorsAndInvited` |
@@ -135,7 +139,9 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | – | `MSC4297StateResolutionV2_1_includes_conflicted_subgraph` |
 | ✅ | – | `MSC4297StateResolutionV2_1_starts_from_empty_set` |
 | 🟥 | 0/2/0 | `MSC4308ThreadSubscriptionsSlidingSync` |
-| ✅ | – | `MSC4311FullCreateEventOnStrippedState` |
+| ✅ | 3/0/0 | `MSC4311FullEventsOnStrippedStateFederation` |
+| 🟥 | 0/2/0 | `MSC4311RejectInvalidStrippedStateFederation` |
+| 🟥 | 0/5/0 | `MSC4311StrippedStateClientAPI` |
 | 🟥 | 0/6/0 | `MSC4429ProfileUpdates` |
 | ✅ | – | `MediaConfig` |
 | ✅ | 25/0/0 | `MediaFilenames` |
