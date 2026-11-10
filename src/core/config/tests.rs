@@ -11,10 +11,15 @@ use std::{
 	sync::{Arc, Mutex, Once},
 };
 
+use ::http::StatusCode;
 use ::tracing::{level_filters::LevelFilter, subscriber::set_global_default};
 use argon2::Params;
 use figment::providers::Data;
 use ipaddress::IPAddress;
+use ruma::{
+	RoomVersionId,
+	api::error::{ErrorKind, IncompatibleRoomVersionErrorData},
+};
 use tracing_subscriber::fmt::{MakeWriter, fmt};
 
 use super::*;
@@ -1207,6 +1212,24 @@ default_power_level_content_override = false
 		.to_string();
 
 	assert!(err.contains("rooms.default_power_level_content_override"), "{err}");
+}
+
+#[test]
+fn an_unsupported_room_version_is_refused_as_incompatible() {
+	let config = default_config();
+
+	config
+		.require_supported_room_version(&RoomVersionId::V12)
+		.expect("room version 12 is supported");
+
+	let error = config
+		.require_supported_room_version(&RoomVersionId::V1)
+		.expect_err("room version 1 is not supported");
+
+	let refused = IncompatibleRoomVersionErrorData::new(RoomVersionId::V1);
+
+	assert_eq!(error.status_code(), StatusCode::BAD_REQUEST);
+	assert_eq!(error.kind(), ErrorKind::IncompatibleRoomVersion(refused));
 }
 
 #[test]

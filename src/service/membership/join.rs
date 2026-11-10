@@ -407,15 +407,9 @@ fn require_supported_remote_room_version(
 		return Err!(BadServerResponse("Remote room version is not supported by tuwunel"));
 	};
 
-	if !self
-		.services
+	self.services
 		.config
-		.supported_room_version(&room_version_id)
-	{
-		return Err!(BadServerResponse(
-			"Remote room version {room_version_id} is not supported by tuwunel"
-		));
-	}
+		.require_supported_room_version(&room_version_id)?;
 
 	Ok(room_version_id)
 }
@@ -1057,10 +1051,7 @@ async fn make_join_request(
 					 room version {room_id}: {e}"
 				);
 
-				make_join_response_and_server =
-					Err!(BadServerResponse("Room version is not supported by tuwunel"));
-
-				return make_join_response_and_server;
+				return make_join_response.map(|r| (r, remote_server.clone()));
 			}
 
 			let max_attempts = self

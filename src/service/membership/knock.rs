@@ -269,15 +269,9 @@ async fn knock_over_federation(
 
 	let room_version_id = make_knock_response.room_version.clone();
 
-	if !self
-		.services
+	self.services
 		.config
-		.supported_room_version(&room_version_id)
-	{
-		return Err!(BadServerResponse(
-			"Remote room version {room_version_id} is not supported by tuwunel"
-		));
-	}
+		.require_supported_room_version(&room_version_id)?;
 
 	let (knock_event, event_id) = self
 		.build_knock_event(sender_user, room_id, reason, &make_knock_response, &room_version_id)

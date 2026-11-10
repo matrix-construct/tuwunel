@@ -8,7 +8,6 @@ use ruma::{
 	RoomId, RoomVersionId, ServerName, UserId,
 	api::{
 		appservice::event::push_events::{self, v1::DeviceLists},
-		error::{ErrorKind, IncompatibleRoomVersionErrorData},
 		federation::membership::{RawStrippedState, create_invite},
 	},
 	events::{
@@ -21,7 +20,7 @@ use ruma::{
 	serde::{JsonObject, Raw},
 };
 use serde::Deserialize;
-use tuwunel_core::{Err, Error, Result, debug_warn, err, utils, utils::hash::sha256};
+use tuwunel_core::{Err, Result, debug_warn, err, utils, utils::hash::sha256};
 use tuwunel_matrix::{Event, PduCount, PduEvent, event::gen_event_id};
 use tuwunel_service::{
 	Services,
@@ -121,17 +120,9 @@ async fn validate_request(
 		.acl_check(body.origin(), &body.room_id)
 		.await?;
 
-	if !services
+	services
 		.config
-		.supported_room_version(&body.room_version)
-	{
-		return Err(Error::BadRequest(
-			ErrorKind::IncompatibleRoomVersion(IncompatibleRoomVersionErrorData::new(
-				body.room_version.clone(),
-			)),
-			"Server does not support this room version.",
-		));
-	}
+		.require_supported_room_version(&body.room_version)?;
 
 	if let Some(server) = body.room_id.server_name()
 		&& services

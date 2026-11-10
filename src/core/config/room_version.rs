@@ -3,9 +3,15 @@
 //! Stable, unstable, and experimental version lists are kept here. [`Config`]
 //! helpers apply the opt-in flags and report each enabled version's stability.
 
-use ruma::{RoomVersionId, api::client::discovery::get_capabilities::v3::RoomVersionStability};
+use ruma::{
+	RoomVersionId,
+	api::{
+		client::discovery::get_capabilities::v3::RoomVersionStability,
+		error::{ErrorKind, IncompatibleRoomVersionErrorData},
+	},
+};
 
-use crate::Config;
+use crate::{Config, Error, Result, implement};
 
 /// Partially supported non-compliant room versions
 pub const UNSTABLE_ROOM_VERSIONS: &[RoomVersionId] =
@@ -24,6 +30,24 @@ pub const STABLE_ROOM_VERSIONS: &[RoomVersionId] = &[
 
 /// Experimental and prototype room versions under development.
 pub const EXPERIMENTAL_ROOM_VERSIONS: &[RoomVersionId] = &[];
+
+/// Refuses a room version this configuration does not enable.
+///
+/// The refusal is `M_INCOMPATIBLE_ROOM_VERSION`, whose `room_version` field
+/// names the refused version for the client or remote server.
+#[implement(Config)]
+pub fn require_supported_room_version(&self, version: &RoomVersionId) -> Result {
+	if !self.supported_room_version(version) {
+		let refused = IncompatibleRoomVersionErrorData::new(version.clone());
+
+		return Err(Error::BadRequest(
+			ErrorKind::IncompatibleRoomVersion(refused),
+			"Room version not supported.",
+		));
+	}
+
+	Ok(())
+}
 
 impl Config {
 	#[inline]
