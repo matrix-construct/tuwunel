@@ -151,7 +151,14 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	expect_member(&owner, &overridden, &user_id, "unchanged delete override", &expected).await?;
 
 	expect_member(&owner, &unknown, &user_id, "unchanged delete match", &[("displayname", None)])
-		.await
+		.await?;
+
+	// With the global now absent, the override still survives an unchanged delete.
+	owner
+		.delete_profile(&user_id, "displayname", Some("unchanged"))
+		.await?;
+
+	expect_member(&owner, &overridden, &user_id, "absent global override", &expected).await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

@@ -373,6 +373,37 @@ fn changed_writes_follows_an_unchanged_match() {
 	assert_eq!(override_count(&member, &[set(ProfileFieldName::DisplayName, "new")]), 1);
 }
 
+// These four follow MSC4466's intent; its literal DELETE clause reverses them.
+#[test]
+fn changed_writes_clears_an_unchanged_match() {
+	let member = typed_member(json!({"membership": "join", "displayname": "global"}));
+
+	assert_eq!(override_count(&member, &[clear(ProfileFieldName::DisplayName)]), 1);
+}
+
+#[test]
+fn changed_writes_leaves_a_room_override_when_the_global_is_absent() {
+	let member = typed_member(json!({"membership": "join", "displayname": "per-room"}));
+
+	assert_eq!(absent_global_count(&member, &[clear(ProfileFieldName::DisplayName)]), 0);
+}
+
+#[test]
+fn changed_writes_clears_an_unchanged_avatar_match() {
+	let member =
+		typed_member(json!({"membership": "join", "avatar_url": "mxc://example.com/global"}));
+
+	assert_eq!(avatar_override_count(&member, &[clear(ProfileFieldName::AvatarUrl)]), 1);
+}
+
+#[test]
+fn changed_writes_leaves_an_avatar_override_when_the_global_is_absent() {
+	let member =
+		typed_member(json!({"membership": "join", "avatar_url": "mxc://example.com/abc"}));
+
+	assert_eq!(absent_global_count(&member, &[clear(ProfileFieldName::AvatarUrl)]), 0);
+}
+
 #[test]
 fn changed_writes_reports_a_new_avatar() {
 	let member =
@@ -498,6 +529,16 @@ fn override_count(member: &RoomMemberEventContent, writes: &[ProfileValue]) -> u
 
 fn empty_global_count(member: &RoomMemberEventContent, writes: &[ProfileValue]) -> usize {
 	changed_writes(member, writes, true, None, Some(<&MxcUri>::from(""))).len()
+}
+
+fn absent_global_count(member: &RoomMemberEventContent, writes: &[ProfileValue]) -> usize {
+	changed_writes(member, writes, true, None, None).len()
+}
+
+fn avatar_override_count(member: &RoomMemberEventContent, writes: &[ProfileValue]) -> usize {
+	let global = <&MxcUri>::from("mxc://example.com/global");
+
+	changed_writes(member, writes, true, None, Some(global)).len()
 }
 
 fn set(name: ProfileFieldName, value: &str) -> ProfileValue { (name, Some(json!(value))) }
