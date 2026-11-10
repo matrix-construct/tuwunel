@@ -2,7 +2,7 @@ use ruma::{
 	CanonicalJsonMemberOptional as JsonMember, CanonicalJsonMembersOptional as JsonMembers,
 	events::{
 		AnyMessageLikeEvent, AnyStateEvent, AnyStrippedStateEvent, AnySyncMessageLikeEvent,
-		AnySyncStateEvent, AnySyncTimelineEvent, AnyTimelineEvent, StateEvent, TimelineEventType,
+		AnySyncStateEvent, AnySyncTimelineEvent, AnyTimelineEvent, StateEvent,
 		room::member::RoomMemberEventContent, space::child::HierarchySpaceChildEvent,
 	},
 	serde::Raw,
@@ -200,11 +200,8 @@ impl<E: Event> From<Owned<E>> for Raw<AnyStrippedStateEvent> {
 impl<'a, E: Event> From<Ref<'a, E>> for Raw<AnyStrippedStateEvent> {
 	fn from(event: Ref<'a, E>) -> Self {
 		let event = event.0;
-		// MSC4311: the create event keeps origin_server_ts in stripped state.
-		let create = matches!(event.event_type(), TimelineEventType::RoomCreate);
 		let members: [JsonMember<_>; _] = [
 			("content", Some(event.content().into())),
-			("origin_server_ts", create.then(|| event.origin_server_ts().get().into())),
 			("sender", Some(event.sender().as_str().into())),
 			("state_key", event.state_key().map(Into::into)),
 			("type", Some(event.event_type().to_string().into())),
