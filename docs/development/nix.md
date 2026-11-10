@@ -98,12 +98,16 @@ it points `build-dir` at the runner's temp directory.
 > build fails with a permission error while evaluation keeps working and hides
 > the cause.
 
-Nix builds run the unit tests but not the integration tests. The targets under
-`src/main/tests` each boot a server. A Nix builder has no network, denies
-`io_uring`, and offers no resolver configuration, so these tests cannot run
-there. The `unit` and `integ` CI jobs run them with those facilities available.
-The Nix check phase uses unit tests to confirm that the nixpkgs-linked build
-of our own crates works.
+### Tests
+
+Nix builds of the dynamically linked packages run the unit tests to confirm
+that the nixpkgs-linked build of our own crates works. Static packages skip
+the check phase.
+
+No Nix build runs the integration tests. The targets under `src/main/tests`
+each boot a server. A Nix builder has no network, denies `io_uring`, and
+offers no resolver configuration, so these tests cannot run there. The
+`unit` and `integ` CI jobs run them with those facilities available.
 
 ### Cache contents
 
