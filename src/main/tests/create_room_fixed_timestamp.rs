@@ -23,13 +23,16 @@ const TOKEN: &str = "create-room-fixed-timestamp-test-access-token";
 // A past timestamp no server-chosen create event carries.
 const TIMESTAMP: u64 = 1_700_000_000_000;
 
+// The year 3000, past any allowance for clock skew.
+const FUTURE: u64 = 32_503_680_000_000;
+
 /// Drives createRoom with a client-chosen create timestamp and expected ID.
 ///
-/// The timestamp is stored on the create event. A second create with the same
-/// inputs hashes to the same room, so it is refused and the first room is
-/// left alone; an expected ID the hash disagrees with is refused before
-/// anything is stored. A server-owned create that lands on a taken ID is
-/// rehashed with a nonce instead.
+/// The timestamp is stored on the create event, and one ahead of the clock is
+/// refused. A second create with the same inputs hashes to the same room, so
+/// it is refused and the first room is left alone; an expected ID the hash
+/// disagrees with is refused before anything is stored. A server-owned create
+/// that lands on a taken ID is rehashed with a nonce instead.
 #[test]
 fn a_fixed_create_timestamp_is_honoured_and_never_reused() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -123,6 +126,10 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	client
 		.create_room(&json!({ "fi.mau.origin_server_ts": later }))
 		.await?;
+
+	let future = json!({ "fi.mau.origin_server_ts": FUTURE });
+
+	expect_refusal(&client, &future, "M_INVALID_PARAM").await?;
 
 	retried_collision(services, &room_id).await
 }

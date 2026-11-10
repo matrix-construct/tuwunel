@@ -4,7 +4,7 @@
 //! insertion are coordinated under the caller's room state guard. Successfully
 //! persisted events are then queued for federation to participating servers.
 
-use std::{collections::HashSet, iter::once};
+use std::{collections::HashSet, iter::once, time::Duration};
 
 use futures::{FutureExt, StreamExt};
 use ruma::{
@@ -20,7 +20,7 @@ use ruma::{
 use serde_json::value::to_raw_value;
 use tuwunel_core::{
 	Err, Result, err, implement,
-	utils::{BoolExt, IterStream, random_string, result::NotFound},
+	utils::{BoolExt, IterStream, random_string, result::NotFound, time::now},
 };
 use tuwunel_matrix::{
 	StateKey,
@@ -33,6 +33,9 @@ use super::RoomMutexGuard;
 const NONCE_KEY: &str = "uwu.woof";
 
 const NONCE_LENGTH: usize = 8;
+
+// A create sets the room's old-event cutoff, so one dated ahead drops gapped federated events.
+const CREATE_TIMESTAMP_SKEW: Duration = Duration::from_mins(1);
 
 /// What a hashed-ID create does when its room ID is already taken.
 ///
@@ -118,8 +121,9 @@ pub async fn build_and_append_create_pdu(
 /// Builds, signs, and persists a room's create event as
 /// `build_and_append_create_pdu` does, under an explicit collision policy.
 ///
-/// A `timestamp` of `None` takes the server's clock, and `collision` decides
-/// what a room ID an earlier create already took does to this one.
+/// A `timestamp` of `None` takes the server's clock, and one more than a
+/// minute ahead of it is refused. `collision` decides what a room ID an
+/// earlier create already took does to this one.
 #[implement(super::Service)]
 #[tracing::instrument(
 	name = "build_and_append_create"
@@ -134,6 +138,12 @@ pub async fn build_and_append_create_pdu_with(
 	timestamp: Option<MilliSecondsSinceUnixEpoch>,
 	collision: Collision<'_>,
 ) -> Result<OwnedEventId> {
+	if timestamp.is_some_and(ahead_of_clock) {
+		return Err!(Request(InvalidParam(
+			"The create event's timestamp is too far in the future."
+		)));
+	}
+
 	let room_id = room_id!("!thiswillbereplaced");
 	let state_lock = self.services.state.mutex.lock(room_id).await;
 	let inputs = CreateInputs {
@@ -151,6 +161,12 @@ pub async fn build_and_append_create_pdu_with(
 	self.append_signed_pdu(pdu, pdu_json, sender, &state_lock)
 		.boxed() // size firewall
 		.await
+}
+
+fn ahead_of_clock(timestamp: MilliSecondsSinceUnixEpoch) -> bool {
+	let at = Duration::from_millis(timestamp.get().into());
+
+	at > now().saturating_add(CREATE_TIMESTAMP_SKEW)
 }
 
 #[implement(super::Service)]
