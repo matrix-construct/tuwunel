@@ -77,7 +77,7 @@ fn run_child(database: &Path, phase: &str) -> Result {
 }
 
 fn seed_phase(database: &Path) -> Result {
-	let args = Args::default_test(&["fresh"]).with_option(format!("database_path={database:?}"));
+	let args = Args::default_test(&["fresh"]).with_database_path(database);
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;
@@ -141,7 +141,7 @@ fn scan_phase(database: &Path, phase: &str) -> Result {
 	};
 
 	let args = Args::default_test(&[])
-		.with_option(format!("database_path={database:?}"))
+		.with_database_path(database)
 		.with_option(option);
 
 	let runtime = Runtime::new(Some(&args))?;

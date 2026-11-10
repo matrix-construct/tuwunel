@@ -16,19 +16,13 @@ fn admin_backup_database() -> Result {
 	create_dir_all(&db)?;
 	create_dir_all(&backup)?;
 
-	let mut args = Args::default_test(&["smoke", "fresh", "cleanup"]);
-
-	args.option.extend([
-		format!("database_path=\"{}\"", db.display()),
-		format!("database.backup.path=\"{}\"", backup.display()),
-	]);
-
-	args.execute.extend([
-		"server backup-database".to_owned(),
-		"server list-backups".to_owned(),
-		"server verify-backup".to_owned(),
-		"server delete-backups 0".to_owned(),
-	]);
+	let args = Args::default_test(&["smoke", "fresh", "cleanup"])
+		.with_database_path(&db)
+		.with_path_option("database.backup.path", &backup)
+		.with_execute("server backup-database")
+		.with_execute("server list-backups")
+		.with_execute("server verify-backup")
+		.with_execute("server delete-backups 0");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

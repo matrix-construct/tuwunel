@@ -54,7 +54,8 @@ pub struct Registration {
 	/// a space.
 	///
 	/// Conduit used a lightning-bolt emoji for this suffix. Set to an empty
-	/// string to disable it.
+	/// string to disable it. It is left out when the name leaves no room for
+	/// it under the 256-character display name limit.
 	///
 	/// reloadable: yes
 	/// default: "💕"

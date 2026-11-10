@@ -35,7 +35,7 @@ fn an_ignored_invite_is_stored_and_surfaces_on_un_ignore() -> Result {
 	let db_path = Args::test_database_path("invite-ignored");
 
 	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={db_path:?}"))
+		.with_database_path(&db_path)
 		.with_loopback_listener(port)
 		.with_option("listening=true");
 

@@ -4,8 +4,8 @@ use axum::extract::State;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use ruma::{
-	CanonicalJsonObject, EventEncryptionAlgorithm, Int, OwnedRoomAliasId, OwnedRoomId,
-	OwnedUserId, RoomAliasId, RoomId, RoomVersionId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventEncryptionAlgorithm, Int, OwnedRoomAliasId,
+	OwnedRoomId, OwnedUserId, RoomAliasId, RoomId, RoomVersionId, UserId,
 	api::client::room::{
 		self,
 		create_room::{
@@ -39,8 +39,10 @@ use serde_json::{
 	value::{RawValue as RawJsonValue, to_raw_value},
 };
 use tuwunel_core::{
-	Err, Result, debug_info, debug_warn, err, info,
-	utils::{BoolExt, IterStream, ReadyExt, option::OptionExt, result::FlatOk},
+	Err, Error, Result, debug_info, debug_warn, err, info,
+	utils::{
+		BoolExt, IterStream, ReadyExt, json::serialized_len, option::OptionExt, result::FlatOk,
+	},
 	warn,
 };
 use tuwunel_matrix::{
@@ -48,7 +50,10 @@ use tuwunel_matrix::{
 	pdu::{Content, PduBuilder},
 	room_version,
 };
-use tuwunel_service::{Services, appservice::RegistrationInfo, rooms::state::RoomMutexGuard};
+use tuwunel_service::{
+	Services, appservice::RegistrationInfo, profile::check_member_content,
+	rooms::state::RoomMutexGuard,
+};
 
 use crate::{Ruma, utils::invite_check};
 
@@ -58,6 +63,9 @@ pub(crate) async fn create_room_route(
 ) -> Result<create_room::v3::Response> {
 	can_create_room_check(&services, &body).await?;
 	can_publish_directory_check(&services, &body).await?;
+	let initial_events = parse_initial_state(&body)?;
+
+	check_initial_member_content(&services, &initial_events)?;
 
 	// Figure out preset. We need it for preset specific events
 	let preset = body
@@ -107,8 +115,11 @@ pub(crate) async fn create_room_route(
 		| RoomIdFormatVersion::V2 =>
 			create_create_event(&services, &body, &preset, room_version, &version_rules)
 				.await
-				.map_err(|e| {
-					err!(Request(InvalidParam("Error while creating m.room.create event: {e}")))
+				.map_err(|e| match e {
+					| Error::Request(..) | Error::BadRequest(..) => e,
+					| e => err!(Request(InvalidParam(
+						"Error while creating m.room.create event: {e}"
+					))),
 				})?,
 	};
 
@@ -138,10 +149,16 @@ pub(crate) async fn create_room_route(
 	}
 
 	// 5. Events set by preset
-	let initial_state =
-		apply_preset_state_pdus(&services, &body, &preset, sender_user, &room_id, &state_lock)
-			.boxed() // size firewall
-			.await?;
+	let initial_state = apply_preset_state_pdus(
+		&services,
+		initial_events,
+		&preset,
+		sender_user,
+		&room_id,
+		&state_lock,
+	)
+	.boxed() // size firewall
+	.await?;
 
 	// 6. Events listed in initial_state
 	apply_initial_state_pdus(
@@ -318,33 +335,29 @@ async fn apply_canonical_alias_pdu(
 
 async fn apply_preset_state_pdus(
 	services: &Services,
-	body: &Ruma<create_room::v3::Request>,
+	initial_events: impl IntoIterator<Item = InitialEvent>,
 	preset: &RoomPreset,
 	sender_user: &UserId,
 	room_id: &RoomId,
 	state_lock: &RoomMutexGuard,
 ) -> Result<Vec<InitialEvent>> {
-	let mut initial_state = body
-		.initial_state
-		.iter()
-		.map(|state| Ok(state.deserialize_as_unchecked::<InitialEvent>()?))
-		.filter_ok(|event| {
+	let mut initial_state = initial_events
+		.into_iter()
+		.filter(|event| {
 			services.config.encryption.allow || event.event_type != StateEventType::RoomEncryption
 		})
-		.filter_ok(|event| {
+		.filter(|event| {
 			// client/appservice workaround: if a user sends an initial_state event with a
 			// state event in there with the content of literally `{}` (not null or empty
 			// string), let's just skip it over and warn.
-			if event.content.json().get() == "{}" {
+			if is_empty_content(event) {
 				debug_warn!("skipping empty initial state event of type {}", event.event_type);
 				false
 			} else {
 				true
 			}
 		})
-		.filter_ok(|event| body.name.is_none() || event.event_type != StateEventType::RoomName)
-		.filter_ok(|event| body.topic.is_none() || event.event_type != StateEventType::RoomTopic)
-		.collect::<Result<Vec<_>>>()?;
+		.collect::<Vec<_>>();
 
 	let join_rule_pdubuilder =
 		take_initial(&mut initial_state, &StateEventType::RoomJoinRules, "")
@@ -684,32 +697,40 @@ async fn create_create_event(
 		}
 	}
 
-	// 1. The room create event, using a placeholder room_id
-	let room_id = ruma::room_id!("!thiswillbereplaced").to_owned();
-	let state_lock = services.state.mutex.lock(&room_id).await;
+	let expected_room_id = body
+		.room_id
+		.as_deref()
+		.map(expected_room_id_check)
+		.transpose()?;
+
 	let create_event_id = services
 		.timeline
-		.build_and_append_pdu(
-			PduBuilder {
-				event_type: TimelineEventType::RoomCreate,
-				content: to_raw_value(&create_content)?.into(),
-				state_key: Some(StateKey::new()),
-				..Default::default()
-			},
+		.build_and_append_create_pdu(
+			create_content,
 			body.sender_user(),
-			&room_id,
-			&state_lock,
+			body.origin_server_ts,
+			expected_room_id,
 		)
 		.boxed() // size firewall
 		.await?;
-
-	drop(state_lock);
 
 	// The real room_id is now the event_id.
 	let room_id = OwnedRoomId::from_parts('!', create_event_id.localpart(), None)?;
 	let state_lock = services.state.mutex.lock(&room_id).await;
 
 	Ok((room_id, state_lock))
+}
+
+// These versions derive the room ID from the create event, so only a hash-form ID is admitted.
+fn expected_room_id_check(expected: &str) -> Result<&str> {
+	let hashed = expected.starts_with('!') && !expected.contains(':');
+
+	hashed.then_some(expected).ok_or_else(|| {
+		err!(Request(InvalidParam(
+			"This room version derives the room ID from the create event; only that ID can be \
+			 expected."
+		)))
+	})
 }
 
 async fn create_create_event_legacy(
@@ -1026,6 +1047,46 @@ async fn can_publish_directory_check(
 
 	Err!(Request(Forbidden("Publishing rooms to the room directory is not allowed")))
 }
+
+// The entries are parsed once, before any PDU is appended, so a refusal cannot leave a
+// half-built room behind.
+fn parse_initial_state(body: &Ruma<create_room::v3::Request>) -> Result<Vec<InitialEvent>> {
+	body.initial_state
+		.iter()
+		.map(|state| Ok(state.deserialize_as_unchecked::<InitialEvent>()?))
+		.filter_ok(|event| body.name.is_none() || event.event_type != StateEventType::RoomName)
+		.filter_ok(|event| body.topic.is_none() || event.event_type != StateEventType::RoomTopic)
+		.collect::<Result<Vec<_>>>()
+}
+
+fn check_initial_member_content(services: &Services, initial_events: &[InitialEvent]) -> Result {
+	let max_bytes = services.config.profile.member_event_max_bytes;
+
+	initial_events
+		.iter()
+		.filter(|event| event.event_type == StateEventType::RoomMember)
+		.filter(|event| !is_empty_content(event))
+		.try_for_each(|event| {
+			// Appending parses this too, but by then the room exists.
+			event
+				.content
+				.deserialize_as_unchecked::<RoomMemberEventContent>()
+				.map_err(|e| err!(Request(BadJson("Invalid initial member event: {e}"))))?;
+
+			let content = event.content.deserialize()?;
+			let displayname = content
+				.get("displayname")
+				.and_then(CanonicalJsonValue::as_str);
+
+			let avatar_url = content
+				.get("avatar_url")
+				.and_then(CanonicalJsonValue::as_str);
+
+			check_member_content(max_bytes, serialized_len(&content)?, displayname, avatar_url)
+		})
+}
+
+fn is_empty_content(event: &InitialEvent) -> bool { event.content.json().get() == "{}" }
 
 async fn can_create_room_check(
 	services: &Services,

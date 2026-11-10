@@ -8,15 +8,16 @@ use std::io::{Error as IoError, ErrorKind};
 use std::os::unix::fs::{PermissionsExt as _, symlink};
 use std::{
 	env::{current_exe, temp_dir, var_os},
-	fs::{
-		OpenOptions, Permissions, create_dir_all, metadata, read_to_string, remove_dir_all,
-		set_permissions, write,
-	},
-	io::Write as _,
+	fs::{create_dir_all, read_to_string, remove_dir_all, write},
 	path::{Path, PathBuf},
 	process::{Command, id as process_id},
 	slice::from_ref,
 	sync::atomic::{AtomicU64, Ordering},
+};
+#[cfg(unix)]
+use std::{
+	fs::{OpenOptions, Permissions, metadata, set_permissions},
+	io::Write as _,
 };
 
 use figment::Figment;
@@ -30,9 +31,11 @@ use toml::{Value, from_str, value::Table};
 use super::write::owner_error;
 #[cfg(target_os = "macos")]
 use super::write::path_cstring;
+#[cfg(unix)]
+use super::{Overwrite, write_example_config};
 use super::{
-	Overwrite, RegenerateOptions, adjacent_new_path, example_config, regenerate_config, schema,
-	write::write_atomic_with_precommit, write_example_config,
+	RegenerateOptions, adjacent_new_path, example_config, regenerate_config, schema,
+	write::write_atomic_with_precommit,
 };
 use crate::{
 	config::{ENV_PREFIXES, Sources},

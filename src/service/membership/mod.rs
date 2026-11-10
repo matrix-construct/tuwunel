@@ -23,7 +23,7 @@ use tuwunel_matrix::pdu::Pdu;
 
 use self::auto_accept::Pending;
 pub use self::{
-	join::Join,
+	join::{Join, is_reserved_join_key},
 	stripped_state::{
 		StrippedCreateVerdict, dedup_stripped_state, enforce_stripped_create,
 		into_client_stripped, v12_room_ids, without_member,

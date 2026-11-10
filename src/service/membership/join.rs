@@ -1,6 +1,6 @@
 use std::{
 	borrow::Borrow,
-	collections::{BTreeSet, HashMap, HashSet},
+	collections::{BTreeMap, BTreeSet, HashMap, HashSet},
 	iter::once,
 	mem::take,
 	sync::Arc,
@@ -27,7 +27,10 @@ use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
 use tuwunel_core::{
 	Err, Result, async_noinline, at, debug, debug_error, debug_info, debug_warn, err, error,
 	implement, info, trace,
-	utils::{self, BoolExt, IterStream, ReadyExt, math::Expected, shuffle, stream::WidebandExt},
+	utils::{
+		self, BoolExt, IterStream, ReadyExt, json::serialized_len, math::Expected, shuffle,
+		stream::WidebandExt,
+	},
 	warn,
 };
 use tuwunel_matrix::{
@@ -41,11 +44,19 @@ use super::{Service, VerifiedPdu};
 use crate::{
 	Services,
 	federation::{Candidates, WhenAllBackedOff},
+	profile::check_member_content,
 	rooms::{
 		state::{IdMapState, RoomMutexGuard},
 		state_compressor::{CompressedState, HashSetCompressStateEvent},
 	},
 };
+
+/// Keys a client may not set on `/join`, because the server owns them.
+///
+/// The `/join` route and `merge_member_content` both drop them, so the merged
+/// member event never carries one from a client.
+const RESERVED_JOIN_KEYS: [&str; 3] =
+	["reason", "third_party_signed", "join_authorised_via_users_server"];
 
 #[derive(Debug)]
 pub struct Join<'a> {
@@ -148,6 +159,58 @@ pub async fn join<'a>(
 		.await;
 
 	Ok(())
+}
+
+/// Refuses `/join` extras that a join would refuse once it is under way.
+///
+/// The route retries a failed join on other servers, and a refused body fails
+/// the same way on every attempt, so it is refused here before one is made. A
+/// join by a member changes nothing, so a member's extras pass.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn check_extra_content(
+	&self,
+	sender_user: &UserId,
+	room_id: &RoomId,
+	extra_content: Option<&CanonicalJsonObject>,
+) -> Result {
+	if extra_content.is_none()
+		|| self
+			.services
+			.state_cache
+			.is_joined(sender_user, room_id)
+			.await
+	{
+		return Ok(());
+	}
+
+	let content = RoomMemberEventContent::new(MembershipState::Join);
+
+	self.merged_join_content(sender_user, content, extra_content)
+		.await
+		.map(drop)
+}
+
+#[implement(Service)]
+async fn merged_join_content(
+	&self,
+	sender_user: &UserId,
+	content: RoomMemberEventContent,
+	extra_content: Option<&CanonicalJsonObject>,
+) -> Result<CanonicalJsonValue> {
+	let content = self
+		.services
+		.profile
+		.fill_content(sender_user, content)
+		.await;
+
+	let max_bytes = self
+		.services
+		.config
+		.profile
+		.member_event_max_bytes;
+
+	merge_member_content(max_bytes, content, extra_content)
 }
 
 #[implement(Service)]
@@ -790,17 +853,15 @@ async fn join_local(
 		.map(Option::flatten)
 		.await;
 
-	let content = self
-		.services
-		.profile
-		.fill_content(sender_user, RoomMemberEventContent {
-			reason: reason.clone(),
-			join_authorized_via_users_server,
-			..RoomMemberEventContent::new(MembershipState::Join)
-		})
-		.await;
+	let content = RoomMemberEventContent {
+		reason: reason.clone(),
+		join_authorized_via_users_server,
+		..RoomMemberEventContent::new(MembershipState::Join)
+	};
 
-	let content = merge_member_content(content, extra_content.as_ref())?;
+	let content = self
+		.merged_join_content(sender_user, content, extra_content.as_ref())
+		.await?;
 
 	let pdu_builder = PduBuilder {
 		event_type: StateEventType::RoomMember.into(),
@@ -921,17 +982,15 @@ async fn create_join_event(
 		})
 		.and_then(|s| OwnedUserId::try_from(s.as_str().unwrap_or_default()).ok());
 
-	let content = self
-		.services
-		.profile
-		.fill_content(sender_user, RoomMemberEventContent {
-			reason,
-			join_authorized_via_users_server: join_authorized_via_users_server.clone(),
-			..RoomMemberEventContent::new(MembershipState::Join)
-		})
-		.await;
+	let content = RoomMemberEventContent {
+		reason,
+		join_authorized_via_users_server: join_authorized_via_users_server.clone(),
+		..RoomMemberEventContent::new(MembershipState::Join)
+	};
 
-	let content = merge_member_content(content, extra_content.as_ref())?;
+	let content = self
+		.merged_join_content(sender_user, content, extra_content.as_ref())
+		.await?;
 
 	event.insert("content".into(), content);
 
@@ -969,24 +1028,73 @@ async fn create_join_event(
 	Ok((event, event_id, join_authorized_via_users_server))
 }
 
-// Server-computed membership fields win; client custom keys only fill the gaps.
+// The server's fields win the merge, and client keys only fill the gaps.
 fn merge_member_content(
+	max_bytes: usize,
 	content: RoomMemberEventContent,
 	extra_content: Option<&CanonicalJsonObject>,
 ) -> Result<CanonicalJsonValue> {
-	let mut content = to_canonical_value(content)?;
+	// The server's name and avatar win the merge, so only client values are bounded.
+	let bound_name = content.displayname.is_none();
+	let bound_avatar = content.avatar_url.is_none();
+	let server = to_canonical_value(content)?;
 
-	if let (CanonicalJsonValue::Object(content), Some(extra_content)) =
-		(&mut content, extra_content)
-	{
-		for (key, value) in extra_content {
-			content
-				.entry(key.clone())
-				.or_insert_with(|| value.clone());
-		}
-	}
+	let Some(extra_content) = extra_content else {
+		return Ok(server);
+	};
 
-	Ok(content)
+	let CanonicalJsonValue::Object(server) = server else {
+		return Ok(server);
+	};
+
+	// Server-owned keys are dropped here too, so no caller can set them.
+	let extra: BTreeMap<&str, &CanonicalJsonValue> = extra_content
+		.iter()
+		.filter(|(key, _)| !is_reserved_join_key(key))
+		.map(|(key, value)| (key.as_str(), value))
+		.collect();
+
+	let displayname = bound_string(&extra, "displayname", bound_name)?;
+	let avatar_url = bound_string(&extra, "avatar_url", bound_avatar)?;
+
+	check_member_content(max_bytes, serialized_len(&extra)?, displayname, avatar_url)?;
+
+	let merged = extra
+		.into_iter()
+		.fold(server, |mut merged, (key, value)| {
+			if !merged.contains_key(key) {
+				merged.insert(key.into(), value.clone());
+			}
+
+			merged
+		});
+
+	Ok(CanonicalJsonValue::Object(merged))
+}
+
+/// Whether a client's `/join` key is one the server owns.
+///
+/// A client value under such a key is dropped, never merged into the member
+/// event the server builds.
+#[must_use]
+pub fn is_reserved_join_key(key: &str) -> bool { RESERVED_JOIN_KEYS.contains(&key) }
+
+// A remote join sends the merged content as it is, so a non-string cannot pass here.
+fn bound_string<'a>(
+	extra: &BTreeMap<&str, &'a CanonicalJsonValue>,
+	key: &str,
+	bound: bool,
+) -> Result<Option<&'a str>> {
+	extra
+		.get(key)
+		.copied()
+		.filter(|value| bound && !matches!(value, CanonicalJsonValue::Null))
+		.map(|value| {
+			value
+				.as_str()
+				.ok_or_else(|| err!(Request(BadJson("{key} must be a string."))))
+		})
+		.transpose()
 }
 
 #[implement(Service)]

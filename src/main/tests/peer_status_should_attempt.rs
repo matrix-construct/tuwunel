@@ -14,10 +14,7 @@ use tuwunel_service::federation::{Classification, ShouldAttempt};
 fn should_attempt_backs_off_after_failure() -> Result {
 	let db_dir = Args::test_database_path("peer-status-should-attempt");
 
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
-	args.maintenance = true;
-	args.option
-		.push(format!("database_path={:?}", db_dir.to_str().expect("utf-8 path")));
+	let args = Args::maintenance_test(&db_dir);
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

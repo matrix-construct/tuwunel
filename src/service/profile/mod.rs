@@ -2,7 +2,7 @@ mod remote;
 #[cfg(test)]
 mod tests;
 
-use std::{borrow::Cow, collections::BTreeMap, iter::once, mem::replace, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 
 use futures::{
 	Stream, StreamExt, TryStreamExt,
@@ -10,18 +10,22 @@ use futures::{
 	stream::empty,
 };
 use ruma::{
-	MxcUri, OwnedMxcUri, OwnedRoomId, OwnedUserId, RoomId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, MxcUri, OwnedMxcUri, OwnedRoomId, OwnedUserId,
+	RoomId, UserId,
 	api::federation::query::get_profile_information,
-	events::room::member::{MembershipState, RoomMemberEventContent},
+	events::{
+		StateEventType,
+		room::member::{MembershipState, RoomMemberEventContent},
+	},
 	profile::{ProfileFieldName, ProfileFieldValue},
 };
 use serde::Deserialize;
 use serde_json::Value;
 use tuwunel_core::{
-	Err, Result, err, extract_variant, implement,
+	Err, Result, err, implement,
 	smallvec::SmallVec,
 	utils::{
-		MutexMap, MutexMapGuard, ReadyExt,
+		BoolExt, MutexMap, MutexMapGuard, ReadyExt,
 		future::TryExtExt,
 		result::NotFound,
 		stream::{IterStream, TryIgnore, TryReadyExt, automatic_width},
@@ -31,7 +35,7 @@ use tuwunel_core::{
 use tuwunel_database::{
 	Deserialized, Ignore, Interfix, Json, KeyVal, Map, Txn, deserialize_from_slice, serialize_key,
 };
-use tuwunel_matrix::PduBuilder;
+use tuwunel_matrix::{PduBuilder, pdu::Content};
 
 type ProfileLock = MutexMapGuard<OwnedUserId, ()>;
 
@@ -69,7 +73,10 @@ type ChangeKeyVal<'a> = KeyVal<'a, (&'a str, u64, &'a str), &'a UserId>;
 
 /// One field of a profile write: the name and the value to store, or `None`
 /// to clear it.
-type ProfileValue = (ProfileFieldName, Option<Value>);
+pub type ProfileValue = (ProfileFieldName, Option<Value>);
+
+// A single write names one field; a combined write names both.
+type ChangedWrites<'a> = SmallVec<[&'a ProfileValue; 2]>;
 
 /// The field names one write actually changes, almost always just the one the
 /// caller named.
@@ -91,6 +98,13 @@ const MAX_STATUS_TEXT_LENGTH: usize = 256;
 
 /// MSC4426 maximum `m.status` emoji length, in bytes.
 const MAX_STATUS_EMOJI_LENGTH: usize = 32;
+
+/// Maximum local display name length, in characters.
+///
+/// A longer name is refused with `M_BAD_JSON`.
+pub const MAX_DISPLAYNAME_LENGTH: usize = 256;
+
+const MAX_AVATAR_URL_LENGTH: usize = 1000;
 
 /// Per-update policy for fanning a global profile change out to each of
 /// the user's joined rooms as a fresh `m.room.member` event. Mirrors the
@@ -178,7 +192,7 @@ async fn update_room(
 	&self,
 	user_id: &UserId,
 	room_id: &RoomId,
-	profile_values: &[(ProfileFieldName, Option<Value>)],
+	profile_values: &[ProfileValue],
 	propagation: Propagation,
 	current_displayname: Option<&str>,
 	current_avatar_url: Option<&MxcUri>,
@@ -193,80 +207,153 @@ async fn update_room(
 	// cannot be overwritten by the append.
 	let state_lock = self.services.state.mutex.lock(room_id).await;
 
-	let content = self
+	let pdu = self
 		.services
 		.state_accessor
-		.get_member(room_id, user_id)
+		.room_state_get(room_id, &StateEventType::RoomMember, user_id.as_str())
 		.await?;
 
-	if !matches!(content.membership, MembershipState::Join) {
+	let member: RoomMemberEventContent = pdu.content.deserialize_as_unchecked()?;
+
+	if !matches!(member.membership, MembershipState::Join) {
 		return Ok(());
 	}
 
-	let Some(content) =
-		apply_fields(content, profile_values, unchanged, current_displayname, current_avatar_url)
-	else {
+	let writes = changed_writes(
+		&member,
+		profile_values,
+		unchanged,
+		current_displayname,
+		current_avatar_url,
+	);
+
+	if writes.is_empty() {
 		return Ok(());
+	}
+
+	// Copy the previous content raw so its unrelated keys survive (MSC4466).
+	let overlaid = overlay_member_content(pdu.content.deserialize()?, &writes)?;
+	let content = Content::new(&overlaid)?;
+
+	// Some write values do not survive the typed round trip, so the result is checked.
+	let checked: RoomMemberEventContent = content.deserialize_as_unchecked()?;
+
+	BoolExt::ok_or_else(overlay_holds(&checked, &writes), || {
+		err!(Request(Unknown("The overlaid member event does not hold the profile write")))
+	})?;
+
+	let builder = PduBuilder {
+		event_type: StateEventType::RoomMember.into(),
+		content,
+		state_key: Some(user_id.as_str().into()),
+		..PduBuilder::default()
 	};
 
 	self.services
 		.timeline
-		.build_and_append_pdu(
-			PduBuilder::state(user_id.as_str(), &content),
-			user_id,
-			room_id,
-			&state_lock,
-		)
+		.build_and_append_pdu(builder, user_id, room_id, &state_lock)
 		.await?;
 
 	Ok(())
 }
 
-/// Lays a profile write over a room's member content.
+/// Returns the profile writes that change the member event.
 ///
-/// Returns the content only when a field differs from what the room holds,
-/// so a write restoring the stored value emits no member event. Under
-/// `Propagation::Unchanged` a room whose value departs from the user's prior
-/// global value keeps its override.
-fn apply_fields(
-	content: RoomMemberEventContent,
-	profile_values: &[ProfileValue],
+/// Compares against the typed previous content, so a no-op write emits nothing.
+/// With `unchanged`, a field is written only where the room still holds the
+/// current global value, so a room override is left alone.
+fn changed_writes<'a>(
+	member: &RoomMemberEventContent,
+	profile_values: &'a [ProfileValue],
 	unchanged: bool,
 	current_displayname: Option<&str>,
 	current_avatar_url: Option<&MxcUri>,
-) -> Option<RoomMemberEventContent> {
-	let mut content = RoomMemberEventContent { reason: None, ..content };
-	let mut changed = false;
-
-	for (name, value) in profile_values {
-		match name {
-			| ProfileFieldName::DisplayName
-				if !unchanged || content.displayname.as_deref() == current_displayname =>
-			{
-				let displayname = value.clone().map(|value| {
-					extract_variant!(value, Value::String).expect("invalid profile value type")
-				});
-
-				changed |= assign(&mut content.displayname, displayname);
-			},
-			| ProfileFieldName::AvatarUrl
-				if !unchanged || content.avatar_url.as_deref() == current_avatar_url =>
-			{
-				let avatar_url = value.clone().map(|value| {
-					serde_json::from_value(value).expect("invalid profile value type")
-				});
-
-				changed |= assign(&mut content.avatar_url, avatar_url);
-			},
-			| _ => {},
-		}
-	}
-
-	changed.then_some(content)
+) -> ChangedWrites<'a> {
+	profile_values
+		.iter()
+		.filter(|write| {
+			!unchanged || holds_current(member, write, current_displayname, current_avatar_url)
+		})
+		.filter(|write| !member_holds(member, write))
+		.collect()
 }
 
-fn assign<T: PartialEq>(slot: &mut Option<T>, next: Option<T>) -> bool {
-	replace(slot, next).ne(slot)
+fn holds_current(
+	member: &RoomMemberEventContent,
+	(name, _): &ProfileValue,
+	current_displayname: Option<&str>,
+	current_avatar_url: Option<&MxcUri>,
+) -> bool {
+	let current = match name {
+		| ProfileFieldName::DisplayName => current_displayname,
+		| _ => current_avatar_url.map(MxcUri::as_str),
+	};
+
+	field_matches(member, name, current).unwrap_or(false)
+}
+
+fn member_holds(member: &RoomMemberEventContent, (name, value): &ProfileValue) -> bool {
+	let written = value.as_ref().and_then(Value::as_str);
+
+	field_matches(member, name, written).unwrap_or(true)
+}
+
+/// Whether the member's `name` field reads as `value`.
+///
+/// Returns `None` for a field other than the display name or the avatar URL,
+/// which the member event does not carry.
+fn field_matches(
+	member: &RoomMemberEventContent,
+	name: &ProfileFieldName,
+	value: Option<&str>,
+) -> Option<bool> {
+	match name {
+		| ProfileFieldName::DisplayName => Some(member.displayname.as_deref() == value),
+		| ProfileFieldName::AvatarUrl => Some(avatar_matches(member, value)),
+		| _ => None,
+	}
+}
+
+/// Whether the member's avatar reads as `url`.
+///
+/// `compat-empty-string-null` reads a written `""` back as `None`, so an empty
+/// `url` matches an absent avatar.
+fn avatar_matches(member: &RoomMemberEventContent, url: Option<&str>) -> bool {
+	member.avatar_url.as_deref().map(MxcUri::as_str) == url.filter(|url| !url.is_empty())
+}
+
+/// Overlays the profile writes onto the previous member content.
+///
+/// MSC4466 copies every other key unchanged, and forbids copying `reason` and
+/// `join_authorised_via_users_server`. A key the write clears is removed.
+fn overlay_member_content(
+	mut content: CanonicalJsonObject,
+	writes: &[&ProfileValue],
+) -> Result<CanonicalJsonObject> {
+	content.remove("reason");
+	content.remove("join_authorised_via_users_server");
+
+	writes
+		.iter()
+		.try_for_each(|write| write_field(&mut content, write))
+		.map(|()| content)
+}
+
+fn write_field(content: &mut CanonicalJsonObject, (name, value): &ProfileValue) -> Result {
+	match value {
+		| Some(value) =>
+			content.insert(name.as_str().into(), CanonicalJsonValue::deserialize(value)?),
+		| None => content.remove(name.as_str()),
+	};
+
+	Ok(())
+}
+
+fn overlay_holds(member: &RoomMemberEventContent, writes: &[&ProfileValue]) -> bool {
+	matches!(member.membership, MembershipState::Join)
+		&& writes
+			.iter()
+			.all(|write| member_holds(member, write))
 }
 
 /// Sets a new displayname or removes it if displayname is None. You still
@@ -486,21 +573,14 @@ async fn set_profile_keys_locked(
 ) -> Result {
 	let local = self.services.globals.user_is_local(user_id);
 
-	if local {
-		for (name, value) in profile_values {
-			check_profile_key(name.as_str())?;
-
-			if let Some(value) = value {
-				check_profile_value(name.as_str(), value)?;
-				self.enforce_profile_size(user_id, name.as_str(), value)
-					.await?;
-			}
-		}
-	}
-
 	let changed = self
 		.changed_fields(user_id, profile_values)
 		.await?;
+
+	if local {
+		self.check_changed_keys(user_id, profile_values, &changed)
+			.await?;
+	}
 
 	let propagation = propagation.unwrap_or(
 		if self
@@ -547,6 +627,83 @@ async fn set_profile_keys_locked(
 		.filter(|name| local || changed.contains(name));
 
 	self.publish_update(user_id, logged, &changed, txn, rooms)
+		.await
+}
+
+/// Pairs a profile field with the string a write stores in it.
+///
+/// A `None` value clears the field. `set_profile_keys` and
+/// `set_profile_keys_after` each take a slice of these pairs.
+#[must_use]
+pub fn string_field(name: ProfileFieldName, value: Option<&str>) -> ProfileValue {
+	(name, value.map(Value::from))
+}
+
+/// Checks local profile values, runs `before_write`, then writes the values,
+/// all under the user's profile lock.
+///
+/// A caller that changes the account a profile belongs to passes that change
+/// as `before_write`, so a refused value returns before the account changes
+/// and the values checked are the values written. `before_write` must not
+/// write this user's profile, whose lock it runs under.
+#[implement(Service)]
+pub async fn set_profile_keys_after<F>(
+	&self,
+	user_id: &UserId,
+	profile_values: &[ProfileValue],
+	propagation: Option<Propagation>,
+	before_write: F,
+) -> Result
+where
+	F: Future<Output = Result>,
+{
+	let profile_lock = self.mutex.lock(user_id).await;
+	let changed = self
+		.changed_fields(user_id, profile_values)
+		.await?;
+
+	self.check_changed_keys(user_id, profile_values, &changed)
+		.await?;
+
+	before_write.await?;
+
+	if profile_values.is_empty() {
+		return Ok(());
+	}
+
+	self.set_profile_keys_locked(&profile_lock, user_id, profile_values, propagation)
+		.await
+}
+
+// Only a change is checked, so a stored value now refused can still be restated.
+#[implement(Service)]
+async fn check_changed_keys(
+	&self,
+	user_id: &UserId,
+	profile_values: &[ProfileValue],
+	changed: &ChangedFields<'_>,
+) -> Result {
+	let is_changed = |name: &ProfileFieldName| changed.contains(&name.as_str());
+
+	profile_values
+		.iter()
+		.try_for_each(|(name, value)| {
+			check_profile_key(name.as_str())?;
+			value
+				.as_ref()
+				.filter(|_| is_changed(name))
+				.map_or(Ok(()), |value| check_profile_value(name.as_str(), value))
+		})?;
+
+	let grows = profile_values
+		.iter()
+		.any(|(name, value)| value.is_some() && is_changed(name));
+
+	if !grows {
+		return Ok(());
+	}
+
+	self.enforce_profile_size(user_id, profile_values)
 		.await
 }
 
@@ -825,8 +982,23 @@ pub(super) const MAX_PROFILE_SIZE: usize = 65_536;
 /// stored field that no longer parses is logged and left out of the total, so
 /// it cannot block writes to the other fields; removals skip this check.
 #[implement(Service)]
-async fn enforce_profile_size(&self, user_id: &UserId, key: &str, value: &Value) -> Result {
-	let replacement = once((ProfileFieldName::from(key), Cow::Borrowed(value))).stream();
+async fn enforce_profile_size(
+	&self,
+	user_id: &UserId,
+	profile_values: &[ProfileValue],
+) -> Result {
+	// The write lands whole, so all its replacements and removals apply before measuring.
+	let written = |name: &ProfileFieldName| {
+		profile_values
+			.iter()
+			.any(|(field, _)| field == name)
+	};
+
+	let replacements = profile_values
+		.iter()
+		.filter_map(|(name, value)| Some((name.clone(), Cow::Borrowed(value.as_ref()?))))
+		.stream();
+
 	let profile: ProspectiveProfile<'_> = self
 		.try_all_profile_keys(user_id)
 		.ready_filter_map(|field| {
@@ -834,8 +1006,11 @@ async fn enforce_profile_size(&self, user_id: &UserId, key: &str, value: &Value)
 				.inspect_err(|e| warn!(%user_id, %e, "Skipping unreadable profile field"))
 				.ok()
 		})
-		.map(|field| (field.field_name(), Cow::Owned(field.value().into_owned())))
-		.chain(replacement)
+		.ready_filter_map(|field| {
+			let name = field.field_name();
+			(!written(&name)).then(|| (name, Cow::Owned(field.value().into_owned())))
+		})
+		.chain(replacements)
 		.collect()
 		.await;
 
@@ -878,6 +1053,48 @@ pub fn check_requested_fields(&self, fields: &[ProfileFieldName]) -> Result {
 	Ok(())
 }
 
+/// Validates a client-supplied `m.room.member` content from any route that accepts one.
+///
+/// `json_len` is the canonical length. `displayname` and `avatar_url` are passed
+/// only when the write stores them, so a value the room already holds is not
+/// bounded again. The content is refused over `max_bytes`, the display name over
+/// `MAX_DISPLAYNAME_LENGTH` characters, and the avatar URL over
+/// `MAX_AVATAR_URL_LENGTH` bytes or when it is not a valid `mxc://` URI, all with
+/// `M_BAD_JSON`.
+pub fn check_member_content(
+	max_bytes: usize,
+	json_len: usize,
+	displayname: Option<&str>,
+	avatar_url: Option<&str>,
+) -> Result {
+	check_member_size(max_bytes, json_len)?;
+	check_member_displayname(displayname)?;
+	check_member_avatar_url(avatar_url)
+}
+
+/// Bounds the canonical size of a client-supplied `m.room.member` content, in bytes.
+///
+/// Every route measures the canonical form, the one the stored event carries, so
+/// the cap means the same thing wherever a member event enters.
+pub fn check_member_size(max_bytes: usize, json_len: usize) -> Result {
+	check_field_length(json_len, max_bytes, "Membership event content", "bytes")
+}
+
+/// Bounds a member event's display name, in characters.
+///
+/// An absent name passes. A present one is refused over
+/// `MAX_DISPLAYNAME_LENGTH` characters.
+pub fn check_member_displayname(displayname: Option<&str>) -> Result {
+	displayname.map_or(Ok(()), check_displayname_length)
+}
+
+/// Validates a member event's avatar URL.
+///
+/// An absent URL passes. A present one must be a valid `mxc://` URI within the byte cap.
+pub fn check_member_avatar_url(avatar_url: Option<&str>) -> Result {
+	avatar_url.map_or(Ok(()), check_avatar_mxc)
+}
+
 /// Validate a profile field name against the Common Namespaced Identifier
 /// Grammar: a lowercase-leading identifier over `[a-z0-9_.-]`, matching the
 /// reference homeserver. Length is bounded separately by `MAX_KEY_LENGTH`.
@@ -918,6 +1135,8 @@ fn check_profile_value(name: &str, value: &Value) -> Result {
 		| "m.status" | "org.matrix.msc4426.status" => check_status(value),
 		| "m.call" | "org.matrix.msc4426.call" => check_call(value),
 		| "m.tz" | "us.cloke.msc4175.tz" => check_timezone(value),
+		| "displayname" => check_displayname(value),
+		| "avatar_url" => check_avatar_url(value),
 		| _ => Ok(()),
 	}
 }
@@ -937,22 +1156,32 @@ fn check_status(value: &Value) -> Result {
 		return Err!(Request(BadJson("Status requires a text and an emoji string.")));
 	};
 
-	check_status_length(text, MAX_STATUS_TEXT_LENGTH, "text")?;
-	check_status_length(emoji, MAX_STATUS_EMOJI_LENGTH, "emoji")
+	check_length(text.len(), MAX_STATUS_TEXT_LENGTH, "Status text", "bytes")?;
+	check_length(emoji.len(), MAX_STATUS_EMOJI_LENGTH, "Status emoji", "bytes")
 }
 
-/// Bound one status field by its byte budget.
+/// Bound one profile value by its length budget.
 ///
 /// MSC4426 mandates both the `M_TOO_LARGE` errcode and a 400, while the
 /// kind-derived table promotes that errcode to 413, so this is one of the few
 /// call sites naming its own status.
-fn check_status_length(value: &str, max: usize, field: &str) -> Result {
-	value.len().le(&max).then_some(()).ok_or_else(|| {
+fn check_length(len: usize, max: usize, field: &str, unit: &str) -> Result {
+	len.le(&max).then_some(()).ok_or_else(|| {
 		err!(RequestStatus(
 			BAD_REQUEST,
-			TooLarge("Status {field} cannot be longer than {max} bytes.")
+			TooLarge("{field} cannot be longer than {max} {unit}.")
 		))
 	})
+}
+
+/// Bound a display name or avatar URL by its length budget.
+///
+/// These limits answer `M_BAD_JSON` at 400, while `check_length` keeps
+/// `M_TOO_LARGE` for the status text and emoji.
+fn check_field_length(len: usize, max: usize, field: &str, unit: &str) -> Result {
+	len.le(&max)
+		.then_some(())
+		.ok_or_else(|| err!(Request(BadJson("{field} cannot be longer than {max} {unit}."))))
 }
 
 /// Validate an MSC4426 call indicator.
@@ -1033,4 +1262,47 @@ fn is_timezone_component(component: &str) -> bool {
 		&& component
 			.bytes()
 			.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'-'))
+}
+
+/// Bound a display name by its character budget.
+///
+/// Characters are Unicode scalar values, so a name in a multi-byte script is
+/// not penalized against one in ASCII.
+fn check_displayname(value: &Value) -> Result {
+	let Some(name) = value.as_str() else {
+		return Err!(Request(BadJson("Display name must be a string.")));
+	};
+
+	check_displayname_length(name)
+}
+
+fn check_displayname_length(name: &str) -> Result {
+	let len = name
+		.chars()
+		.take(MAX_DISPLAYNAME_LENGTH + 1)
+		.count();
+
+	check_field_length(len, MAX_DISPLAYNAME_LENGTH, "Display name", "characters")
+}
+
+// As in Synapse's default, the profile takes any avatar string within the cap.
+fn check_avatar_url(value: &Value) -> Result {
+	let Some(url) = value.as_str() else {
+		return Err!(Request(BadJson("Avatar URL must be a string.")));
+	};
+
+	check_avatar_url_length(url)
+}
+
+fn check_avatar_mxc(url: &str) -> Result {
+	check_avatar_url_length(url)?;
+
+	// An empty value clears the avatar, so it is not a URI.
+	BoolExt::ok_or_else(url.is_empty() || <&MxcUri>::from(url).is_valid(), || {
+		err!(Request(BadJson("Avatar URL must be a valid mxc:// URI.")))
+	})
+}
+
+fn check_avatar_url_length(url: &str) -> Result {
+	check_field_length(url.len(), MAX_AVATAR_URL_LENGTH, "Avatar URL", "bytes")
 }

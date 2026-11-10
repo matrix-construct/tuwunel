@@ -245,25 +245,11 @@ async fn upgrade_room_create(
 		return Err!(Request(BadJson("Error forming creation event: {e}")));
 	}
 
-	let room_id = ruma::room_id!("!thiswillbereplaced").to_owned();
-	let state_lock = services.state.mutex.lock(&room_id).await;
 	let create_event_id = services
 		.timeline
-		.build_and_append_pdu(
-			PduBuilder {
-				event_type: TimelineEventType::RoomCreate,
-				content: to_raw_value(&content)?.into(),
-				state_key: Some(StateKey::new()),
-				..Default::default()
-			},
-			sender_user,
-			&room_id,
-			&state_lock,
-		)
+		.build_and_append_create_pdu(content, sender_user, None, None)
 		.boxed() // size firewall
 		.await?;
-
-	drop(state_lock);
 
 	// The real room_id is now the event_id.
 	let room_id = OwnedRoomId::from_parts('!', create_event_id.localpart(), None)?;

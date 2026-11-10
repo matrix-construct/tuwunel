@@ -338,17 +338,6 @@
                     value = scopeCrossStatic.main;
                   }
 
-                  # An output for a statically-linked binary with x86_64 haswell
-                  # target optimisations
-                  {
-                    name = "${binaryName}-x86_64-haswell-optimised";
-                    value = scopeCrossStatic.main.override {
-                      x86_64_haswell_target_optimised = (
-                        if (crossSystem == "x86_64-linux-gnu" || crossSystem == "x86_64-linux-musl") then true else false
-                      );
-                    };
-                  }
-
                   # An output for a statically-linked unstripped debug ("dev") binary
                   {
                     name = "${binaryName}-debug";
@@ -389,26 +378,6 @@
                     };
                   }
 
-                  # An output for a statically-linked binary with `--all-features` and with x86_64 haswell
-                  # target optimisations
-                  {
-                    name = "${binaryName}-all-features-x86_64-haswell-optimised";
-                    value = scopeCrossStatic.main.override {
-                      all_features = true;
-                      disable_features = [
-                        # jemalloc profiling/stats features are expensive and shouldn't
-                        # be expected on non-debug builds.
-                        "jemalloc_prof"
-                        "jemalloc_stats"
-                        # tuwunel_mods is a development-only hot reload feature
-                        "tuwunel_mods"
-                      ];
-                      x86_64_haswell_target_optimised = (
-                        if (crossSystem == "x86_64-linux-gnu" || crossSystem == "x86_64-linux-musl") then true else false
-                      );
-                    };
-                  }
-
                   # An output for a statically-linked unstripped debug ("dev") binary with `--all-features`
                   {
                     name = "${binaryName}-all-features-debug";
@@ -428,19 +397,6 @@
                   {
                     name = "oci-image-${crossSystem}";
                     value = scopeCrossStatic.oci-image;
-                  }
-
-                  # An output for an OCI image based on that binary with x86_64 haswell
-                  # target optimisations
-                  {
-                    name = "oci-image-${crossSystem}-x86_64-haswell-optimised";
-                    value = scopeCrossStatic.oci-image.override {
-                      main = scopeCrossStatic.main.override {
-                        x86_64_haswell_target_optimised = (
-                          if (crossSystem == "x86_64-linux-gnu" || crossSystem == "x86_64-linux-musl") then true else false
-                        );
-                      };
-                    };
                   }
 
                   # An output for an OCI image based on that unstripped debug ("dev") binary
@@ -473,28 +429,6 @@
                     };
                   }
 
-                  # An output for an OCI image based on that binary with `--all-features` and with x86_64 haswell
-                  # target optimisations
-                  {
-                    name = "oci-image-${crossSystem}-all-features-x86_64-haswell-optimised";
-                    value = scopeCrossStatic.oci-image.override {
-                      main = scopeCrossStatic.main.override {
-                        all_features = true;
-                        disable_features = [
-                          # jemalloc profiling/stats features are expensive and shouldn't
-                          # be expected on non-debug builds.
-                          "jemalloc_prof"
-                          "jemalloc_stats"
-                          # tuwunel_mods is a development-only hot reload feature
-                          "tuwunel_mods"
-                        ];
-                        x86_64_haswell_target_optimised = (
-                          if (crossSystem == "x86_64-linux-gnu" || crossSystem == "x86_64-linux-musl") then true else false
-                        );
-                      };
-                    };
-                  }
-
                   # An output for an OCI image based on that unstripped debug ("dev") binary with `--all-features`
                   {
                     name = "oci-image-${crossSystem}-all-features-debug";
@@ -522,7 +456,6 @@
               [
                 #"x86_64-apple-darwin"
                 #"aarch64-apple-darwin"
-                "x86_64-linux-gnu"
                 "x86_64-linux-musl"
                 "aarch64-linux-musl"
               ]

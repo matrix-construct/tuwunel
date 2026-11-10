@@ -1,8 +1,17 @@
+use std::borrow::Cow;
+
 use futures::FutureExt;
 use ruma::{UserId, events::GlobalAccountDataEventType, push};
-use tuwunel_core::{Err, Result, error, implement, info, is_equal_to, utils::BoolExt, warn};
+use tuwunel_core::{
+	Err, Result, error, implement, info, is_equal_to,
+	utils::{BoolExt, string::truncate_chars},
+	warn,
+};
 
-use crate::{membership::Join, profile::Propagation};
+use crate::{
+	membership::Join,
+	profile::{MAX_DISPLAYNAME_LENGTH, Propagation},
+};
 
 #[derive(Debug, Default)]
 pub struct Register<'a> {
@@ -61,24 +70,22 @@ pub async fn full_register(
 		.create(user_id, password, origin)
 		.await?;
 
-	let displayname_suffix = self
+	let suffix = self
 		.services
 		.config
 		.registration
 		.displayname_suffix
 		.as_str();
 
-	let mut displayname = displayname.unwrap_or_else(|| user_id.localpart());
+	let suffix = omit_displayname_suffix
+		.or_some(suffix)
+		.filter(|suffix| !suffix.is_empty());
 
-	let displayname_with_suffix;
-	if !displayname_suffix.is_empty() && !omit_displayname_suffix {
-		displayname_with_suffix = format!("{displayname} {displayname_suffix}");
-		displayname = &displayname_with_suffix;
-	}
+	let displayname = new_displayname(displayname.unwrap_or_else(|| user_id.localpart()), suffix);
 
 	self.services
 		.profile
-		.set_displayname(user_id, Some(displayname), Some(Propagation::None))
+		.set_displayname(user_id, Some(&displayname), Some(Propagation::None))
 		.await?;
 
 	// Initial account data
@@ -191,4 +198,54 @@ pub async fn full_register(
 	}
 
 	Ok(())
+}
+
+// The account already exists here, so an overlong name is shortened rather than refused.
+fn new_displayname<'a>(name: &'a str, suffix: Option<&str>) -> Cow<'a, str> {
+	let name = truncate_chars(name, MAX_DISPLAYNAME_LENGTH);
+	let fits = |suffix: &&str| {
+		name.chars()
+			.count()
+			.saturating_add(suffix.chars().count())
+			.lt(&MAX_DISPLAYNAME_LENGTH)
+	};
+
+	suffix
+		.filter(fits)
+		.map_or_else(|| name.into(), |suffix| format!("{name} {suffix}").into())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{MAX_DISPLAYNAME_LENGTH, new_displayname};
+
+	#[test]
+	fn a_name_that_fits_is_kept() {
+		assert_eq!(new_displayname("june", None), "june");
+		assert_eq!(new_displayname("june", Some("💕")), "june 💕");
+	}
+
+	#[test]
+	fn an_overlong_name_is_shortened_to_the_limit() {
+		let long = "é".repeat(MAX_DISPLAYNAME_LENGTH + 1);
+
+		assert_eq!(new_displayname(&long, None).chars().count(), MAX_DISPLAYNAME_LENGTH);
+		assert_eq!(new_displayname(&long, Some("💕")).chars().count(), MAX_DISPLAYNAME_LENGTH);
+	}
+
+	#[test]
+	fn the_suffix_is_added_only_where_it_fits() {
+		let fits = "n".repeat(MAX_DISPLAYNAME_LENGTH - 2);
+		let full = "n".repeat(MAX_DISPLAYNAME_LENGTH - 1);
+
+		assert_eq!(new_displayname(&fits, Some("💕")), format!("{fits} 💕"));
+		assert_eq!(new_displayname(&full, Some("💕")), full);
+	}
+
+	#[test]
+	fn an_overlong_suffix_leaves_the_name_alone() {
+		let suffix = "s".repeat(MAX_DISPLAYNAME_LENGTH);
+
+		assert_eq!(new_displayname("june", Some(&suffix)), "june");
+	}
 }

@@ -4,7 +4,7 @@ use ruma::{
 	api::client::membership::{join_room_by_id, join_room_by_id_or_alias},
 };
 use tuwunel_core::{Result, warn};
-use tuwunel_service::membership::Join;
+use tuwunel_service::membership::{Join, is_reserved_join_key};
 
 use super::banned_room_check;
 use crate::{ClientIp, Ruma};
@@ -30,6 +30,11 @@ pub(crate) async fn join_room_by_id_route(
 	banned_room_check(&services, sender_user, room_id, None, client).await?;
 
 	let extra_content = extra_member_content(body.json_body.as_ref());
+
+	services
+		.membership
+		.check_extra_content(sender_user, room_id, extra_content.as_ref())
+		.await?;
 
 	let mut errors = 0_usize;
 	while let Err(e) = services
@@ -92,6 +97,11 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 
 	let extra_content = extra_member_content(body.json_body.as_ref());
 
+	services
+		.membership
+		.check_extra_content(sender_user, &room_id, extra_content.as_ref())
+		.await?;
+
 	let mut errors = 0_usize;
 	while let Err(e) = services
 		.membership
@@ -125,9 +135,6 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 	Ok(join_room_by_id_or_alias::v3::Response { room_id: room_id.clone() })
 }
 
-const RESERVED_JOIN_KEYS: [&str; 3] =
-	["reason", "third_party_signed", "join_authorised_via_users_server"];
-
 // Drop recognized and server-owned keys the client must not set.
 fn extra_member_content(json_body: Option<&CanonicalJsonValue>) -> Option<CanonicalJsonObject> {
 	let CanonicalJsonValue::Object(object) = json_body? else {
@@ -136,7 +143,7 @@ fn extra_member_content(json_body: Option<&CanonicalJsonValue>) -> Option<Canoni
 
 	let extra: CanonicalJsonObject = object
 		.iter()
-		.filter(|(key, _)| !RESERVED_JOIN_KEYS.contains(&key.as_str()))
+		.filter(|(key, _)| !is_reserved_join_key(key))
 		.map(|(key, value)| (key.clone(), value.clone()))
 		.collect();
 

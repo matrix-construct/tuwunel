@@ -333,6 +333,19 @@ pub fn default_test(name: &[&str]) -> Self {
 		.with_database_path(&test_database_root().join(random_string(32)))
 }
 
+/// Returns arguments for a maintenance-mode test on its own database.
+///
+/// The `fresh` and `cleanup` harnesses clear the database before the boot and
+/// remove it afterwards. The server boots without listening, so the test drives
+/// the services directly.
+#[implement(Args)]
+#[must_use]
+pub fn maintenance_test(database_path: &Path) -> Self {
+	Self::default_test(&["fresh", "cleanup"])
+		.with_maintenance()
+		.with_database_path(database_path)
+}
+
 /// Returns these arguments with an IPv4 loopback listener configured.
 ///
 /// The address and port overrides are appended together, preserving existing
@@ -346,17 +359,27 @@ pub fn with_loopback_listener(self, port: u16) -> Self {
 
 /// Returns these arguments with the database path override appended.
 ///
-/// The path is quoted as a TOML basic string, escaping backslashes and quotes,
-/// so any platform path survives the option parser.
+/// The path is escaped through `with_path_option`, so any platform path parses.
 #[implement(Args)]
 #[must_use]
 pub fn with_database_path(self, path: &Path) -> Self {
+	self.with_path_option("database_path", path)
+}
+
+/// Returns these arguments with a path-valued option override appended.
+///
+/// The path is quoted as a TOML basic string, escaping backslashes and quotes,
+/// so any platform path survives the option parser. The key is written as given,
+/// so it must already be a valid, possibly dotted, option name.
+#[implement(Args)]
+#[must_use]
+pub fn with_path_option(self, key: &str, path: &Path) -> Self {
 	let escaped = path
 		.to_string_lossy()
 		.replace('\\', "\\\\")
 		.replace('"', "\\\"");
 
-	self.with_option(format!("database_path=\"{escaped}\""))
+	self.with_option(format!("{key}=\"{escaped}\""))
 }
 
 /// Returns a dedicated database path for a named test.

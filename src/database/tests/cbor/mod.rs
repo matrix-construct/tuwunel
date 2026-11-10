@@ -188,18 +188,37 @@ fn nested_and_transparent() {
 }
 
 #[test]
+#[cfg(not(windows))]
 fn clock() {
-	let time = UNIX_EPOCH + Duration::new(1_700_000_000, 123_456_789);
+	assert_pinned_clock(
+		123_456_789,
+		"a26474696d65a270736563735f73696e63655f65706f63681a6553f100716e616e6f735f73696e63655f\
+		 65706f63681a075bcd15686475726174696f6ea264736563731818656e616e6f731a3b9ac9ff",
+	);
+}
+
+// Windows SystemTime has 100 ns resolution, so the nanoseconds stay a multiple of 100.
+#[test]
+#[cfg(windows)]
+fn clock_windows() {
+	assert_pinned_clock(
+		123_456_700,
+		"a26474696d65a270736563735f73696e63655f65706f63681a6553f100716e616e6f735f73696e63655f\
+		 65706f63681a075bccbc686475726174696f6ea264736563731818656e616e6f731a3b9ac9ff",
+	);
+}
+
+fn assert_pinned_clock(nanos: u32, expected: &str) {
+	let time = UNIX_EPOCH
+		.checked_add(Duration::new(1_700_000_000, nanos))
+		.expect("pinned clock in range");
+
 	let clock = Clock {
 		time,
 		duration: Duration::new(24, 999_999_999),
 	};
 
-	assert_pinned(
-		"a26474696d65a270736563735f73696e63655f65706f63681a6553f100716e616e6f735f73696e63655f\
-		 65706f63681a075bcd15686475726174696f6ea264736563731818656e616e6f731a3b9ac9ff",
-		&clock,
-	);
+	assert_pinned(expected, &clock);
 }
 
 #[test]

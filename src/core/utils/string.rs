@@ -246,6 +246,18 @@ pub fn truncate_deterministic(str: &str, range: Option<Range<usize>>) -> &str {
 		.unwrap_or(str)
 }
 
+/// Shortens a string to at most `max` characters.
+///
+/// Characters are Unicode scalar values, so the cut never splits one. A string
+/// already within the limit is returned whole.
+#[inline]
+#[must_use]
+pub fn truncate_chars(str: &str, max: usize) -> &str {
+	str.char_indices()
+		.nth(max)
+		.map_or(str, |(i, _)| str.split_at(i).0)
+}
+
 /// Displays a value into a small string with an inline byte capacity.
 ///
 /// Output beyond `CAP` bytes spills to the heap. Panics if the value's

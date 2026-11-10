@@ -41,7 +41,7 @@ fn device_removal_drops_its_identity_keys() -> Result {
 	let db_path = Args::test_database_path("device-key-removal");
 
 	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={db_path:?}"))
+		.with_database_path(&db_path)
 		.with_loopback_listener(port)
 		.with_option("listening=true");
 

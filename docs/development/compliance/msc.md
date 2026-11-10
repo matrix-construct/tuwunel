@@ -386,7 +386,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4470 | 🟥 ● | 0/0 | Routing reports to non-local destinations | `/report` does not accept `must_send_to`; no fan-out. |
 | MSC4469 | 🟥 ● | 0/0 | Reporting to remote servers (EDU approach) | `m.report` EDU not defined or routed. |
 | MSC4467 | 🟥 ● | 0/0 | Improved Room Upgrade API | v3 upgrade only; no v4 endpoint, capability, or migration_schema. |
-| MSC4466 | 🟨 ◐ | 50/70 | Altering profile change propagation | Single-field propagation works; whole-profile extension and key copying lack |
+| MSC4466 | 🟨 ◐ | 50/70 | Altering profile change propagation | Single-field propagation and key copying work; whole-profile extension lacks |
 | MSC4464 | 🟥 ● | 0/0 | verifiable links in profile | No /verify_profile_connection endpoint or verification backend |
 | MSC4462 | 🟥 ◐ | 10/10 | Links in Profile | Incidental MSC4133 passthrough; no m.connections parsing. |
 | MSC4461 | ✅ ◐ | 100/100 | Storing per-message profiles for users | Pure account data passthrough; generic CS account-data covers it |

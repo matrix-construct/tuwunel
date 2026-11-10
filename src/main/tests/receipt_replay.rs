@@ -28,10 +28,7 @@ impl Drop for DatabasePath {
 fn replayed_receipts_hold_their_stream_position() -> Result {
 	let db_path = DatabasePath(Args::test_database_path("receipt-replay"));
 
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
-	args.maintenance = true;
-	args.option
-		.push(format!("database_path={:?}", db_path.0));
+	let args = Args::maintenance_test(&db_path.0);
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

@@ -2,20 +2,29 @@ use std::collections::BTreeSet;
 
 use axum::extract::State;
 use futures::{StreamExt, TryStreamExt};
-use ruma::{MilliSecondsSinceUnixEpoch, MxcUri, UserId, thirdparty::Medium};
+use ruma::{MilliSecondsSinceUnixEpoch, UserId, profile::ProfileFieldName, thirdparty::Medium};
 use synapse_admin_api::mas::provision_user::{Request, Response};
 use tuwunel_core::{
 	Result,
+	arrayvec::ArrayVec,
 	utils::{
 		IterStream, ReadyExt,
+		option::OptionExt,
 		stream::{TryBroadbandExt, automatic_width},
+		string::truncate_chars,
 	},
 	warn,
 };
-use tuwunel_service::{threepid::canonicalize_email, users::PASSWORD_SENTINEL};
+use tuwunel_service::{
+	profile::{MAX_DISPLAYNAME_LENGTH, ProfileValue, string_field},
+	threepid::canonicalize_email,
+	users::PASSWORD_SENTINEL,
+};
 
 use super::{Mas, local_user};
 use crate::Ruma;
+
+type ProfileWrites = ArrayVec<ProfileValue, 2>;
 
 /// # `POST /_synapse/mas/provision_user`
 pub(crate) async fn provision_user_route(
@@ -36,36 +45,15 @@ pub(crate) async fn provision_user_route(
 	};
 
 	let created = !services.users.exists(&user_id).await;
+	let profile = requested_profile(services, &user_id, &body).await;
 
-	if created {
-		services
-			.users
-			.create(&user_id, Some(PASSWORD_SENTINEL), Some("oidc"))
-			.await?;
-	}
+	let account = create_account(services, &user_id, created);
 
-	let touch_displayname = body.set_displayname.is_some() || body.unset_displayname;
-	let touch_avatar = body.set_avatar_url.is_some() || body.unset_avatar_url;
-	if touch_displayname || touch_avatar {
-		if touch_displayname {
-			services
-				.profile
-				.set_displayname(&user_id, body.set_displayname.as_deref(), None)
-				.await?;
-		}
-
-		if touch_avatar {
-			let avatar = body
-				.set_avatar_url
-				.as_deref()
-				.map(<&MxcUri>::from);
-
-			services
-				.profile
-				.set_avatar_url(&user_id, avatar, None)
-				.await?;
-		}
-	}
+	// A refused profile value returns before the account exists.
+	services
+		.profile
+		.set_profile_keys_after(&user_id, &profile, None, account)
+		.await?;
 
 	if let Some(desired) = desired_emails {
 		sync_emails(services, &user_id, desired).await?;
@@ -87,6 +75,68 @@ fn canonicalize_emails(addrs: &[String]) -> Result<BTreeSet<String>> {
 		.iter()
 		.map(|a| canonicalize_email(a))
 		.collect()
+}
+
+/// The display name and avatar URL the request sets or unsets.
+///
+/// MAS relays the upstream provider's display name, which the user may have no
+/// way to shorten there, so an overlong one is cut to the profile's limit
+/// rather than refused.
+async fn requested_profile(
+	services: crate::State,
+	user_id: &UserId,
+	body: &Request,
+) -> ProfileWrites {
+	let displayname = body
+		.set_displayname
+		.as_deref()
+		.map_async(|name| fitted_displayname(services, user_id, name))
+		.await;
+
+	let touch_displayname = displayname.is_some() || body.unset_displayname;
+	let touch_avatar = body.set_avatar_url.is_some() || body.unset_avatar_url;
+	let avatar_url = body.set_avatar_url.as_deref();
+
+	[
+		touch_displayname.then(|| string_field(ProfileFieldName::DisplayName, displayname)),
+		touch_avatar.then(|| string_field(ProfileFieldName::AvatarUrl, avatar_url)),
+	]
+	.into_iter()
+	.flatten()
+	.collect()
+}
+
+// A name equal to the stored one is restated whole, as the profile accepts it.
+async fn fitted_displayname<'a>(
+	services: crate::State,
+	user_id: &UserId,
+	name: &'a str,
+) -> &'a str {
+	let fitted = truncate_chars(name, MAX_DISPLAYNAME_LENGTH);
+
+	if fitted.len() == name.len() {
+		return name;
+	}
+
+	let restated = services
+		.profile
+		.displayname(user_id)
+		.await
+		.is_ok_and(|stored| stored == name);
+
+	if restated { name } else { fitted }
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn create_account(services: crate::State, user_id: &UserId, created: bool) -> Result {
+	if !created {
+		return Ok(());
+	}
+
+	services
+		.users
+		.create(user_id, Some(PASSWORD_SENTINEL), Some("oidc"))
+		.await
 }
 
 /// Reconcile the user's bound email addresses to exactly `desired`. A desired

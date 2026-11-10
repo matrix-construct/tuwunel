@@ -29,7 +29,7 @@ fn exhausted_backward_page_uses_scanned_edge() -> Result {
 	let db_path = Args::test_database_path("messages-empty-page");
 
 	let mut args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={db_path:?}"))
+		.with_database_path(&db_path)
 		.with_loopback_listener(port);
 
 	args.option.extend(["listening=true".to_owned()]);

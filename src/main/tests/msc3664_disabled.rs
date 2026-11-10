@@ -50,7 +50,7 @@ fn related_event_match_is_inert_by_default() -> Result {
 	let db_path = Args::test_database_path("msc3664-disabled");
 
 	let mut args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={db_path:?}"))
+		.with_database_path(&db_path)
 		.with_loopback_listener(port);
 
 	args.option.extend(["listening=true".to_owned()]);

@@ -92,21 +92,12 @@ struct Fixture<'a> {
 fn pusher_notify() -> Result {
 	let db_path = Args::test_database_path("test-pusher-notify");
 
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
-	args.option
-		.push(format!("database_path={db_path:?}"));
-
-	args.option
-		.push("network.http.ip_range_denylist=[]".to_owned());
-
-	args.option
-		.push("sending.startup_netburst=true".to_owned());
-
-	args.option
-		.push("push.suppress_when_active=true".to_owned());
-
-	args.option
-		.push("sending.retry_backoff_limit=1".to_owned());
+	let args = Args::default_test(&["fresh", "cleanup"])
+		.with_database_path(&db_path)
+		.with_option("network.http.ip_range_denylist=[]")
+		.with_option("sending.startup_netburst=true")
+		.with_option("push.suppress_when_active=true")
+		.with_option("sending.retry_backoff_limit=1");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;
