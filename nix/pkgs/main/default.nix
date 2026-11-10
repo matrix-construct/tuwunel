@@ -30,8 +30,10 @@
   profile ? "release",
   # Minimum CPU the build may require, given to rustc as -Ctarget-cpu and to
   # rocksdb as -march; null targets the baseline. x86_64 takes any name both
-  # compilers accept (e.g. "x86-64-v3"). aarch64 takes only "native": a name
-  # there replaces the crc and crypto extensions rocksdb's build adds itself.
+  # compilers accept (e.g. "x86-64-v3"); the levels x86-64-v2 to v4 also
+  # require PCLMUL, as the release packages of those levels do. aarch64 takes
+  # only "native": a name there replaces the crc and crypto extensions
+  # rocksdb's build adds itself.
   target_cpu ? null,
   # Allow any target_cpu off x86_64. The value must then be a -march string
   # gcc and rustc both accept, and must keep crc and crypto on aarch64.
@@ -99,8 +101,10 @@ let
         # Not PORTABLE=<cpu>: cmake reads any value containing 0, 1, N or Y
         # as a boolean, so names like skylake-avx512 would silently stay
         # baseline. NIX_CFLAGS_COMPILE follows cmake's flags, so this wins.
-        # The psABI levels omit pclmul, which rocksdb's crc32c assumes from
-        # AVX and then fails to compile without.
+        # The psABI levels omit pclmul. Rocksdb's crc32c assumes it from AVX,
+        # so v3 and v4 fail to compile without it, and it gives v2 the three
+        # way crc32c. The v2 to v4 release packages add it too (docker/bake.hcl,
+        # rocksdb_cxx_flags), so these levels mean the level plus PCLMUL.
         env =
           (old.env or { })
           // lib.optionalAttrs (target_cpu != null) {
