@@ -17,7 +17,6 @@ use ruma::{
 	room_id,
 	serde::Raw,
 };
-use serde_json::value::to_raw_value;
 use tuwunel_core::{
 	Err, Result, err, implement,
 	utils::{BoolExt, IterStream, random_string, result::NotFound, time::now},
@@ -66,33 +65,65 @@ struct CreateInputs<'a> {
 /// after persistence, so its failure can be returned after the event and room
 /// state have already been stored.
 #[implement(super::Service)]
+pub fn build_and_append_pdu<'a>(
+	&'a self,
+	pdu_builder: PduBuilder,
+	sender: &'a UserId,
+	room_id: &'a RoomId,
+	state_lock: &'a RoomMutexGuard,
+) -> impl Future<Output = Result<OwnedEventId>> + Send + 'a {
+	self.build_and_store_pdu(pdu_builder, sender, room_id, state_lock)
+		.map(|stored| stored.and_then(|(event_id, appended)| appended.map(|()| event_id)))
+}
+
+/// Builds and persists a locally authored room event, telling a failure after
+/// storage apart from one before it.
+///
+/// An outer error means no timeline row for the event could be found after the
+/// failure. An inner error comes from work done after the event entered the
+/// timeline, such as its side effects or federation enqueue, so the event
+/// exists under the returned ID.
+#[implement(super::Service)]
 #[tracing::instrument(
 	name = "build_and_append"
 	level = "debug",
 	skip(self, state_lock),
 	ret,
 )]
-pub async fn build_and_append_pdu(
+pub async fn build_and_store_pdu(
 	&self,
-	mut pdu_builder: PduBuilder,
+	pdu_builder: PduBuilder,
 	sender: &UserId,
 	room_id: &RoomId,
 	state_lock: &RoomMutexGuard,
-) -> Result<OwnedEventId> {
-	if pdu_builder.event_type == TimelineEventType::RoomMember {
-		self.sanitize_member_authorisation(&mut pdu_builder, room_id)
+) -> Result<(OwnedEventId, Result)> {
+	let pdu_builder = if pdu_builder.event_type == TimelineEventType::RoomMember {
+		self.sanitize_member_authorisation(pdu_builder, room_id)
 			.boxed() // size firewall
-			.await?;
-	}
+			.await?
+	} else {
+		pdu_builder
+	};
 
 	let (pdu, pdu_json) = self
 		.create_hash_and_sign_event(pdu_builder, sender, room_id, state_lock)
 		.boxed() // query-depth firewall
 		.await?;
 
-	self.append_signed_pdu(pdu, pdu_json, sender, state_lock)
+	let event_id = pdu.event_id().to_owned();
+	let appended = self
+		.append_signed_pdu(pdu, pdu_json, sender, state_lock)
 		.boxed() // size firewall
-		.await
+		.await;
+
+	let Err(error) = appended else {
+		return Ok((event_id, Ok(())));
+	};
+
+	match self.non_outlier_pdu_exists(&event_id).await {
+		| Ok(()) => Ok((event_id, Err(error))),
+		| Err(_) => Err(error),
+	}
 }
 
 /// Builds, signs, and persists a room's create event under the placeholder
@@ -370,13 +401,13 @@ async fn room_id_taken(&self, room_id: &RoomId) -> Result<bool> {
 #[tracing::instrument(skip_all, level = "debug")]
 async fn sanitize_member_authorisation(
 	&self,
-	pdu_builder: &mut PduBuilder,
+	pdu_builder: PduBuilder,
 	room_id: &RoomId,
-) -> Result {
+) -> Result<PduBuilder> {
 	let content: RoomMemberEventContent = pdu_builder.content.deserialize_as_unchecked()?;
 
 	let Some(authorising_user) = &content.join_authorized_via_users_server else {
-		return Ok(());
+		return Ok(pdu_builder);
 	};
 
 	if content.membership != MembershipState::Join {
@@ -397,11 +428,16 @@ async fn sanitize_member_authorisation(
 			.await
 			.is_some_and(|m| matches!(m, MembershipState::Join | MembershipState::Invite))
 	{
-		let mut object = pdu_builder.content.deserialize()?;
-		object.remove("join_authorised_via_users_server");
-		pdu_builder.content = to_raw_value(&object)?.into();
+		let object: CanonicalJsonObject = pdu_builder
+			.content
+			.deserialize()?
+			.into_iter()
+			.filter(|(key, _)| key != "join_authorised_via_users_server")
+			.collect();
 
-		return Ok(());
+		let content = Raw::new(&object)?;
+
+		return Ok(PduBuilder { content, ..pdu_builder });
 	}
 
 	if !self
@@ -414,7 +450,7 @@ async fn sanitize_member_authorisation(
 		)));
 	}
 
-	Ok(())
+	Ok(pdu_builder)
 }
 
 #[implement(super::Service)]

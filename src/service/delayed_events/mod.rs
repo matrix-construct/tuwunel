@@ -18,7 +18,7 @@ use futures::{
 };
 use http::StatusCode;
 use ruma::{
-	MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, OwnedUserId, UserId,
+	EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, OwnedUserId, UserId,
 	api::{
 		client::delayed_events::get_delayed_event::v1::Finalized,
 		error::{ErrorKind, LimitExceededErrorData, RetryAfter, StandardErrorBody},
@@ -348,10 +348,10 @@ pub async fn cancel(&self, delay_id: &str, owner: Option<&UserId>) -> Result {
 
 /// Sends a scheduled event now and finalises it whatever the outcome.
 ///
-/// An append can fail after the event is stored, so a failed send is never
-/// kept for another attempt. The error is the one an ordinary send returns.
-/// An event already sent answers with its event ID again; one cancelled, or
-/// whose send failed, conflicts (MSC4140).
+/// A failed send is never kept for another attempt, and its error is the one
+/// an ordinary send returns; an event stored before a later step failed counts
+/// as sent. An event already sent answers with its event ID again; one
+/// cancelled, or whose send failed, conflicts (MSC4140).
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn send(&self, delay_id: &str, owner: Option<&UserId>) -> Result<OwnedEventId> {
@@ -478,10 +478,7 @@ async fn send_scheduled(&self, delay_id: &DelayId, due: u64) {
 
 	self.send_and_finalise(delay_id, event)
 		.await
-		.inspect_err(|e| match e.status_code().is_server_error() {
-			| true => warn!(%delay_id, %user_id, %e, "Delayed event not sent"),
-			| false => debug_warn!(%delay_id, %user_id, %e, "Delayed event not sent"),
-		})
+		.inspect_err(|e| log_send_error(delay_id, &user_id, e, None))
 		.ok();
 }
 
@@ -503,7 +500,8 @@ async fn send_and_finalise(&self, delay_id: &str, event: Event) -> Result<OwnedE
 ///
 /// A suspended sender is refused here, since the suspension may postdate the
 /// scheduling. The event names its delay ID in its unsigned data, which the
-/// serving paths show to its sender alone (MSC4140).
+/// serving paths show to its sender alone (MSC4140). Once the event is stored,
+/// the append succeeds even if a later step, such as thread indexing, fails.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn append(&self, delay_id: &str, event: &Event) -> Result<OwnedEventId> {
@@ -523,11 +521,28 @@ async fn append(&self, delay_id: &str, event: &Event) -> Result<OwnedEventId> {
 	};
 
 	let state_lock = self.services.state.mutex.lock(room_id).await;
-
-	self.services
+	let (event_id, appended) = self
+		.services
 		.timeline
-		.build_and_append_pdu(pdu, user_id, room_id, &state_lock)
-		.await
+		.build_and_store_pdu(pdu, user_id, room_id, &state_lock)
+		.await?;
+
+	appended
+		.inspect_err(|e| log_send_error(delay_id, user_id, e, Some(&event_id)))
+		.ok();
+
+	Ok(event_id)
+}
+
+/// Logs a failed send, at warning level only when the server is at fault.
+///
+/// An `event_id` names an event stored before a later step of its send failed.
+fn log_send_error(delay_id: &str, user_id: &UserId, error: &Error, event_id: Option<&EventId>) {
+	match error.status_code().is_server_error() {
+		| true => warn!(%delay_id, %user_id, %error, ?event_id, "Delayed event send failed"),
+		| false =>
+			debug_warn!(%delay_id, %user_id, %error, ?event_id, "Delayed event send failed"),
+	}
 }
 
 /// Removes one of a user's events during deactivation.

@@ -24,7 +24,7 @@ use tuwunel::Args;
 use tuwunel_core::{
 	Err, Result, err, implement, is_equal_to,
 	ruma::{
-		RoomAliasId, RoomId, UserId,
+		OwnedRoomId, RoomAliasId, RoomId, UserId,
 		events::{
 			StateEventType,
 			room::{member::RoomMemberEventContent, topic::RoomTopicEventContent},
@@ -121,6 +121,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	owner_mismatch_is_not_found(&alice, &bob, &room).await?;
 	transaction_retry_returns_one_delay(services, &alice, &room, &alice_id).await?;
 	failed_sends_are_kept(services, &alice, &room, &alice_id).await?;
+	stored_send_stands(&alice, &room).await?;
+	refused_before_storage(&alice, &bob).await?;
 	room_auth_checked_at_schedule(&bob, &room).await?;
 	delay_id_reaches_only_its_sender(services, &alice, &bob, &alice_id).await?;
 	deactivation_removes_scheduled(services, &bob, &bob_id).await
@@ -486,6 +488,81 @@ async fn failed_sends_are_kept(
 	Ok(())
 }
 
+/// A send stored before a later step fails still stands as sent.
+///
+/// The reply names a thread root this server lacks, so thread indexing fails
+/// once the event is already in the room.
+async fn stored_send_stands(alice: &Client<'_>, room: &RoomId) -> Result {
+	let content = json!({
+		"body": "x",
+		"m.relates_to": { "rel_type": "m.thread", "event_id": "$absent:localhost" },
+	});
+
+	let delay_id = alice
+		.schedule_dedicated(room, "m.room.message", "orphan", &content)
+		.await?;
+
+	alice.act(&delay_id, "send").await?;
+
+	let event = alice.delayed(&delay_id).await?;
+	let finalised = &event["finalised"];
+	let event_id = field(finalised, "event_id")?;
+
+	assert_eq!(finalised.get("error"), None, "{event}");
+
+	alice
+		.get_json(&alice.url(&format!("rooms/{room}/event/{event_id}")))
+		.await?;
+
+	alice.act(&delay_id, "send").await?;
+	conflicting(alice, &delay_id, ["cancel", "restart"]).await
+}
+
+/// A send refused before the event is stored stays a failed send.
+///
+/// Room auth lets Bob schedule a redaction of Alice's message, but the
+/// timeline refuses it at send time, before anything is stored.
+async fn refused_before_storage(alice: &Client<'_>, bob: &Client<'_>) -> Result {
+	let room = shared_room(alice, bob).await?;
+
+	let path = format!("rooms/{room}/send/m.room.message/target");
+	let sent = alice
+		.put_json(&alice.url(&path), &json!({ "body": "x" }))
+		.await?;
+
+	let redacts = json!({ "redacts": field(&sent, "event_id")? });
+	let delay_id = bob
+		.schedule_dedicated(&room, "m.room.redaction", "redact", &redacts)
+		.await?;
+
+	let refusal = bob.attempt(&delay_id, "send").await?;
+
+	refused(refusal, StatusCode::FORBIDDEN, "M_FORBIDDEN").await?;
+
+	let event = bob.delayed(&delay_id).await?;
+	let finalised = &event["finalised"];
+
+	assert_eq!(finalised["error"]["errcode"], "M_FORBIDDEN", "{event}");
+	assert_eq!(finalised.get("event_id"), None, "{event}");
+
+	Ok(())
+}
+
+/// Creates a public room of Alice's that Bob has joined.
+///
+/// Bob holds the default power level there, below what redaction or state
+/// changes on others' behalf require.
+async fn shared_room(alice: &Client<'_>, bob: &Client<'_>) -> Result<OwnedRoomId> {
+	let room = alice
+		.create_room(&json!({ "preset": "public_chat" }))
+		.await?;
+
+	bob.post_json(&bob.url(&format!("rooms/{room}/join")), &json!({}))
+		.await?;
+
+	Ok(room)
+}
+
 async fn room_auth_checked_at_schedule(bob: &Client<'_>, room: &RoomId) -> Result {
 	let path = format!("rooms/{room}/state/m.room.topic?org.matrix.msc4140.delay={LONG}");
 	let response = bob
@@ -502,12 +579,7 @@ async fn delay_id_reaches_only_its_sender(
 	bob: &Client<'_>,
 	alice_id: &UserId,
 ) -> Result {
-	let room = alice
-		.create_room(&json!({ "preset": "public_chat" }))
-		.await?;
-
-	bob.post_json(&bob.url(&format!("rooms/{room}/join")), &json!({}))
-		.await?;
+	let room = shared_room(alice, bob).await?;
 
 	let path =
 		format!("rooms/{room}/state/m.room.member/{alice_id}?org.matrix.msc4140.delay=300");
