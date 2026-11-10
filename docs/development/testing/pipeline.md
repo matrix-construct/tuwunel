@@ -143,18 +143,20 @@ requests to reduce costs of scaling public contribution.
 
 #### Nix Smoke Test (`nix`)
 
-Verifies that `nix build` still produces a working binary. Beyond the binary,
-the Nix build also runs its own set of tests:
+This job checks that `nix build` produces a working binary. The Nix build
+also runs Cargo unit tests inside the Nix sandbox. Integration tests cannot
+run there. See [Nix tests](../nix.md#tests) for the sandbox limitations.
 
-- Cargo unit and integration tests inside the Nix sandbox
+The build also checks its inputs:
+
 - Requires all dependency Git commits to be reachable from a branch
 - Validates that the SHA256 hash in `flake.nix` matches the current
-  `rust-toolchain.toml` version — this catches MSRV bumps where the flake was
-  not updated
+  `rust-toolchain.toml` version. This catches MSRV bumps where the flake was
+  not updated.
 
-Only runs on `main` and `test` branches with the `msrv` toolchain. Pull
-requests skip this test intentionally — it is expensive and rarely fails for
-routine code changes.
+The job runs on branch pushes, `main` and `test` included, when the selected
+matrix includes the `release` profile, the `all` feature set, the `msrv`
+toolchain and the `x86_64-v1-linux-gnu` target. Pull requests skip it.
 
 - Bake target: `smoke-nix`
 - Dockerfile: `docker/Dockerfile.nix`
