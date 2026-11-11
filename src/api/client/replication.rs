@@ -198,48 +198,153 @@ pub(crate) async fn replication_wal(
 ///
 /// The caller is responsible for pausing WAL consumption while restoring the
 /// checkpoint and then resuming from `X-Tuwunel-Checkpoint-Sequence`.
+///
+/// The archive is streamed, never held in memory. It used to be built into a
+/// `Vec<u8>` before the first byte went out, so the primary's resident size
+/// grew by the whole database (~30 GB on core1-phx, 2026-11-11) and the OOM
+/// killer took the primary down — and a replica retrying its bootstrap every
+/// few seconds did it again the moment the primary came back. In flight now:
+/// at most `CHECKPOINT_CHANNEL_DEPTH` chunks of `CHECKPOINT_CHUNK_BYTES`.
+///
+/// One checkpoint at a time: a second request while one is streaming gets
+/// `503` with `Retry-After`, so a retry loop cannot stack concurrent archives.
 pub(crate) async fn replication_checkpoint(State(services): State<crate::State>) -> Response {
+	let Some(guard) = CheckpointGuard::acquire() else {
+		return Response::builder()
+			.status(StatusCode::SERVICE_UNAVAILABLE)
+			.header(header::RETRY_AFTER, "30")
+			.body(Body::from("A checkpoint is already being streamed; retry later"))
+			.expect("Failed to build checkpoint busy response");
+	};
+
 	let db = services.db.clone();
 
-	// Build the checkpoint and tar it in a blocking thread.
-	let result = tokio::task::spawn_blocking(move || -> Result<(Bytes, u64)> {
-		let tmp = tempfile_checkpoint_dir()?;
+	// Alongside the database, not in the OS temp dir: a RocksDB checkpoint is
+	// hard links only when it is on the same filesystem as the database. On a
+	// different one (a tmpfs /tmp, say) it copies every SST file — onto RAM,
+	// in the tmpfs case, which is the failure this handler exists to avoid.
+	let db_path = services.server.config.database_path.clone();
+	let checkpoint_parent = db_path.parent().unwrap_or(&db_path).to_path_buf();
+
+	let (seq_tx, seq_rx) = tokio::sync::oneshot::channel::<Result<u64>>();
+	let (chunk_tx, mut chunk_rx) =
+		tokio::sync::mpsc::channel::<std::io::Result<Bytes>>(CHECKPOINT_CHANNEL_DEPTH);
+
+	// Checkpoint creation and tar writing are blocking I/O. The thread owns the
+	// temp dir and the busy guard, so both are released when the stream ends —
+	// including when the secondary disconnects partway, which surfaces here as
+	// a failed send and aborts the archive.
+	tokio::task::spawn_blocking(move || {
+		let _guard = guard;
+
+		// Holding the guard, so any checkpoint dir already here was left by a
+		// process that died mid-stream (SIGKILL skips TempDir's drop). Its hard
+		// links pin SST files compaction has since deleted, so it grows into a
+		// second copy of the database on disk if left alone.
+		remove_stale_checkpoint_dirs(&checkpoint_parent);
+
+		let tmp = match tempfile_checkpoint_dir(&checkpoint_parent) {
+			| Ok(tmp) => tmp,
+			| Err(e) => {
+				let _ = seq_tx.send(Err(e));
+				return;
+			},
+		};
 		let checkpoint_path = tmp.path().join("checkpoint");
 
-		let seq = db.create_checkpoint(&checkpoint_path)?;
-
-		// Build tar archive in memory.
-		let mut archive_bytes: Vec<u8> = Vec::new();
-		#[allow(clippy::semicolon_outside_block)]
-		{
-			let mut builder = tar::Builder::new(&mut archive_bytes);
-			builder
-				.append_dir_all("checkpoint", &checkpoint_path)
-				.map_err(|e| tuwunel_core::err!(Database("{e}")))?;
-			builder
-				.finish()
-				.map_err(|e| tuwunel_core::err!(Database("{e}")))?;
+		match db.create_checkpoint(&checkpoint_path) {
+			| Ok(seq) =>
+				if seq_tx.send(Ok(seq)).is_err() {
+					return; // handler went away before headers were sent
+				},
+			| Err(e) => {
+				let _ = seq_tx.send(Err(e));
+				return;
+			},
 		}
 
-		Ok((Bytes::from(archive_bytes), seq))
-	})
-	.await;
+		let writer = std::io::BufWriter::with_capacity(
+			CHECKPOINT_CHUNK_BYTES,
+			ChannelWriter(chunk_tx.clone()),
+		);
+		let mut builder = tar::Builder::new(writer);
+		let written = builder
+			.append_dir_all("checkpoint", &checkpoint_path)
+			.and_then(|()| builder.into_inner())
+			.and_then(|mut w| std::io::Write::flush(&mut w));
 
-	match result {
-		| Ok(Ok((bytes, seq))) => Response::builder()
-			.status(StatusCode::OK)
-			.header(header::CONTENT_TYPE, "application/x-tar")
-			.header("x-tuwunel-checkpoint-sequence", seq.to_string())
-			.body(Body::from(bytes))
-			.expect("Failed to build checkpoint response"),
+		if let Err(e) = written {
+			// Ends the body with an error, so the secondary sees a failed
+			// transfer rather than a short archive that parses as complete.
+			let _ = chunk_tx.blocking_send(Err(e));
+		}
+	});
 
+	let seq = match seq_rx.await {
+		| Ok(Ok(seq)) => seq,
 		| Ok(Err(e)) =>
-			(StatusCode::INTERNAL_SERVER_ERROR, format!("Checkpoint creation failed: {e}"))
+			return (StatusCode::INTERNAL_SERVER_ERROR, format!("Checkpoint creation failed: {e}"))
 				.into_response(),
+		| Err(_) =>
+			return (StatusCode::INTERNAL_SERVER_ERROR, "Checkpoint task ended unexpectedly")
+				.into_response(),
+	};
 
-		| Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Spawn_blocking panicked: {e}"))
-			.into_response(),
+	let stream = futures::stream::poll_fn(move |cx| chunk_rx.poll_recv(cx));
+
+	Response::builder()
+		.status(StatusCode::OK)
+		.header(header::CONTENT_TYPE, "application/x-tar")
+		.header("x-tuwunel-checkpoint-sequence", seq.to_string())
+		.body(Body::from_stream(stream))
+		.expect("Failed to build checkpoint response")
+}
+
+/// Size of each streamed checkpoint chunk.
+const CHECKPOINT_CHUNK_BYTES: usize = 1024 * 1024;
+
+/// Chunks buffered between the tar writer and the socket. Bounds the memory
+/// a checkpoint can hold at `CHECKPOINT_CHUNK_BYTES * CHECKPOINT_CHANNEL_DEPTH`.
+const CHECKPOINT_CHANNEL_DEPTH: usize = 8;
+
+static CHECKPOINT_IN_PROGRESS: std::sync::atomic::AtomicBool =
+	std::sync::atomic::AtomicBool::new(false);
+
+/// Held for the life of one checkpoint stream; releases the slot on drop.
+struct CheckpointGuard;
+
+impl CheckpointGuard {
+	fn acquire() -> Option<Self> {
+		use std::sync::atomic::Ordering;
+
+		CHECKPOINT_IN_PROGRESS
+			.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+			.ok()
+			.map(|_| Self)
 	}
+}
+
+impl Drop for CheckpointGuard {
+	fn drop(&mut self) {
+		CHECKPOINT_IN_PROGRESS.store(false, std::sync::atomic::Ordering::Release);
+	}
+}
+
+/// `Write` adapter that hands each buffer to the response body. Blocks when the
+/// channel is full, which is what holds the tar writer to the socket's pace.
+struct ChannelWriter(tokio::sync::mpsc::Sender<std::io::Result<Bytes>>);
+
+impl std::io::Write for ChannelWriter {
+	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+		self.0
+			.blocking_send(Ok(Bytes::copy_from_slice(buf)))
+			.map_err(|_| {
+				std::io::Error::new(std::io::ErrorKind::BrokenPipe, "checkpoint receiver closed")
+			})?;
+		Ok(buf.len())
+	}
+
+	fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
 }
 
 /// `POST /_tuwunel/replication/promote`
@@ -337,23 +442,38 @@ pub(crate) async fn replication_demote(
 	}
 }
 
-/// Creates a temporary directory that is automatically removed on drop.
+/// Creates a uniquely-named directory under `parent` that is removed on drop.
 ///
-/// We use a simple wrapper around `std::fs::create_dir_all` on a
-/// `tempfile::TempDir` equivalent so we don't add a `tempfile` dependency.
-/// Instead, we create a uniquely-named subdirectory in the OS temp dir and
-/// delete it ourselves.
-fn tempfile_checkpoint_dir() -> Result<TempDir> {
+/// `parent` must be on the database's filesystem (see `replication_checkpoint`).
+/// A plain wrapper rather than the `tempfile` crate, to avoid the dependency.
+fn tempfile_checkpoint_dir(parent: &std::path::Path) -> Result<TempDir> {
 	use std::time::{SystemTime, UNIX_EPOCH};
 
 	let ts = SystemTime::now()
 		.duration_since(UNIX_EPOCH)
 		.unwrap_or_default()
 		.as_nanos();
-	let dir =
-		std::env::temp_dir().join(format!("tuwunel-checkpoint-{ts}-{}", std::process::id()));
+	let dir = parent.join(format!("{CHECKPOINT_DIR_PREFIX}{ts}-{}", std::process::id()));
 	std::fs::create_dir_all(&dir).map_err(|e| tuwunel_core::err!(Database("{e}")))?;
 	Ok(TempDir(dir))
+}
+
+const CHECKPOINT_DIR_PREFIX: &str = "_replication_checkpoint-";
+
+fn remove_stale_checkpoint_dirs(parent: &std::path::Path) {
+	let Ok(entries) = std::fs::read_dir(parent) else {
+		return;
+	};
+
+	for entry in entries.flatten() {
+		if entry
+			.file_name()
+			.to_str()
+			.is_some_and(|name| name.starts_with(CHECKPOINT_DIR_PREFIX))
+		{
+			let _: std::io::Result<()> = std::fs::remove_dir_all(entry.path());
+		}
+	}
 }
 
 struct TempDir(std::path::PathBuf);
@@ -364,4 +484,81 @@ impl TempDir {
 
 impl Drop for TempDir {
 	fn drop(&mut self) { let _: std::io::Result<()> = std::fs::remove_dir_all(&self.0); }
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A tree tarred through `ChannelWriter` arrives in bounded chunks and
+	/// unpacks byte-for-byte, and the writer never buffers the whole archive.
+	#[test]
+	fn checkpoint_tar_streams_in_bounded_chunks() {
+		let src = tempfile_checkpoint_dir(&std::env::temp_dir()).unwrap();
+		let tree = src.path().join("checkpoint");
+		std::fs::create_dir_all(tree.join("sub")).unwrap();
+		let big: Vec<u8> = (0..(3 * CHECKPOINT_CHUNK_BYTES + 12345))
+			.map(|i| (i % 251) as u8)
+			.collect();
+		std::fs::write(tree.join("000001.sst"), &big).unwrap();
+		std::fs::write(tree.join("sub/CURRENT"), b"MANIFEST-000001\n").unwrap();
+
+		let (tx, mut rx) = tokio::sync::mpsc::channel::<std::io::Result<Bytes>>(2);
+		let writer_tree = tree.clone();
+		let writer = std::thread::spawn(move || {
+			let w = std::io::BufWriter::with_capacity(CHECKPOINT_CHUNK_BYTES, ChannelWriter(tx));
+			let mut builder = tar::Builder::new(w);
+			builder.append_dir_all("checkpoint", &writer_tree).unwrap();
+			let mut w = builder.into_inner().unwrap();
+			std::io::Write::flush(&mut w).unwrap();
+		});
+
+		let mut archive = Vec::new();
+		while let Some(chunk) = rx.blocking_recv() {
+			let chunk = chunk.unwrap();
+			assert!(chunk.len() <= CHECKPOINT_CHUNK_BYTES, "chunk of {} bytes", chunk.len());
+			archive.extend_from_slice(&chunk);
+		}
+		writer.join().unwrap();
+
+		let out = tempfile_checkpoint_dir(&std::env::temp_dir()).unwrap();
+		tar::Archive::new(&archive[..]).unpack(out.path()).unwrap();
+		assert_eq!(std::fs::read(out.path().join("checkpoint/000001.sst")).unwrap(), big);
+		assert_eq!(
+			std::fs::read(out.path().join("checkpoint/sub/CURRENT")).unwrap(),
+			b"MANIFEST-000001\n"
+		);
+	}
+
+	/// A receiver that goes away (secondary disconnected) fails the writer
+	/// instead of blocking it forever.
+	#[test]
+	fn checkpoint_writer_fails_when_receiver_drops() {
+		let (tx, rx) = tokio::sync::mpsc::channel::<std::io::Result<Bytes>>(1);
+		drop(rx);
+		let err = std::io::Write::write(&mut ChannelWriter(tx), b"x").unwrap_err();
+		assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
+	}
+
+	#[test]
+	fn checkpoint_guard_allows_one_at_a_time() {
+		let first = CheckpointGuard::acquire().expect("first acquire");
+		assert!(CheckpointGuard::acquire().is_none());
+		drop(first);
+		assert!(CheckpointGuard::acquire().is_some());
+	}
+
+	#[test]
+	fn stale_checkpoint_dirs_are_removed() {
+		let parent = tempfile_checkpoint_dir(&std::env::temp_dir()).unwrap();
+		let stale = parent.path().join(format!("{CHECKPOINT_DIR_PREFIX}1-1"));
+		std::fs::create_dir_all(stale.join("checkpoint")).unwrap();
+		let keep = parent.path().join("data");
+		std::fs::create_dir_all(&keep).unwrap();
+
+		remove_stale_checkpoint_dirs(parent.path());
+
+		assert!(!stale.exists());
+		assert!(keep.exists());
+	}
 }

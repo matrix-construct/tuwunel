@@ -1,3 +1,4 @@
+#![expect(clippy::large_stack_arrays)] // serde derive: one &str per Config field
 pub mod check;
 pub mod manager;
 pub mod proxy;
@@ -1182,6 +1183,36 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub rocksdb_direct_io: bool,
 
+	/// Size leveled-compaction levels from the bottom up, each level 10x the
+	/// one above it, instead of from fixed per-column targets.
+	///
+	/// With fixed targets the bottom level of a large column grows without
+	/// bound while the level above it stays a few MB, so every byte written
+	/// is rewritten in proportion to the column's size (hundreds of times on
+	/// a multi-GB database). Dynamic sizing keeps write amplification roughly
+	/// constant as the database grows.
+	///
+	/// Existing databases are migrated on open by trivially moving files down
+	/// the LSM; no data is rewritten up front. Setting this back to false is
+	/// safe but triggers compactions to reshape the levels again.
+	///
+	/// For more details, see:
+	/// https://github.com/facebook/rocksdb/wiki/Leveled-Compaction#option-level_compaction_dynamic_level_bytes-and-levels-target-size
+	#[serde(default = "true_fn")]
+	pub rocksdb_dynamic_level_bytes: bool,
+
+	/// Let RocksDB size the number of sorted runs in universal-compaction
+	/// columns from their data, instead of capping it at two.
+	///
+	/// With the cap, every flush merges into the newest run and rewrites all
+	/// of it, so write amplification grows with the column's size. Auto-tuning
+	/// keeps roughly log2(column size / write buffer) runs, trading a few more
+	/// runs per lookup for far fewer rewrites.
+	///
+	/// Takes effect on restart; setting it back to false is safe.
+	#[serde(default = "true_fn")]
+	pub rocksdb_universal_auto_read_amp: bool,
+
 	/// Amount of threads that RocksDB will use for parallelism on database
 	/// operations such as cleanup, sync, flush, compaction, etc. Set to 0 to
 	/// use all your logical threads. Defaults to your CPU logical thread count.
@@ -1367,6 +1398,18 @@ pub struct Config {
 	/// after downtime without needing a full re-sync. Default: 86400 (24h).
 	#[serde(default = "default_rocksdb_wal_ttl_seconds")]
 	pub rocksdb_wal_ttl_seconds: u64,
+
+	/// Cap (in MiB) on the archived WAL the primary keeps for secondaries.
+	/// RocksDB deletes archived WAL when it is older than
+	/// `rocksdb_wal_ttl_seconds` OR when the archive exceeds this size,
+	/// whichever comes first — so on a busy primary this, not the TTL, decides
+	/// how long a secondary can be away and still resume. A secondary that
+	/// falls outside it hits a WAL gap and needs a full checkpoint, including
+	/// one that just finished bootstrapping and must catch up on the writes
+	/// made while its checkpoint was in transit. `0` removes the cap, leaving
+	/// only the TTL. Default: 8192 (8 GiB); was a hardcoded 1024 before.
+	#[serde(default = "default_rocksdb_wal_size_limit_mb")]
+	pub rocksdb_wal_size_limit_mb: u64,
 
 	/// Interval in milliseconds at which the secondary polls for new WAL
 	/// frames when caught up with the primary. Default: 250ms.
@@ -3427,6 +3470,8 @@ fn default_rocksdb_bottommost_compression_level() -> i32 { 32767 }
 fn default_rocksdb_stats_level() -> u8 { 1 }
 
 fn default_rocksdb_wal_ttl_seconds() -> u64 { 86400 }
+
+fn default_rocksdb_wal_size_limit_mb() -> u64 { 8192 }
 
 fn default_rocksdb_replication_interval_ms() -> u64 { 250 }
 

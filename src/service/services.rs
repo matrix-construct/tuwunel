@@ -307,6 +307,9 @@ async fn maybe_bootstrap_checkpoint(server: &Arc<Server>) -> Result {
 
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
+        // No overall timeout: a full checkpoint of a large database takes many
+        // minutes. A per-read timeout still ends a transfer that has stalled.
+        .read_timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(|e| tuwunel_core::err!(Database("Failed to build HTTP client: {e}")))?;
 
@@ -329,9 +332,6 @@ async fn maybe_bootstrap_checkpoint(server: &Arc<Server>) -> Result {
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
 
-    let tar_bytes: Bytes = resp.bytes().await
-        .map_err(|e| tuwunel_core::err!(Database("Reading checkpoint body: {e}")))?;
-
     let parent = db_path.parent().unwrap_or(&db_path);
     let staging = parent.join("_replication_staging");
     let backup = parent.join("_replication_backup");
@@ -343,10 +343,55 @@ async fn maybe_bootstrap_checkpoint(server: &Arc<Server>) -> Result {
     std::fs::create_dir_all(&staging)
         .map_err(|e| tuwunel_core::err!(Database("Creating staging dir: {e}")))?;
 
-    let cursor = std::io::Cursor::new(&*tar_bytes);
-    let mut archive = tar::Archive::new(cursor);
-    archive.unpack(&staging)
-        .map_err(|e| tuwunel_core::err!(Database("Unpacking checkpoint: {e}")))?;
+    // Unpack while downloading. The body used to be read whole with
+    // `resp.bytes()` and unpacked from memory, which needs RAM the size of the
+    // database (tens of GB) on the secondary. Now chunks go straight from the
+    // socket to a blocking tar reader through a bounded channel, so at most
+    // BOOTSTRAP_CHANNEL_DEPTH chunks are held at once.
+    const BOOTSTRAP_CHANNEL_DEPTH: usize = 16;
+    let (chunk_tx, chunk_rx) =
+        tokio::sync::mpsc::channel::<std::io::Result<Bytes>>(BOOTSTRAP_CHANNEL_DEPTH);
+
+    let unpack_dir = staging.clone();
+    let unpack = tokio::task::spawn_blocking(move || {
+        let reader = ChannelReader { rx: chunk_rx, current: Bytes::new() };
+        tar::Archive::new(reader).unpack(&unpack_dir)
+    });
+
+    let mut resp = resp;
+    let mut received: u64 = 0;
+    let mut next_report: u64 = BOOTSTRAP_PROGRESS_BYTES;
+    let download: std::result::Result<(), String> = loop {
+        match resp.chunk().await {
+            | Ok(Some(chunk)) => {
+                received = received.saturating_add(chunk.len() as u64);
+                if received >= next_report {
+                    info!("Pre-open bootstrap: {} MiB received", received / (1024 * 1024));
+                    next_report = next_report.saturating_add(BOOTSTRAP_PROGRESS_BYTES);
+                }
+                if chunk_tx.send(Ok(chunk)).await.is_err() {
+                    // The unpacker stopped early; its own error says why.
+                    break Ok(());
+                }
+            },
+            | Ok(None) => break Ok(()),
+            | Err(e) => {
+                let msg = format!("Reading checkpoint body: {e}");
+                let _ = chunk_tx
+                    .send(Err(std::io::Error::other(msg.clone())))
+                    .await;
+                break Err(msg);
+            },
+        }
+    };
+    drop(chunk_tx);
+
+    let unpacked = unpack.await
+        .map_err(|e| tuwunel_core::err!(Database("Checkpoint unpack task failed: {e}")))?;
+    download.map_err(|e| tuwunel_core::err!(Database("{e}")))?;
+    unpacked.map_err(|e| tuwunel_core::err!(Database("Unpacking checkpoint: {e}")))?;
+
+    info!("Pre-open bootstrap: checkpoint received ({} MiB)", received / (1024 * 1024));
 
     let checkpoint_src = staging.join("checkpoint");
 
@@ -367,4 +412,103 @@ async fn maybe_bootstrap_checkpoint(server: &Arc<Server>) -> Result {
 
     info!("Pre-open bootstrap complete; resume_seq = {seq}. RocksDB will open clean checkpoint.");
     Ok(())
+}
+
+/// Log a progress line every this many bytes of checkpoint download.
+const BOOTSTRAP_PROGRESS_BYTES: u64 = 1024 * 1024 * 1024;
+
+/// Blocking `Read` over checkpoint chunks arriving from the async download.
+struct ChannelReader {
+    rx: tokio::sync::mpsc::Receiver<std::io::Result<bytes::Bytes>>,
+    current: bytes::Bytes,
+}
+
+impl std::io::Read for ChannelReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        while self.current.is_empty() {
+            match self.rx.blocking_recv() {
+                | Some(Ok(chunk)) => self.current = chunk,
+                | Some(Err(e)) => return Err(e),
+                | None => return Ok(0), // sender dropped: end of body
+            }
+        }
+
+        let n = buf.len().min(self.current.len());
+        buf[..n].copy_from_slice(&self.current.split_to(n));
+        Ok(n)
+    }
+}
+
+#[cfg(test)]
+mod bootstrap_stream_tests {
+    use super::ChannelReader;
+
+    fn archive_of(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut builder = tar::Builder::new(Vec::new());
+        for (name, data) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_data(&mut header, name, *data).unwrap();
+        }
+        builder.into_inner().unwrap()
+    }
+
+    fn out_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "tuwunel-bootstrap-test-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Chunks of awkward sizes (splitting tar headers mid-block) reassemble
+    /// into the same files.
+    #[test]
+    fn unpacks_archive_fed_in_odd_chunks() {
+        let big: Vec<u8> = (0..200_000u32).map(|i| (i % 253) as u8).collect();
+        let archive = archive_of(&[("checkpoint/000001.sst", &big), ("checkpoint/CURRENT", b"M\n")]);
+
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let dir = out_dir("ok");
+        let unpack_dir = dir.clone();
+        let unpack = std::thread::spawn(move || {
+            tar::Archive::new(ChannelReader { rx, current: bytes::Bytes::new() }).unpack(&unpack_dir)
+        });
+        for piece in archive.chunks(777) {
+            tx.blocking_send(Ok(bytes::Bytes::copy_from_slice(piece))).unwrap();
+        }
+        drop(tx);
+
+        unpack.join().unwrap().unwrap();
+        assert_eq!(std::fs::read(dir.join("checkpoint/000001.sst")).unwrap(), big);
+        assert_eq!(std::fs::read(dir.join("checkpoint/CURRENT")).unwrap(), b"M\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A download error mid-stream fails the unpack; it must never look like a
+    /// complete (truncated) checkpoint.
+    #[test]
+    fn download_error_fails_unpack() {
+        let big = vec![7u8; 100_000];
+        let archive = archive_of(&[("checkpoint/000001.sst", &big)]);
+
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let dir = out_dir("err");
+        let unpack_dir = dir.clone();
+        let unpack = std::thread::spawn(move || {
+            tar::Archive::new(ChannelReader { rx, current: bytes::Bytes::new() }).unpack(&unpack_dir)
+        });
+        tx.blocking_send(Ok(bytes::Bytes::copy_from_slice(&archive[..archive.len() / 2])))
+            .unwrap();
+        tx.blocking_send(Err(std::io::Error::other("connection reset"))).unwrap();
+        drop(tx);
+
+        assert!(unpack.join().unwrap().is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

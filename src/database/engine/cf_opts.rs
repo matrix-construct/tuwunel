@@ -1,7 +1,8 @@
 use rocksdb::{
 	BlockBasedIndexType, BlockBasedOptions, BlockBasedPinningTier, Cache,
-	DBCompressionType as CompressionType, DataBlockIndexType, FifoCompactOptions,
-	LruCacheOptions, Options, UniversalCompactOptions, UniversalCompactionStopStyle,
+	DBCompactionStyle as CompactionStyle, DBCompressionType as CompressionType,
+	DataBlockIndexType, FifoCompactOptions, LruCacheOptions, Options, UniversalCompactOptions,
+	UniversalCompactionStopStyle,
 };
 use tuwunel_core::{Config, Result, err, utils::math::Expected};
 
@@ -36,18 +37,40 @@ fn descriptor_cf_options(
 	opts.set_target_file_size_multiplier(desc.file_shape);
 
 	opts.set_level_zero_file_num_compaction_trigger(desc.level0_width);
-	opts.set_level_compaction_dynamic_level_bytes(false);
 	opts.set_ttl(desc.ttl);
 
+	// Fixed level targets leave the bottom level unbounded beneath a few-MB
+	// level above it, so write amplification grows with the column's size.
+	// Dynamic sizing keeps each level 10x the next; RocksDB ignores
+	// level_shape in that mode and migrates existing files down on open.
+	let dynamic_levels =
+		config.rocksdb_dynamic_level_bytes && matches!(desc.compaction, CompactionStyle::Level);
+
+	opts.set_level_compaction_dynamic_level_bytes(dynamic_levels);
 	opts.set_max_bytes_for_level_base(desc.level_size);
-	opts.set_max_bytes_for_level_multiplier(1.0);
-	opts.set_max_bytes_for_level_multiplier_additional(&desc.level_shape);
+	if dynamic_levels {
+		opts.set_max_bytes_for_level_multiplier(10.0);
+	} else {
+		opts.set_max_bytes_for_level_multiplier(1.0);
+		opts.set_max_bytes_for_level_multiplier_additional(&desc.level_shape);
+	}
 
 	opts.set_disable_auto_compactions(desc.ignored);
 	opts.set_compaction_style(desc.compaction);
 	opts.set_compaction_pri(desc.compaction_pri);
 	opts.set_universal_compaction_options(&uc_options(&desc));
 	opts.set_fifo_compaction_options(&fifo_options(&desc));
+
+	// The default run limit falls back to level0_width (2), so every flush
+	// rewrites the whole newest run and write amplification grows with the
+	// column's size. Auto-tuning sizes the run limit from the data instead.
+	// The bindings have no setter; this must follow the struct copy above.
+	if config.rocksdb_universal_auto_read_amp
+		&& matches!(desc.compaction, CompactionStyle::Universal)
+	{
+		opts.set_options_from_string("compaction_options_universal={max_read_amp=0}")
+			.map_err(map_err)?;
+	}
 
 	let compression_shape: Vec<_> = desc
 		.compression_shape
