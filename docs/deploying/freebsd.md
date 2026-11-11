@@ -1,16 +1,38 @@
 # Tuwunel for FreeBSD
 
 Tuwunel builds and runs on FreeBSD, but FreeBSD is not a supported platform.
-Nothing in the CI matrix builds it, no release artifact is published for it, and
-there is no port or package. This page records a build that was verified end to
-end, and the handful of things that differ from the platforms we do ship.
+Nothing in the CI matrix builds it and no release artifact is published for it.
+For installation through the FreeBSD ports tree, see [Port](#port). The rest
+of this page records a build from source that was verified end to end, and the
+handful of things that differ from the platforms we do ship.
 
-Verified against 1.8.3 on FreeBSD 15.1-RELEASE, `aarch64` and `amd64`. The
+Verified against `1.8.3` on FreeBSD `15.1-RELEASE`, `aarch64` and `amd64`. The
 resulting server opens its database, answers the client and federation version
 endpoints, registers an account, creates a room, sends and reads back a message,
 reopens a populated database across a restart, and exits cleanly on `SIGTERM`.
 
-Contributions for getting Tuwunel into ports are welcome.
+
+## Port
+
+The FreeBSD ports tree provides
+[`net-im/tuwunel`](https://www.freshports.org/net-im/tuwunel) for `aarch64`
+and `amd64`.
+
+The port is maintained in the FreeBSD ports tree, not by this project, so the
+version it carries can trail the latest release. Its page lists the current
+one.
+
+Install the package:
+
+```sh
+pkg install tuwunel
+```
+
+Or build the port:
+
+```sh
+cd /usr/ports/net-im/tuwunel && make install clean
+```
 
 
 ## Toolchain
