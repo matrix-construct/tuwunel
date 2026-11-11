@@ -47,6 +47,7 @@ Switzerland 🇨🇭 where it is currently deployed for citizens.
 - Nix binary cache available at `https://cache.tuwunel.chat`, see the [NixOS guide](https://matrix-construct.github.io/tuwunel/deploying/nixos.html#binary-cache) for setup.
 - Alpine package available as [tuwunel](https://pkgs.alpinelinux.org/package/edge/testing/x86_64/tuwunel).
 - Gentoo ebuild available in Guru as [net-im/tuwunel](https://gitweb.gentoo.org/repo/proj/guru.git/tree/net-im/tuwunel).
+- FreeBSD port available as [net-im/tuwunel](https://www.freshports.org/net-im/tuwunel).
 - Ansible playbook available as [matrix-docker-ansible-deploy](https://github.com/spantaleev/matrix-docker-ansible-deploy/blob/master/docs/configuring-playbook-tuwunel.md).
 
 ### Quick Setup
