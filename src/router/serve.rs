@@ -22,8 +22,8 @@ use crate::handle::ServerHandle;
 /// breaking together) the excess SYNs overflow that queue and are retried by
 /// the clients' TCP stacks at 1 s, 3 s, 7 s...: 5,000 simultaneous connects
 /// produced 2,751 listen-queue overflows on a 4-vCPU primary, and on a busy one
-/// half of 10,000 were still unconnected after 2.5 minutes (netsapiens-matrix
-/// load tests, 2026-09-30). The kernel caps this at net.core.somaxconn.
+/// half of 10,000 were still unconnected after 2.5 minutes. The kernel caps
+/// this at net.core.somaxconn.
 const LISTEN_BACKLOG: u32 = 8192;
 
 /// Bind like `TcpListener::bind` (SO_REUSEADDR on Unix), with LISTEN_BACKLOG.

@@ -1411,6 +1411,20 @@ pub struct Config {
 	#[serde(default = "default_rocksdb_wal_size_limit_mb")]
 	pub rocksdb_wal_size_limit_mb: u64,
 
+	/// Whether a secondary whose database predates exact replication takes
+	/// one full checkpoint from its primary to repair itself.
+	///
+	/// Builds before this one dropped writes on secondaries (the replication
+	/// cursor was off by one), so a secondary that ran one is missing data
+	/// until it restores a fresh checkpoint. With this on, such a secondary
+	/// does that once, automatically, the first time it connects to a primary
+	/// that is also on a fixed build; it never repeats. Turn it off to choose
+	/// the moment yourself on a large database — the copy is tens of minutes
+	/// of disk and network load, with no healthy secondary to fail over to
+	/// until it finishes — and re-sync by hand instead. Default: true.
+	#[serde(default = "true_fn")]
+	pub rocksdb_replication_auto_resync: bool,
+
 	/// Interval in milliseconds at which the secondary polls for new WAL
 	/// frames when caught up with the primary. Default: 250ms.
 	#[serde(default = "default_rocksdb_replication_interval_ms")]

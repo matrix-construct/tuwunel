@@ -3,7 +3,7 @@ use std::{fmt, sync::Arc};
 use futures::{StreamExt, TryStreamExt};
 use tokio::sync::Mutex;
 use tuwunel_core::{
-	Result, Server, debug, debug_info, implement, info, trace, utils::stream::IterStream,
+	Result, Server, debug, debug_info, implement, info, trace, utils::stream::IterStream, warn,
 };
 use tuwunel_database::Database;
 
@@ -233,6 +233,16 @@ pub async fn stop(&self) {
 	let count = self.globals.persist_clean_shutdown();
 	info!(count, "Recorded clean shutdown counter.");
 
+	// After the counter mark, which is itself a write: this records where the
+	// database ends, and is only honoured if it still ends there at the next
+	// open. Lets a primary that stopped cleanly prove it lost nothing when it
+	// rejoins as a replica (see `tuwunel_database::rejoin`). Failing to write
+	// it costs only that shortcut — the node does a full checkpoint instead.
+	match self.db.record_clean_stop() {
+		| Ok(()) => info!(seq = self.db.latest_wal_sequence(), "Recorded clean stop."),
+		| Err(e) => warn!("Could not record clean stop; a rejoin will need a full checkpoint: {e}"),
+	}
+
 	debug_info!("Services shutdown complete.");
 }
 
@@ -326,11 +336,22 @@ async fn maybe_bootstrap_checkpoint(server: &Arc<Server>) -> Result {
         )));
     }
 
+    // Absent when the primary runs a build without fast rejoin.
+    let primary_instance: Option<String> = resp.headers()
+        .get("x-tuwunel-instance-id")
+        .and_then(|v| v.to_str().ok())
+        .map(ToOwned::to_owned);
+
+    // The resume cursor for this checkpoint. Without it there is no knowing
+    // where the checkpoint ends; guessing 0 would replay whatever WAL the
+    // primary still has onto it, hole and all.
     let seq: u64 = resp.headers()
         .get("x-tuwunel-checkpoint-sequence")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+        .ok_or_else(|| tuwunel_core::err!(Database(
+            "Primary sent a checkpoint without a readable x-tuwunel-checkpoint-sequence"
+        )))?;
 
     let parent = db_path.parent().unwrap_or(&db_path);
     let staging = parent.join("_replication_staging");
@@ -407,7 +428,23 @@ async fn maybe_bootstrap_checkpoint(server: &Arc<Server>) -> Result {
         .map_err(|e| tuwunel_core::err!(Database("Moving checkpoint to db_path: {e}")))?;
 
     let _: std::io::Result<()> = std::fs::remove_dir_all(&staging);
-    std::fs::write(&sidecar, seq.to_string())
+    // The restored directory is, right now, an exact copy of the primary's
+    // database. Say so; the marker is dropped at this node's first local data
+    // write (see `tuwunel_database::rejoin`). Not being able to write it only
+    // costs the fast-rejoin shortcut later.
+    if let Some(primary_instance) = primary_instance.as_deref()
+        && let Err(e) = tuwunel_database::rejoin::mark_restored_checkpoint(&db_path, primary_instance)
+    {
+        warn!("Could not mark the restored checkpoint as an exact copy: {e}");
+    }
+    // Cursor, then the primary's instance id if it gave one. The worker records
+    // both, so that a primary which comes back as a different database before
+    // this node's first connection is still recognised as one.
+    let sidecar_body = match primary_instance.as_deref() {
+        Some(instance) => format!("{seq} {instance}"),
+        None => seq.to_string(),
+    };
+    std::fs::write(&sidecar, sidecar_body)
         .map_err(|e| tuwunel_core::err!(Database("Writing bootstrap sidecar: {e}")))?;
 
     info!("Pre-open bootstrap complete; resume_seq = {seq}. RocksDB will open clean checkpoint.");

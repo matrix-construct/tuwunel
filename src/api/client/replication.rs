@@ -56,9 +56,18 @@ pub(crate) async fn replication_status(
 		"primary"
 	};
 
+	// For operators and tests: which database this is, whether it is still a
+	// proven exact copy of its primary, and whether it holds a handoff for
+	// the primary it replaced. See `tuwunel_database::rejoin`.
+	let exact_copy_of = services.db.pure_replica_of();
+	let has_handoff = matches!(services.db.read_handoff(), Ok(Some(_)));
+
 	Json(serde_json::json!({
 		"role": role,
 		"latest_sequence": seq,
+		"instance": services.db.instance_id(),
+		"exact_copy_of": exact_copy_of,
+		"has_handoff": has_handoff,
 	}))
 }
 
@@ -77,6 +86,7 @@ pub(crate) async fn replication_wal(
 ) -> Response {
 	let since = params.since.unwrap_or(0);
 	let db = services.db.clone();
+	let instance = db.instance_id().to_owned();
 	let interval_ms = services
 		.server
 		.config
@@ -92,7 +102,18 @@ pub(crate) async fn replication_wal(
 		move || {
 			let _: Result<()> = db.flush_wal();
 			let current_seq = db.latest_wal_sequence();
-			if since == 0 || since >= current_seq {
+			// A cursor past our latest sequence names writes this database
+			// does not have (it lost its unsynced tail in a crash, or it is
+			// not the database the cursor came from). Nothing can be resumed
+			// from that; waiting for our sequence to catch up to it would
+			// splice two different histories together.
+			if since > current_seq {
+				return Err(tuwunel_core::err!(Database(
+					"WAL gap: secondary is at seq {since} but the primary only reaches \
+					 {current_seq}; the secondary holds writes this database does not"
+				)));
+			}
+			if since == 0 || since == current_seq {
 				return Ok(());
 			}
 			let mut iter = db.wal_frame_iter(since)?;
@@ -132,23 +153,49 @@ pub(crate) async fn replication_wal(
 
 		loop {
 			// Drain all available WAL frames in a blocking thread.
+			//
+			// Each frame must be the batch directly after the cursor. The gap
+			// check above only runs when the stream opens; a secondary that
+			// falls behind far enough *while connected* has the WAL deleted
+			// out from under it, and the iterator then quietly starts at the
+			// oldest batch it still has. Sending that would leave a hole the
+			// secondary cannot see. Stop instead: the secondary reconnects,
+			// meets the gap check, and re-syncs from a checkpoint.
 			let result = tokio::task::spawn_blocking({
 				let db = db.clone();
-				move || -> (Vec<Bytes>, u64) {
+				move || -> (Vec<Bytes>, u64, Option<String>) {
 					let mut frames: Vec<Bytes> = Vec::new();
 					let mut next_seq = seq;
-					if let Ok(iter) = db.wal_frame_iter(seq) {
-						for frame in iter.flatten() {
-							next_seq = frame.next_resume_seq();
-							frames.push(Bytes::from(frame.encode()));
+					let iter = match db.wal_frame_iter(seq) {
+						| Ok(iter) => iter,
+						| Err(e) => return (frames, next_seq, Some(format!("WAL read: {e}"))),
+					};
+					for frame in iter {
+						let frame = match frame {
+							| Ok(frame) => frame,
+							| Err(e) =>
+								return (frames, next_seq, Some(format!("WAL read: {e}"))),
+						};
+						if next_seq != 0 && frame.sequence != next_seq.saturating_add(1) {
+							return (
+								frames,
+								next_seq,
+								Some(format!(
+									"WAL is not contiguous after seq {next_seq}: next batch \
+									 starts at {}",
+									frame.sequence
+								)),
+							);
 						}
+						next_seq = frame.resume_seq();
+						frames.push(Bytes::from(frame.encode()));
 					}
-					(frames, next_seq)
+					(frames, next_seq, None)
 				}
 			})
 			.await;
 
-			let Ok((frames, next_seq)) = result else {
+			let Ok((frames, next_seq, broken)) = result else {
 				break; // spawn_blocking panicked
 			};
 
@@ -161,19 +208,29 @@ pub(crate) async fn replication_wal(
 				}
 			}
 
+			if let Some(reason) = broken {
+				tuwunel_core::warn!(
+					"Closing WAL stream to a secondary at seq {seq}: {reason}. It will \
+					 reconnect and re-sync if the WAL it needs is gone."
+				);
+				return;
+			}
+
 			// Always emit a heartbeat so the secondary can tell the primary is alive.
 			// When no data was produced, sleep first to avoid a busy-loop.
 			if !advanced {
 				tokio::time::sleep(Duration::from_millis(interval_ms)).await;
 			}
 
-			let hb_seq = {
-				let db = db.clone();
-				tokio::task::spawn_blocking(move || db.latest_wal_sequence())
-					.await
-					.unwrap_or(seq)
-			};
-			let hb = WalFrame::heartbeat(hb_seq);
+			// The heartbeat carries `seq` — this stream's own cursor, the last
+			// sequence it has sent — not the primary's latest sequence. The
+			// secondary saves a heartbeat's sequence as its resume cursor, and
+			// the latest sequence is read after the drain above, so any write
+			// landing in between made the cursor claim batches this stream had
+			// not sent: a reconnect after that heartbeat skipped them for good.
+			// It is also what a promoted node records as how far it got (see
+			// `rejoin::Handoff`), which has to be exact.
+			let hb = WalFrame::heartbeat(seq);
 			if tx.send(Bytes::from(hb.encode())).await.is_err() {
 				return; // client disconnected
 			}
@@ -185,8 +242,33 @@ pub(crate) async fn replication_wal(
 		.status(StatusCode::OK)
 		.header(header::CONTENT_TYPE, "application/octet-stream")
 		.header("x-tuwunel-role", "primary")
+		// Which database this WAL belongs to. The secondary records it with
+		// its cursor so that, if it is promoted, its handoff can name the
+		// database it replaced (see `rejoin`).
+		.header("x-tuwunel-instance-id", instance)
 		.body(Body::from_stream(stream))
 		.expect("Failed to build WAL streaming response")
+}
+
+/// `GET /_tuwunel/replication/handoff`
+///
+/// What this node recorded when it was last promoted: the database it replaced
+/// and how far it had replicated from it. A former primary rejoining as this
+/// node's replica uses it to prove it lost nothing and skip a full checkpoint
+/// (see `tuwunel_database::rejoin`). `404` when there is no record — this node
+/// was never promoted, or has been a replica since.
+pub(crate) async fn replication_handoff(State(services): State<crate::State>) -> Response {
+	match services.db.read_handoff() {
+		| Ok(Some(handoff)) => Json(serde_json::json!({
+			"from_instance": handoff.from_instance,
+			"from_applied_seq": handoff.from_applied_seq,
+			"resume_after": handoff.resume_after,
+			"instance": handoff.instance,
+		}))
+		.into_response(),
+		| Ok(None) => (StatusCode::NOT_FOUND, "No handoff recorded").into_response(),
+		| Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")).into_response(),
+	}
 }
 
 /// `GET /_tuwunel/replication/checkpoint`
@@ -201,7 +283,7 @@ pub(crate) async fn replication_wal(
 ///
 /// The archive is streamed, never held in memory. It used to be built into a
 /// `Vec<u8>` before the first byte went out, so the primary's resident size
-/// grew by the whole database (~30 GB on core1-phx, 2026-11-11) and the OOM
+/// grew by the whole database and the OOM
 /// killer took the primary down — and a replica retrying its bootstrap every
 /// few seconds did it again the moment the primary came back. In flight now:
 /// at most `CHECKPOINT_CHANNEL_DEPTH` chunks of `CHECKPOINT_CHUNK_BYTES`.
@@ -218,6 +300,7 @@ pub(crate) async fn replication_checkpoint(State(services): State<crate::State>)
 	};
 
 	let db = services.db.clone();
+	let instance = db.instance_id().to_owned();
 
 	// Alongside the database, not in the OS temp dir: a RocksDB checkpoint is
 	// hard links only when it is on the same filesystem as the database. On a
@@ -296,6 +379,8 @@ pub(crate) async fn replication_checkpoint(State(services): State<crate::State>)
 		.status(StatusCode::OK)
 		.header(header::CONTENT_TYPE, "application/x-tar")
 		.header("x-tuwunel-checkpoint-sequence", seq.to_string())
+		// Which database this checkpoint is a copy of; see `rejoin::Purity`.
+		.header("x-tuwunel-instance-id", instance)
 		.body(Body::from_stream(stream))
 		.expect("Failed to build checkpoint response")
 }

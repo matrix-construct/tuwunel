@@ -6,7 +6,7 @@
 //! anything at all is being written that is every poll of every connected
 //! client, and each rebuild walks every room the user is in with a dozen
 //! RocksDB lookups apiece: ~3.8 ms + ~0.28 ms per room on a 4-vCPU primary.
-//! Load-tested (netsapiens-matrix `hold`, 2026-09-30): an idle primary held
+//! Load-tested: an idle primary held
 //! 44,000 connections; with 1 msg/s of chat elsewhere, 15,000.
 //!
 //! This index answers "did anything this user's sync reads change after

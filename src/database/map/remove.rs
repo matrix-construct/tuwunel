@@ -10,6 +10,8 @@ pub fn remove<K>(&self, key: &K)
 where
 	K: AsRef<[u8]> + ?Sized + Debug,
 {
+	self.engine.purity.note_write(self.name, key.as_ref());
+
 	let write_options = &self.write_options;
 	self.engine
 		.db

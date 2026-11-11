@@ -256,6 +256,7 @@ pub fn build(router: Router<State>, server: &Server, state: State) -> Router<Sta
 			.route("/_tuwunel/replication/status", get(client::replication_status))
 			.route("/_tuwunel/replication/wal", get(client::replication_wal))
 			.route("/_tuwunel/replication/checkpoint", get(client::replication_checkpoint))
+			.route("/_tuwunel/replication/handoff", get(client::replication_handoff))
 			.route("/_tuwunel/replication/promote", post(client::replication_promote))
 			.route("/_tuwunel/replication/demote", post(client::replication_demote))
 			.layer(middleware::from_fn_with_state(state, check_replication_token)),

@@ -41,6 +41,9 @@ pub struct Engine {
 	pub(super) secondary: bool,
 	pub(crate) checksums: bool,
 	corks: AtomicU32,
+	/// Whether this database is still an exact copy of its primary. Every
+	/// local write reports here first; see `rejoin::Purity`.
+	pub(crate) purity: crate::rejoin::Purity,
 }
 
 pub(crate) type Db = DBWithThreadMode<MultiThreaded>;

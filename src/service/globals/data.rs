@@ -115,7 +115,16 @@ impl Data {
 		// that bypassed promote(). Its clients could otherwise hold sync tokens
 		// above everything it is about to issue. Apply the jump here, persist
 		// it, and clear the cursor so the next restart does not jump again.
-		let was_replica = args.db.get_replication_primary().ok().flatten().is_some()
+		//
+		// The same goes for a promotion that was cut short. promote() clears
+		// the cursor before it jumps the counter (the clears must not reach a
+		// rejoining ex-primary through the WAL), and marks the promotion
+		// pending for exactly that stretch — so a process killed in between
+		// still gets the jump here instead of numbering events inside the old
+		// primary's range.
+		let promotion_pending = args.db.promotion_pending();
+		let was_replica = promotion_pending
+			|| args.db.get_replication_primary().ok().flatten().is_some()
 			|| args.db.get_replication_resume_seq().unwrap_or(0) > 0;
 		if !is_replica && was_replica {
 			count = count.saturating_add(PROMOTION_COUNTER_GAP);
@@ -128,6 +137,8 @@ impl Data {
 			Self::store_count(&db, &global, count)?;
 			args.db.set_replication_resume_seq(0)?;
 			args.db.set_replication_primary(None)?;
+			args.db.set_replication_primary_instance(None)?;
+			args.db.set_promotion_pending(false);
 		}
 		let retires = Sender::new(count);
 		Ok(Self {
@@ -263,8 +274,7 @@ impl Data {
 	/// Checks for shutdown every `SCAN_SHUTDOWN_CHECK_EVERY` keys and gives up
 	/// with an error if one was requested. The scan runs before the signal
 	/// handlers can act on anything, so without this a `systemctl stop` sat
-	/// out the whole scan and was only ended by systemd's SIGKILL — on
-	/// core2-phx on 2026-09-23 that took the full ~6 minute stop timeout. An
+	/// out the whole scan and was only ended by systemd's SIGKILL. An
 	/// abandoned scan leaves nothing half-done: no marker is written, and the
 	/// next start simply scans again.
 	fn max_pdu_count_across_rooms(pduid_pdu: &Arc<Map>, server: &tuwunel_core::Server) -> Result<u64> {

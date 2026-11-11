@@ -74,6 +74,7 @@ pub(crate) async fn open(ctx: Arc<Context>, desc: &[Descriptor]) -> Result<Arc<S
 		secondary: config.rocksdb_secondary,
 		checksums: config.rocksdb_checksums,
 		corks: AtomicU32::new(0),
+		purity: crate::rejoin::Purity::new(path),
 	}))
 }
 

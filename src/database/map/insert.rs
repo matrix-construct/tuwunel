@@ -21,6 +21,8 @@ where
 	K: AsRef<[u8]> + ?Sized,
 	V: AsRef<[u8]>,
 {
+	self.engine.purity.note_write(self.name, key.as_ref());
+
 	let write_options = &self.write_options;
 	self.engine
 		.db
@@ -45,6 +47,7 @@ where
 {
 	let mut batch = WriteBatchWithTransaction::<false>::default();
 	for (key, val) in iter {
+		self.engine.purity.note_write(self.name, key.as_ref());
 		batch.put_cf(&self.cf(), key.as_ref(), val.as_ref());
 	}
 

@@ -41,8 +41,8 @@ pub struct WalFrame {
 	pub frame_type: u8,
 	/// Primary's sequence number for the first record in this batch.
 	pub sequence: u64,
-	/// How many WAL sequence numbers this batch consumes.
-	/// Secondary's next resume point = `sequence + count`.
+	/// How many WAL sequence numbers this batch consumes: it occupies
+	/// `sequence ..= sequence + count - 1`. See `resume_seq`.
 	pub count: u64,
 	/// Unix milliseconds when the primary wrote this batch.
 	pub timestamp_ms: u64,
@@ -80,15 +80,29 @@ impl WalFrame {
 		}
 	}
 
-	/// Returns the sequence number the secondary should use as its next
-	/// `?since=` argument after successfully applying this frame.
-	/// For heartbeats, returns `sequence` unchanged (cursor must not advance
-	/// based on heartbeats alone).
+	/// The secondary's resume cursor once this frame has been applied: the
+	/// last WAL sequence it now holds, and the `?since=` to reconnect with.
+	///
+	/// `get_updates_since(n)` yields the batches that start *after* `n`, so
+	/// the cursor has to be the last sequence consumed, `sequence + count - 1`
+	/// — not the first sequence of the next batch. It was `sequence + count`,
+	/// and because batches are contiguous that is exactly where the next batch
+	/// starts: asking for updates since it skipped that batch. The primary's
+	/// stream loop re-seeks with this value on every poll, so every poll that
+	/// found new writes dropped the first of them, on every secondary.
+	///
+	/// A batch that consumed no sequences (`count == 0`) leaves the cursor one
+	/// short of `sequence`, so whatever real batch starts there is still
+	/// delivered.
+	///
+	/// A heartbeat carries the cursor itself (see `replication_wal`).
 	#[must_use]
 	#[inline]
-	pub fn next_resume_seq(&self) -> u64 {
+	pub fn resume_seq(&self) -> u64 {
 		if self.frame_type == FRAME_TYPE_DATA {
-			self.sequence.saturating_add(self.count)
+			self.sequence
+				.saturating_add(self.count)
+				.saturating_sub(1)
 		} else {
 			self.sequence
 		}
@@ -192,15 +206,27 @@ fn now_ms() -> u64 {
 /// Create a RocksDB checkpoint at `dest`.
 ///
 /// A checkpoint is a consistent point-in-time snapshot consisting of
-/// hard-links to existing SST files. It is created atomically and returns
-/// the sequence number at checkpoint creation time.
+/// hard-links to existing SST files.
+///
+/// Returns the resume cursor for a secondary restoring this checkpoint: the
+/// last WAL sequence the checkpoint is guaranteed to contain.
+///
+/// The sequence is read *before* the checkpoint is taken. It used to be read
+/// after, and the secondary resumed from that value — but creating a
+/// checkpoint is not instant (it links every live file), and writes that
+/// landed while it was being taken were in neither the checkpoint nor the
+/// stream the secondary then asked for. Every bootstrap under write load
+/// silently dropped them. Reading first errs the other way: the checkpoint may
+/// already hold a few of the batches the secondary will be sent again, and
+/// re-applying a put or delete that is already there changes nothing.
 #[implement(Engine)]
 pub fn create_checkpoint(&self, dest: &Path) -> Result<u64> {
+	let last_before = self.db.latest_sequence_number();
 	let checkpoint = Checkpoint::new(&self.db).map_err(map_err)?;
 	checkpoint
 		.create_checkpoint(dest)
 		.map_err(map_err)?;
-	Ok(self.db.latest_sequence_number())
+	Ok(last_before)
 }
 
 /// Prevent RocksDB from deleting obsolete files.
@@ -315,8 +341,8 @@ mod tests {
 		assert_eq!(decoded.sequence, 12345);
 		assert_eq!(decoded.count, 0);
 		assert!(decoded.batch_data.is_empty());
-		// Heartbeat does not advance resume cursor
-		assert_eq!(decoded.next_resume_seq(), 12345);
+		// A heartbeat's sequence is the cursor.
+		assert_eq!(decoded.resume_seq(), 12345);
 	}
 
 	#[test]
@@ -329,15 +355,17 @@ mod tests {
 		assert_eq!(decoded.frame_type, FRAME_TYPE_DATA);
 		assert_eq!(decoded.sequence, 1000);
 		assert_eq!(decoded.count, 50);
-		assert_eq!(decoded.next_resume_seq(), 1050);
+		// Occupies 1000..=1049; the cursor is the last sequence consumed.
+		assert_eq!(decoded.resume_seq(), 1049);
 		assert_eq!(decoded.batch_data, data);
 	}
 
 	#[test]
 	fn data_frame_zero_count() {
-		// A batch with count=0 should not advance the cursor beyond sequence.
+		// A batch that consumed nothing must not move the cursor onto
+		// `sequence`: a real batch starting there would be skipped.
 		let frame = WalFrame::data(500, 0, b"payload".to_vec());
-		assert_eq!(frame.next_resume_seq(), 500);
+		assert_eq!(frame.resume_seq(), 499);
 	}
 
 	#[test]

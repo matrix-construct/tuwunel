@@ -15,6 +15,7 @@ pub mod keyval;
 mod map;
 pub mod maps;
 mod pool;
+pub mod rejoin;
 mod ser;
 mod stream;
 #[cfg(test)]
@@ -47,6 +48,7 @@ pub struct Database {
 	maps: Maps,
 	pub engine: Arc<Engine>,
 	pub(crate) _ctx: Arc<Context>,
+	pub(crate) rejoin: rejoin::RejoinState,
 }
 
 impl Database {
@@ -54,10 +56,15 @@ impl Database {
 	pub async fn open(server: &Arc<Server>) -> Result<Arc<Self>> {
 		let ctx = Context::new(server)?;
 		let engine = Engine::open(ctx.clone(), maps::MAPS).await?;
+		let maps = maps::open(&engine)?;
+		// Before anything writes: the clean-stop proof compares the record with
+		// the sequence the database opened at.
+		let rejoin = rejoin::RejoinState::load(&engine, &maps)?;
 		Ok(Arc::new(Self {
-			maps: maps::open(&engine)?,
+			maps,
 			engine: engine.clone(),
 			_ctx: ctx,
+			rejoin,
 		}))
 	}
 
@@ -173,6 +180,51 @@ impl Database {
 		}
 		let handle = result?;
 		Ok(std::str::from_utf8(&handle).ok().map(ToOwned::to_owned))
+	}
+
+	/// Instance id (see `rejoin`) of the primary the resume cursor refers to,
+	/// as that primary reported it on the WAL stream.
+	pub fn get_replication_primary_instance(&self) -> Result<Option<String>> {
+		use tuwunel_core::utils::result::NotFound;
+
+		let map = &self["replication_meta"];
+		let result = map.get_blocking(b"primary_instance");
+		if result.is_not_found() {
+			return Ok(None);
+		}
+		let handle = result?;
+		Ok(std::str::from_utf8(&handle).ok().map(ToOwned::to_owned))
+	}
+
+	/// Record the primary's instance id. `None` clears it.
+	pub fn set_replication_primary_instance(&self, instance: Option<&str>) -> Result {
+		let map = &self["replication_meta"];
+		match instance {
+			| Some(id) => map.insert(b"primary_instance", id.as_bytes()),
+			| None => map.remove(b"primary_instance"),
+		}
+		Ok(())
+	}
+
+	/// Whether a promotion cleared the replication cursor without having yet
+	/// advanced the PDU counter. See `replication::Service::promote`.
+	#[must_use]
+	pub fn promotion_pending(&self) -> bool {
+		use tuwunel_core::utils::result::NotFound;
+
+		!self["replication_meta"]
+			.get_blocking(b"promotion_pending")
+			.is_not_found()
+	}
+
+	/// Set or clear the promotion-pending mark.
+	pub fn set_promotion_pending(&self, pending: bool) {
+		let map = &self["replication_meta"];
+		if pending {
+			map.insert(b"promotion_pending", [1_u8]);
+		} else {
+			map.remove(b"promotion_pending");
+		}
 	}
 
 	/// Record which primary the resume cursor refers to. `None` clears it.
