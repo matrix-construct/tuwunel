@@ -207,8 +207,15 @@ pub(crate) async fn replication_wal(
 			let advanced = next_seq != seq;
 			seq = next_seq;
 
-			for encoded in frames {
-				if tx.send(encoded).await.is_err() {
+			// One network chunk per round, not one per frame. Each item sent
+			// on this channel becomes its own HTTP chunk, and the secondary
+			// reads the body a chunk at a time — so frames sent singly reach
+			// it singly, however many were ready, and it applies each as a
+			// separate write. Joined, a round arrives as one read and is
+			// applied as one write. The frame encoding is unchanged; a
+			// secondary has always decoded as many frames as a read holds.
+			for chunk in coalesce(frames, SEND_CHUNK_BYTES) {
+				if tx.send(chunk).await.is_err() {
 					return; // client disconnected
 				}
 			}
@@ -261,6 +268,35 @@ pub(crate) async fn replication_wal(
 		.header("x-tuwunel-instance-id", instance)
 		.body(Body::from_stream(stream))
 		.expect("Failed to build WAL streaming response")
+}
+
+/// Largest network chunk a round of frames is joined into. A round bigger
+/// than this goes out as several chunks; a single frame bigger than this goes
+/// out alone, whole.
+const SEND_CHUNK_BYTES: usize = 1024 * 1024;
+
+/// Join encoded frames, in order, into chunks of at most `max` bytes each
+/// (except that a frame larger than `max` is a chunk by itself). Frames are
+/// never split across chunks.
+fn coalesce(frames: Vec<Bytes>, max: usize) -> Vec<Bytes> {
+	let mut chunks: Vec<Bytes> = Vec::new();
+	let mut current: Vec<u8> = Vec::new();
+
+	for frame in frames {
+		if !current.is_empty() && current.len().saturating_add(frame.len()) > max {
+			chunks.push(Bytes::from(std::mem::take(&mut current)));
+		}
+		if current.is_empty() && frame.len() >= max {
+			chunks.push(frame);
+		} else {
+			current.extend_from_slice(&frame);
+		}
+	}
+	if !current.is_empty() {
+		chunks.push(Bytes::from(current));
+	}
+
+	chunks
 }
 
 /// `GET /_tuwunel/replication/handoff`
@@ -636,6 +672,51 @@ mod tests {
 		drop(rx);
 		let err = std::io::Write::write(&mut ChannelWriter(tx), b"x").unwrap_err();
 		assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
+	}
+
+	#[test]
+	fn coalesce_joins_frames_in_order_without_splitting_any() {
+		let frame = |n: u8, len: usize| Bytes::from(vec![n; len]);
+		let frames = vec![frame(1, 10), frame(2, 10), frame(3, 15), frame(4, 40), frame(5, 5)];
+		let all: Vec<u8> = frames.iter().flat_map(|f| f.to_vec()).collect();
+
+		let chunks = coalesce(frames, 30);
+		let sizes: Vec<usize> = chunks.iter().map(Bytes::len).collect();
+		// 10+10 fit; 15 would pass 30 so starts a new chunk; 40 is larger
+		// than the limit and travels alone; 5 follows it.
+		assert_eq!(sizes, vec![20, 15, 40, 5]);
+		let joined: Vec<u8> = chunks.iter().flat_map(|c| c.to_vec()).collect();
+		assert_eq!(joined, all, "same bytes, same order");
+
+		assert!(coalesce(Vec::new(), 30).is_empty());
+	}
+
+	/// What the secondary sees: a joined round decodes back into the same
+	/// frames, one after another.
+	#[test]
+	fn coalesced_round_decodes_into_the_original_frames() {
+		let originals = vec![
+			WalFrame::data(100, 1, b"one".to_vec()),
+			WalFrame::data(101, 3, b"three ops".to_vec()),
+			WalFrame::data(104, 1, b"last".to_vec()),
+		];
+		let encoded: Vec<Bytes> = originals.iter().map(|f| Bytes::from(f.encode())).collect();
+		let chunks = coalesce(encoded, SEND_CHUNK_BYTES);
+		assert_eq!(chunks.len(), 1, "a small round is one chunk");
+
+		let buf = &chunks[0];
+		let mut offset = 0;
+		let mut decoded = Vec::new();
+		while let Ok((frame, used)) = WalFrame::decode(&buf[offset..]) {
+			decoded.push(frame);
+			offset += used;
+		}
+		assert_eq!(offset, buf.len());
+		assert_eq!(decoded.len(), 3);
+		for (got, want) in decoded.iter().zip(&originals) {
+			assert_eq!(got.sequence, want.sequence);
+			assert_eq!(got.batch_data, want.batch_data);
+		}
 	}
 
 	#[test]
