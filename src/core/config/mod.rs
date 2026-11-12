@@ -1430,6 +1430,20 @@ pub struct Config {
 	#[serde(default = "default_rocksdb_replication_interval_ms")]
 	pub rocksdb_replication_interval_ms: u64,
 
+	/// Shortest gap in milliseconds between two rounds of WAL frames sent to
+	/// a secondary while writes keep arriving.
+	///
+	/// Without a gap the primary re-reads its WAL the moment it finishes
+	/// sending, so a busy primary streams one or two writes per round, each
+	/// round re-opening the WAL and each arriving at the secondary as its own
+	/// small network read. A short pause lets writes accumulate into fewer,
+	/// larger rounds — fewer WAL reads here, and fewer, larger writes on the
+	/// secondary, which applies each network read as one write. The cost is
+	/// that the secondary trails by up to this long. Capped at
+	/// `rocksdb_replication_interval_ms`; `0` disables the pause. Default: 25.
+	#[serde(default = "default_rocksdb_replication_batch_ms")]
+	pub rocksdb_replication_batch_ms: u64,
+
 	/// Enables idle CPU priority for compaction thread. This is not enabled by
 	/// default to prevent compaction from falling too far behind on busy
 	/// systems.
@@ -3488,6 +3502,8 @@ fn default_rocksdb_wal_ttl_seconds() -> u64 { 86400 }
 fn default_rocksdb_wal_size_limit_mb() -> u64 { 8192 }
 
 fn default_rocksdb_replication_interval_ms() -> u64 { 250 }
+
+fn default_rocksdb_replication_batch_ms() -> u64 { 25 }
 
 // I know, it's a great name
 #[must_use]

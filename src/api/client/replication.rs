@@ -91,6 +91,11 @@ pub(crate) async fn replication_wal(
 		.server
 		.config
 		.rocksdb_replication_interval_ms;
+	let batch_ms = services
+		.server
+		.config
+		.rocksdb_replication_batch_ms
+		.min(interval_ms);
 
 	// Detect a WAL gap before streaming. RocksDB's `GetUpdatesSince(N)` returns
 	// frames with seq > N, so a healthy first frame is at `since + 1`. A real
@@ -218,8 +223,16 @@ pub(crate) async fn replication_wal(
 
 			// Always emit a heartbeat so the secondary can tell the primary is alive.
 			// When no data was produced, sleep first to avoid a busy-loop.
+			//
+			// When data was produced, pause briefly instead of re-reading the
+			// WAL at once: under steady writes that turns a stream of one- or
+			// two-write rounds into fewer, larger ones (see
+			// `rocksdb_replication_batch_ms`). Nothing is skipped by waiting —
+			// the next round resumes from `seq` either way.
 			if !advanced {
 				tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+			} else if batch_ms > 0 {
+				tokio::time::sleep(Duration::from_millis(batch_ms)).await;
 			}
 
 			// The heartbeat carries `seq` — this stream's own cursor, the last

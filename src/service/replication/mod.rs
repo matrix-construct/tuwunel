@@ -36,7 +36,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use tokio::sync::{Notify, RwLock};
 use tuwunel_core::{Result, err, error, info, warn};
-use tuwunel_database::{Database, WalFrame, is_wal_gap_error};
+use tuwunel_database::{Database, FRAME_TYPE_DATA, RawBatchGroup, WalFrame, is_wal_gap_error};
 
 use crate::service::{Args, make_name};
 
@@ -362,7 +362,7 @@ impl Service {
 	/// primary's range is worse than no failover.
 	pub fn promote(&self) -> Result<()> {
 		// No frame is applied from here until `promoted` is set, after which
-		// `apply_frame` refuses them: the cursor read below is final.
+		// `apply_group` refuses them: the cursor read below is final.
 		let _guard = self.apply_lock.lock().expect("apply lock poisoned");
 
 		// What this node knows about the primary it is replacing, read before
@@ -573,63 +573,68 @@ impl Service {
 	}
 
 	/// Parse and apply as many complete frames as possible from `buf`.
+	///
+	/// Every frame is checked on its own and in order (`plan_group`), but the
+	/// frames that pass are applied together: their batches and the cursor
+	/// they leave go into one RocksDB write per group, a group being bounded
+	/// by `RawBatchGroup`'s limits. A frame that fails a check stops the
+	/// drain: the frames before it are applied, with the cursor at the last of
+	/// them, and the error is returned.
 	fn drain_frames(&self, buf: &mut Vec<u8>, state: &mut StreamState) -> Result {
+		let mut frames = Vec::new();
 		let mut offset = 0;
 		while let Ok((frame, consumed)) = WalFrame::decode(&buf[offset..]) {
-			self.apply_frame(&frame, state)?;
+			frames.push(frame);
 			#[allow(clippy::arithmetic_side_effects)]
 			{
 				offset += consumed;
 			}
 		}
 		buf.drain(..offset);
-		Ok(())
-	}
 
-	/// Apply a single frame to the local database.
-	fn apply_frame(&self, frame: &WalFrame, state: &mut StreamState) -> Result {
-		use tuwunel_database::FRAME_TYPE_DATA;
-
-		// Batch and cursor move together, and not at all once promoted:
-		// `promote()` holds this lock while it records how far we got.
-		let _guard = self.apply_lock.lock().expect("apply lock poisoned");
-		if self.promoted.load(Ordering::Acquire) {
-			return Ok(());
-		}
-
-		let is_data = frame.frame_type == FRAME_TYPE_DATA;
-
-		// From a primary that sends an exact stream, every data frame is the
-		// batch directly after the cursor and every heartbeat names the cursor
-		// itself. Anything else means batches are missing between the two, and
-		// applying past a hole would leave it there for good: report it as a
-		// WAL gap, which re-syncs from a checkpoint.
-		if state.exact && state.cursor != 0 {
-			let expected = if is_data {
-				state.cursor.saturating_add(1)
-			} else {
-				state.cursor
-			};
-			if frame.sequence != expected {
-				return Err(err!(Database(
-					"WAL gap: stream out of sequence — cursor is {}, {} frame is at {}",
-					state.cursor,
-					if is_data { "data" } else { "heartbeat" },
-					frame.sequence
-				)));
+		let mut rest = frames.as_slice();
+		while !rest.is_empty() {
+			let plan = self.apply_group(rest, state)?;
+			match plan.halt {
+				| Some(Halt::Promoted) => return Ok(()),
+				| Some(Halt::Failed(e)) => return Err(*e),
+				| None => rest = &rest[plan.taken..],
 			}
 		}
 
-		if is_data && !frame.batch_data.is_empty() {
-			self.db.write_raw_batch(&frame.batch_data)?;
-		}
-
-		let next = frame.resume_seq();
-		if next > 0 && next != state.cursor {
-			self.db.set_replication_resume_seq(next)?;
-			state.cursor = next;
-		}
 		Ok(())
+	}
+
+	/// Check and apply the longest run of `frames` that fits in one write.
+	fn apply_group(&self, frames: &[WalFrame], state: &mut StreamState) -> Result<Plan> {
+		// Checks, batches and cursor all under one hold of the lock, and not
+		// at all once promoted: `promote()` holds this lock while it records
+		// how far we got, and must find the cursor exactly where the applied
+		// data left it.
+		let _guard = self
+			.apply_lock
+			.lock()
+			.expect("apply lock poisoned");
+
+		let mut group = RawBatchGroup::new();
+		let plan =
+			plan_group(frames, state, || self.promoted.load(Ordering::Acquire), &mut group);
+		debug_assert!(
+			plan.taken > 0 || plan.halt.is_some(),
+			"a group always takes a frame or stops"
+		);
+
+		let moved = (plan.cursor != state.cursor).then_some(plan.cursor);
+		if !group.is_empty() {
+			// The batches and the cursor they leave, in one atomic write.
+			self.db.write_raw_group(group, moved)?;
+		} else if let Some(cursor) = moved {
+			// Heartbeats only (or data frames without a batch).
+			self.db.set_replication_resume_seq(cursor)?;
+		}
+		state.cursor = plan.cursor;
+
+		Ok(plan)
 	}
 
 	/// Record which database the stream belongs to.
@@ -915,4 +920,234 @@ struct StreamState {
 	/// primary's stream drops and overstates batches as a matter of course,
 	/// and holding it to the same check would re-sync from it endlessly.
 	exact: bool,
+}
+
+/// Where `plan_group` stopped.
+struct Plan {
+	/// Frames from the start that passed their checks and are in the group.
+	taken: usize,
+	/// The cursor once those frames are applied.
+	cursor: u64,
+	/// Why the frames after `taken` must not be applied; `None` when the
+	/// frames ran out or the group is full and the rest go in the next.
+	halt: Option<Halt>,
+}
+
+enum Halt {
+	/// This node was promoted: nothing more is applied.
+	Promoted,
+	/// The frame at `taken` failed a check.
+	Failed(Box<tuwunel_core::Error>),
+}
+
+/// Check `frames` one by one, in order, gathering the batches of those that
+/// pass into `group`, and work out the cursor they leave.
+///
+/// Each frame is checked before anything of it is taken, against the cursor
+/// as the frames before it leave it: not once `promoted`; then, from an exact
+/// primary, a data frame must be the batch directly after the cursor and a
+/// heartbeat must name the cursor itself. Anything else means batches are
+/// missing between the two, and applying past a hole would leave it there for
+/// good: that is reported as a WAL gap, which re-syncs from a checkpoint.
+/// The first frame to fail stops the group, and no frame after it is taken.
+///
+/// Pure apart from `promoted`: the caller writes `group` and the cursor.
+fn plan_group(
+	frames: &[WalFrame],
+	state: &StreamState,
+	promoted: impl Fn() -> bool,
+	group: &mut RawBatchGroup,
+) -> Plan {
+	let mut cursor = state.cursor;
+	let stop = |taken, cursor, halt| Plan { taken, cursor, halt };
+
+	for (i, frame) in frames.iter().enumerate() {
+		if promoted() {
+			return stop(i, cursor, Some(Halt::Promoted));
+		}
+
+		let is_data = frame.frame_type == FRAME_TYPE_DATA;
+		if state.exact && cursor != 0 {
+			let expected = if is_data { cursor.saturating_add(1) } else { cursor };
+			if frame.sequence != expected {
+				let e = err!(Database(
+					"WAL gap: stream out of sequence — cursor is {cursor}, {} frame is at {}",
+					if is_data { "data" } else { "heartbeat" },
+					frame.sequence
+				));
+				return stop(i, cursor, Some(Halt::Failed(Box::new(e))));
+			}
+		}
+
+		if is_data && !frame.batch_data.is_empty() {
+			match group.try_append(&frame.batch_data) {
+				| Ok(true) => {},
+				// Full: this frame starts the next group, checked afresh.
+				| Ok(false) => return stop(i, cursor, None),
+				| Err(e) => return stop(i, cursor, Some(Halt::Failed(Box::new(e)))),
+			}
+		}
+
+		let next = frame.resume_seq();
+		if next > 0 && next != cursor {
+			cursor = next;
+		}
+	}
+
+	stop(frames.len(), cursor, None)
+}
+
+#[cfg(test)]
+mod plan_group_tests {
+	use std::cell::Cell;
+
+	use tuwunel_database::{RawBatchGroup, WalFrame};
+
+	use super::{Halt, Plan, StreamState, plan_group};
+
+	/// Raw batch bytes: a header claiming `count` operations, then filler
+	/// standing in for records (`plan_group` never parses them).
+	fn batch(count: u32, filler: u8) -> Vec<u8> {
+		let mut data = vec![0_u8; 8];
+		data.extend_from_slice(&count.to_le_bytes());
+		data.extend_from_slice(&[filler; 5]);
+		data
+	}
+
+	fn data(sequence: u64, count: u32, filler: u8) -> WalFrame {
+		WalFrame::data(sequence, count.into(), batch(count, filler))
+	}
+
+	fn check(frames: &[WalFrame], cursor: u64, exact: bool, group: &mut RawBatchGroup) -> Plan {
+		plan_group(frames, &StreamState { cursor, exact }, || false, group)
+	}
+
+	fn failed(plan: &Plan) -> String {
+		match &plan.halt {
+			| Some(Halt::Failed(e)) => e.to_string(),
+			| Some(Halt::Promoted) => panic!("expected a failure, got promoted"),
+			| None => panic!("expected a failure, got none"),
+		}
+	}
+
+	#[test]
+	fn frames_before_a_gap_are_taken_with_the_cursor_at_the_last_good_one() {
+		let frames = [
+			data(11, 2, 1),          // 11..=12
+			WalFrame::heartbeat(12), // names the cursor
+			data(13, 1, 2),          // 13
+			data(20, 1, 3),          // gap: 14..=19 missing
+			data(14, 1, 4),          // after the failure: never taken
+		];
+		let mut group = RawBatchGroup::new();
+		let plan = check(&frames, 10, true, &mut group);
+
+		assert_eq!(plan.taken, 3);
+		assert_eq!(plan.cursor, 13);
+		assert!(failed(&plan).contains("WAL gap"));
+		assert_eq!(group.batches(), 2);
+		assert_eq!(group.count(), 3);
+		assert_eq!(group.records_len(), 10);
+	}
+
+	#[test]
+	fn heartbeat_must_name_the_cursor() {
+		let frames = [data(11, 1, 1), WalFrame::heartbeat(13), data(12, 1, 2)];
+		let mut group = RawBatchGroup::new();
+		let plan = check(&frames, 10, true, &mut group);
+
+		assert_eq!(plan.taken, 1);
+		assert_eq!(plan.cursor, 11);
+		assert!(failed(&plan).contains("WAL gap"));
+		assert_eq!(group.batches(), 1);
+	}
+
+	#[test]
+	fn first_frame_failing_takes_nothing() {
+		let frames = [data(12, 1, 1)];
+		let mut group = RawBatchGroup::new();
+		let plan = check(&frames, 10, true, &mut group);
+
+		assert_eq!(plan.taken, 0);
+		assert_eq!(plan.cursor, 10);
+		assert!(failed(&plan).contains("WAL gap"));
+		assert!(group.is_empty());
+	}
+
+	#[test]
+	fn promotion_stops_before_the_next_frame() {
+		let frames = [data(11, 1, 1), data(12, 1, 2), data(13, 1, 3)];
+		let calls = Cell::new(0);
+		let promoted = || {
+			calls.set(calls.get() + 1);
+			calls.get() > 2
+		};
+		let mut group = RawBatchGroup::new();
+		let state = StreamState { cursor: 10, exact: true };
+		let plan = plan_group(&frames, &state, promoted, &mut group);
+
+		assert_eq!(plan.taken, 2);
+		assert_eq!(plan.cursor, 12);
+		assert!(matches!(plan.halt, Some(Halt::Promoted)));
+		assert_eq!(group.batches(), 2);
+	}
+
+	#[test]
+	fn full_group_leaves_the_rest_for_the_next() {
+		let frames = [data(11, 1, 1), WalFrame::heartbeat(11), data(12, 2, 2), data(14, 1, 3)];
+		let mut group = RawBatchGroup::with_limits(usize::MAX, 2);
+		let plan = check(&frames, 10, true, &mut group);
+
+		assert_eq!(plan.taken, 3);
+		assert_eq!(plan.cursor, 13);
+		assert!(plan.halt.is_none());
+		assert_eq!(group.batches(), 2);
+
+		// The next group starts from the cursor the first one left.
+		let mut next = RawBatchGroup::with_limits(usize::MAX, 2);
+		let plan = check(&frames[3..], 13, true, &mut next);
+		assert_eq!(plan.taken, 1);
+		assert_eq!(plan.cursor, 14);
+		assert!(plan.halt.is_none());
+	}
+
+	#[test]
+	fn malformed_batch_fails_its_frame_only() {
+		let frames = [data(11, 1, 1), WalFrame::data(12, 1, vec![0; 5]), data(13, 1, 2)];
+		let mut group = RawBatchGroup::new();
+		let plan = check(&frames, 10, true, &mut group);
+
+		assert_eq!(plan.taken, 1);
+		assert_eq!(plan.cursor, 11);
+		assert!(failed(&plan).contains("Malformed WriteBatch"));
+		assert_eq!(group.batches(), 1);
+	}
+
+	#[test]
+	fn count_zero_and_empty_batches_leave_the_cursor() {
+		// A count-0 batch occupies no sequence: its resume_seq is one short of
+		// its sequence, i.e. the cursor itself.
+		let frames = [data(11, 0, 1), WalFrame::data(11, 0, Vec::new())];
+		let mut group = RawBatchGroup::new();
+		let plan = check(&frames, 10, true, &mut group);
+
+		assert_eq!(plan.taken, 2);
+		assert_eq!(plan.cursor, 10);
+		assert!(plan.halt.is_none());
+		// The count-0 batch is still applied, as before; the empty one is not.
+		assert_eq!(group.batches(), 1);
+		assert_eq!(group.count(), 0);
+	}
+
+	#[test]
+	fn inexact_primary_is_not_checked() {
+		let frames = [data(15, 1, 1), WalFrame::heartbeat(40), WalFrame::heartbeat(0)];
+		let mut group = RawBatchGroup::new();
+		let plan = check(&frames, 10, false, &mut group);
+
+		assert_eq!(plan.taken, 3);
+		// The heartbeat's cursor wins, as it did frame by frame; 0 is ignored.
+		assert_eq!(plan.cursor, 40);
+		assert!(plan.halt.is_none());
+	}
 }

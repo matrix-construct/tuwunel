@@ -6,6 +6,7 @@ tuwunel_core::mod_ctor! {}
 tuwunel_core::mod_dtor! {}
 tuwunel_core::rustc_flags_capture! {}
 
+mod apply;
 mod cork;
 mod de;
 mod deserialized;
@@ -28,6 +29,7 @@ use log as _;
 use tuwunel_core::{Result, Server, err};
 
 pub use self::{
+	apply::{GROUP_MAX_BATCHES, GROUP_MAX_BYTES, RawBatchGroup},
 	de::{Ignore, IgnoreAll},
 	deserialized::Deserialized,
 	engine::{
@@ -122,19 +124,6 @@ impl Database {
 		self.engine.create_checkpoint(dest)
 	}
 
-	/// Apply a raw WriteBatch (from the primary's WAL stream) to this database.
-	///
-	/// Used by the secondary replication worker to replay incoming batches.
-	pub fn write_raw_batch(&self, data: &[u8]) -> Result {
-		use rocksdb::{WriteBatch, WriteOptions};
-		let batch = WriteBatch::from_data(data);
-		let opts = WriteOptions::default();
-		self.engine
-			.db
-			.write_opt(&batch, &opts)
-			.map_err(util::map_err)
-	}
-
 	/// Read the secondary's persisted WAL resume cursor from the
 	/// `replication_meta` column family.
 	///
@@ -143,7 +132,7 @@ impl Database {
 		use tuwunel_core::utils::result::NotFound;
 
 		let map = &self["replication_meta"];
-		let result = map.get_blocking(b"primary_resume_seq");
+		let result = map.get_blocking(apply::RESUME_SEQ_KEY);
 		if result.is_not_found() {
 			return Ok(0);
 		}
@@ -159,7 +148,7 @@ impl Database {
 	/// column family so it survives restarts.
 	pub fn set_replication_resume_seq(&self, seq: u64) -> Result {
 		let map = &self["replication_meta"];
-		map.insert(b"primary_resume_seq", seq.to_le_bytes());
+		map.insert(apply::RESUME_SEQ_KEY, seq.to_le_bytes());
 		Ok(())
 	}
 
