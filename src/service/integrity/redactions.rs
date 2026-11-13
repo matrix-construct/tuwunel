@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use futures::{Stream, TryStreamExt, stream::once};
+use futures::{Stream, StreamExt, TryStreamExt, stream::once};
 use ruma::{OwnedEventId, OwnedRoomId, RoomVersionId, events::TimelineEventType};
 use serde::Deserialize;
 use tuwunel_core::{
@@ -132,7 +132,10 @@ pub fn scan(services: &Services) -> impl Stream<Item = Result<Finding>> + Send +
 	let redactions = once(records_by_reference(services))
 		.map_ok(move |recorded| recorded.then(|| redactions(services)))
 		.ready_try_filter_map(Ok)
-		.try_flatten();
+		.try_flatten()
+		// Erases the stream's type: unboxed, the drop glue of what `per_room` builds
+		// on it has a symbol name over 1 MiB, longer than Apple's linker accepts.
+		.boxed();
 
 	per_room(redactions, PduEvent::room_id, move |room_id| version(services, room_id))
 		.broad_and_then(async |redaction| classify(services, redaction).await)
