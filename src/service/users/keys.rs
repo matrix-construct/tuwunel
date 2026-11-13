@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, mem, ops::Deref, sync::Arc};
 
 use futures::{
-	Stream, StreamExt, TryFutureExt,
+	Stream, StreamExt, TryFutureExt, TryStreamExt,
 	future::{join, try_join3},
 	pin_mut,
 };
@@ -31,8 +31,8 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_database::{
-	Deserialized, Ignore, Interfix, Json, Map, Txn, deserialize_from_slice, serialize_key,
-	serialize_to_vec,
+	Deserialized, Ignore, Interfix, Json, Map, Txn, deserialize_from_slice, deserialize_key,
+	serialize_key, serialize_to_vec,
 };
 
 use super::device::DeviceLock;
@@ -476,6 +476,84 @@ pub async fn remove_one_time_keys(&self, user_id: &UserId, device_id: &DeviceId)
 
 	otk.del_prefix(&(user_id, device_id, Interfix))
 		.await;
+}
+
+/// Drops the one-time keys of every local device, or of one user's devices,
+/// and returns how many keys it dropped and from how many devices.
+///
+/// A database restored from an older backup again holds the keys claimed since
+/// the backup was taken, and `/keys/claim` would issue them a second time.
+/// Their devices discarded the private halves on first use, so a session
+/// opened with one of them cannot be decrypted. An empty pool issues none: a
+/// client sees a count of zero at its next sync and uploads new keys, and a
+/// claim before then is served the device's fallback key, which this leaves in
+/// place. A device that never syncs, such as a dehydrated device, keeps only
+/// that fallback key until it is replaced. Removing the fallback key would
+/// leave the device unreachable for new sessions until it uploads again, so it
+/// stays even though a restored one can itself be stale: some clients rotate it
+/// on a timer, and a backup older than the last rotation restores a key the
+/// device no longer holds.
+///
+/// Every row of the pool goes, including one whose device is gone and one that
+/// does not parse as a key. The scan's own errors are returned rather than
+/// skipped, so a clearing that did not see the whole pool is never reported as
+/// done. Each user whose keys went is marked as changed, which wakes their
+/// syncs, in the same atomic batch as the removal; a clearing cut short
+/// therefore leaves the whole pool for a retry rather than an empty one whose
+/// clients were never told.
+#[implement(super::Service)]
+pub async fn clear_one_time_keys(&self, user_id: Option<&UserId>) -> Result<(usize, usize)> {
+	let Some(otk) = self.db.onetimekeyid4225_otk.as_ref() else {
+		return Err!(Database("one-time-key column unavailable"));
+	};
+
+	// An empty prefix spans the whole pool.
+	let prefix = user_id
+		.map(|user_id| serialize_key((user_id, Interfix)))
+		.transpose()?
+		.unwrap_or_default();
+
+	let rows: Vec<Vec<u8>> = otk
+		.raw_keys_prefix(&prefix)
+		.map_ok(<[u8]>::to_vec)
+		.try_collect()
+		.await?;
+
+	// Rows sort by user then device, so each device's rows are adjacent.
+	let devices = || {
+		rows.iter()
+			.filter_map(|row| deserialize_key::<OtkRowKey<'_>>(row).ok())
+			.map(|(user_id, device_id, ..)| (user_id, device_id))
+			.dedup()
+	};
+
+	let users = devices().map(|(user_id, _)| user_id).dedup();
+
+	// Held until the batch commits, as `add_one_time_keys` holds its own, so the
+	// retirement frontier cannot pass it first. Taken after the scan, since the
+	// mark carries no snapshot of the rows and the hold should stay short.
+	let count = self.services.globals.next_count();
+
+	self.clear_txn(otk, &rows, users, *count)
+		.try_execute()?;
+
+	drop(count);
+
+	Ok((rows.len(), devices().count()))
+}
+
+#[implement(super::Service)]
+fn clear_txn<'a, Users>(&self, otk: &Map, rows: &[Vec<u8>], users: Users, count: u64) -> Txn
+where
+	Users: Iterator<Item = &'a UserId>,
+{
+	let mark = &self.db.userid_lastonetimekeyupdate;
+	let mut txn = self.services.db.txn();
+
+	txn.extend(rows.iter().map(|row| (otk, row)));
+	txn.extend(users.map(|user_id| (&**mark, user_id, count.to_be_bytes())));
+
+	txn
 }
 
 /// Stores a device's identity keys in place of any it had.

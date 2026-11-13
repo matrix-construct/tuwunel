@@ -1,8 +1,8 @@
-use std::iter::once;
+use std::{collections::BTreeMap, iter::once, sync::Arc};
 
-use futures::{StreamExt, future::join, pin_mut, poll};
+use futures::{StreamExt, TryStreamExt, future::join, pin_mut, poll};
 use ruma::{
-	OneTimeKeyAlgorithm, OneTimeKeyId, UserId, device_id,
+	DeviceId, OneTimeKeyAlgorithm, OneTimeKeyId, OwnedOneTimeKeyId, UInt, UserId, device_id,
 	encryption::OneTimeKey,
 	serde::{Base64, Raw, base64::Standard},
 	signatures::{Ed25519KeyPair, KeyPair, to_canonical_json_string_for_signing},
@@ -11,7 +11,7 @@ use ruma::{
 use serde_json::{Value, from_value, json};
 use tokio::sync::Notify;
 use tuwunel_core::{Result, config::Figment, utils::to_canonical_object};
-use tuwunel_database::{Cbor, Deserialized, Json, serialize_key};
+use tuwunel_database::{Cbor, Deserialized, Json, Map, serialize_key};
 
 use super::{PASSWORD_SENTINEL, Service, device::DeviceLock};
 use crate::{
@@ -21,6 +21,9 @@ use crate::{
 
 const OLD_PASSWORD: &str = "old password";
 const NEW_PASSWORD: &str = "new password";
+
+type OneTimeKeys = BTreeMap<OwnedOneTimeKeyId, Raw<OneTimeKey>>;
+type Row = (Vec<u8>, Vec<u8>);
 
 #[tokio::test]
 async fn deactivation_before_password_change_rejects_write() -> Result {
@@ -197,6 +200,154 @@ async fn unused_fallback_keys_stay_with_their_device() -> Result {
 		.await?;
 
 	assert_eq!(unused(longer_id).await, []);
+
+	Ok(())
+}
+
+/// A cleared pool issues none of the keys a restore put back.
+///
+/// A pool restored from an older backup reissues an already claimed key. Once
+/// cleared, every device's count reads zero, the fallback key still answers,
+/// and a fresh upload is taken.
+#[tokio::test]
+async fn cleared_pool_issues_no_restored_key() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let users = &fixture.services.users;
+	let alice = user_id!("@alice:localhost");
+	let bob = user_id!("@bob:localhost");
+	let (phone, laptop, tablet) =
+		(device_id!("PHONE"), device_id!("LAPTOP"), device_id!("TABLET"));
+
+	let devices = [(alice, phone), (alice, laptop), (bob, tablet)];
+	let curve25519 = OneTimeKeyAlgorithm::from("curve25519");
+
+	create_devices(users, alice, &[phone, laptop]).await?;
+	create_devices(users, bob, &[tablet]).await?;
+
+	for (user_id, device_id) in devices {
+		upload_one_time_keys(users, user_id, device_id, &["AAAAAA", "AAAAAQ"]).await?;
+	}
+
+	let fallback_id = <&OneTimeKeyId>::try_from("curve25519:fallback")?;
+	let fallback: Raw<OneTimeKey> = from_value(json!("fallback key"))?;
+
+	users
+		.add_fallback_keys(alice, phone, once((fallback_id, &fallback)))
+		.await?;
+
+	let otk = pool(users);
+	let backup = rows(otk).await?;
+	let (claimed, _) = users
+		.take_one_time_key(alice, phone, &curve25519)
+		.await?;
+
+	restore(otk, &backup);
+	let (again, _) = users
+		.take_one_time_key(alice, phone, &curve25519)
+		.await?;
+
+	assert_eq!(again, claimed, "a restored pool issues a claimed key again");
+
+	restore(otk, &backup);
+	let marked = users.last_one_time_keys_update(alice).await;
+
+	assert_eq!(users.clear_one_time_keys(None).await?, (6, 3));
+	assert!(users.last_one_time_keys_update(alice).await > marked);
+
+	for (user_id, device_id) in devices {
+		let counts = users
+			.count_one_time_keys(user_id, device_id)
+			.await;
+
+		assert!(counts.values().all(|&count| count == UInt::MIN), "{device_id}: {counts:?}");
+	}
+
+	users
+		.take_one_time_key(alice, phone, &curve25519)
+		.await
+		.expect_err("a cleared pool issues no one-time key");
+
+	let (served, _) = users
+		.take_fallback_key(alice, phone, &curve25519)
+		.await?;
+
+	assert_eq!(served, fallback_id);
+
+	upload_one_time_keys(users, alice, phone, &["AAAAAg"]).await?;
+
+	let (fresh, _) = users
+		.take_one_time_key(alice, phone, &curve25519)
+		.await?;
+
+	assert_eq!(fresh.as_str(), "curve25519:AAAAAg");
+
+	Ok(())
+}
+
+/// Clearing one user's keys leaves everyone else's.
+///
+/// The rows of that user's deleted device are removed with the rest.
+#[tokio::test]
+async fn clearing_one_users_keys_leaves_the_others() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let users = &fixture.services.users;
+	let alice = user_id!("@alice:localhost");
+	let bob = user_id!("@bob:localhost");
+	let (phone, tablet, watch) = (device_id!("PHONE"), device_id!("TABLET"), device_id!("WATCH"));
+	let curve25519 = OneTimeKeyAlgorithm::from("curve25519");
+
+	create_devices(users, alice, &[phone]).await?;
+	create_devices(users, bob, &[tablet, watch]).await?;
+
+	for (user_id, device_id) in [(alice, phone), (bob, tablet), (bob, watch)] {
+		upload_one_time_keys(users, user_id, device_id, &["AAAAAA", "AAAAAQ"]).await?;
+	}
+
+	let otk = pool(users);
+	let backup = rows(otk).await?;
+
+	users.remove_device(bob, watch).await;
+	restore(otk, &backup);
+
+	assert_eq!(users.clear_one_time_keys(Some(bob)).await?, (4, 2));
+	assert_eq!(rows(otk).await?.len(), 2);
+
+	let counts = users.count_one_time_keys(alice, phone).await;
+
+	assert_eq!(counts.get(&curve25519), Some(&UInt::from(2_u32)));
+
+	Ok(())
+}
+
+/// A row that does not read as a key is cleared and counted too.
+///
+/// Counting it means a clearing never reports an empty pool while a row
+/// remains.
+#[tokio::test]
+async fn a_row_that_does_not_read_as_a_key_is_cleared_too() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let users = &fixture.services.users;
+	let alice = user_id!("@alice:localhost");
+	let phone = device_id!("PHONE");
+
+	create_devices(users, alice, &[phone]).await?;
+	upload_one_time_keys(users, alice, phone, &["AAAAAA"]).await?;
+
+	let otk = pool(users);
+
+	otk.insert(b"not a key row", b"one-time key");
+
+	assert_eq!(users.clear_one_time_keys(None).await?, (2, 1));
+	assert_eq!(rows(otk).await?, []);
 
 	Ok(())
 }
@@ -423,6 +574,51 @@ async fn device_removal_keeps_its_connections() -> Result {
 	assert_eq!(stored.next_batch, next_batch);
 
 	Ok(())
+}
+
+async fn upload_one_time_keys(
+	users: &Service,
+	user_id: &UserId,
+	device_id: &DeviceId,
+	names: &[&str],
+) -> Result {
+	users
+		.add_one_time_keys(user_id, device_id, &one_time_keys(names)?, 256)
+		.await
+}
+
+fn one_time_keys(names: &[&str]) -> Result<OneTimeKeys> {
+	names
+		.iter()
+		.map(|name| -> Result<_> {
+			let id = OwnedOneTimeKeyId::try_from(format!("curve25519:{name}"))?;
+
+			Ok((id, from_value(json!("one-time key"))?))
+		})
+		.collect()
+}
+
+/// The one-time-key pool, which a backup copies and a restore puts back.
+fn pool(users: &Service) -> &Arc<Map> {
+	users
+		.db
+		.onetimekeyid4225_otk
+		.as_ref()
+		.expect("the one-time-key column should be open")
+}
+
+async fn rows(map: &Arc<Map>) -> Result<Vec<Row>> {
+	map.raw_stream()
+		.map_ok(|(key, val)| (key.to_vec(), val.to_vec()))
+		.try_collect()
+		.await
+}
+
+/// Puts rows back as a restore from a backup does.
+fn restore(map: &Map, rows: &[Row]) {
+	for (key, val) in rows {
+		map.insert(key, val);
+	}
 }
 
 fn key_pair(version: &str) -> Ed25519KeyPair {

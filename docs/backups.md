@@ -89,14 +89,18 @@ while the normal service is stopped:
 ```bash
 systemctl stop tuwunel
 sudo -u tuwunel tuwunel --config /etc/tuwunel/tuwunel.toml --restore-backup \
-	--maintenance --execute "server shutdown"
+	--maintenance --execute "users clear-one-time-keys" --execute "server shutdown"
 systemctl start tuwunel
 ```
 
 Maintenance mode prevents the temporary process from serving clients. The
-startup command shuts it down after the restore completes. With Docker or
-Podman, append `--restore-backup` to a one-time container invocation that uses
-the normal configuration and volumes, then recreate the regular container.
+startup commands clear the restored one-time keys, as described in
+[One-time keys after a restore](#one-time-keys-after-a-restore), and shut the
+process down after the restore completes.
+
+With Docker or Podman, append `--restore-backup` to a one-time container
+invocation that uses the normal configuration and volumes, then recreate the
+regular container.
 
 #### Manual recovery
 
@@ -181,9 +185,11 @@ rm -r /var/lib/tuwunel/checkpoint-1755850800
 Stop Tuwunel before opening or restoring a checkpoint. Either copy the complete
 checkpoint into a new database directory and point `database_path` to it, or
 replace the old database directory only after preserving it for rollback.
-Restore directory ownership for the service account, restore media separately,
-then start Tuwunel and verify the server before deleting the previous database
-or source checkpoint.
+Restore directory ownership for the service account and restore media
+separately. Clear the restored one-time keys as described in
+[One-time keys after a restore](#one-time-keys-after-a-restore). Then start
+Tuwunel and verify the server before deleting the previous database or source
+checkpoint.
 
 ### Scheduling checkpoints with a signal
 
@@ -228,3 +234,50 @@ For the simplest database copy, stop Tuwunel and copy the entire
 `database_path` to independent storage. The copied RocksDB directory can be
 restored without conversion. Copy the `media/` directory and any external media
 storage providers as part of the same backup set.
+
+After restoring a copy, clear its one-time keys before starting the service,
+as described in [One-time keys after a restore](#one-time-keys-after-a-restore).
+
+## One-time keys after a restore
+
+Devices upload one-time keys for end-to-end encryption. Restoring a managed
+backup, a checkpoint, or an offline copy puts the keys claimed since the copy
+was made back into the pool of available keys. The server would issue them
+again, but their devices discarded the private halves when they first used
+them, so a message encrypted with a reissued key cannot be decrypted. Clear
+the pool before the restored server serves clients.
+
+For a managed backup, use this command while the normal service is stopped.
+It clears the keys in the one-time restore process before shutting it down:
+
+```bash
+sudo -u tuwunel tuwunel --config /etc/tuwunel/tuwunel.toml --restore-backup \
+	--maintenance --execute "users clear-one-time-keys" --execute "server shutdown"
+```
+
+For a checkpoint or an offline copy, run the same one-time process without
+`--restore-backup` after the files are in place and before starting the
+service:
+
+```bash
+sudo -u tuwunel tuwunel --config /etc/tuwunel/tuwunel.toml \
+	--maintenance --execute "users clear-one-time-keys" --execute "server shutdown"
+```
+
+The command reports how many keys it cleared and from how many devices. If
+clearing fails, keep the normal service stopped, resolve the reported error,
+and retry. An interrupted clearing leaves the pool intact for a retry.
+
+If the restored server is already running, issue the same command in the admin
+room as soon as possible:
+
+```text
+!admin users clear-one-time-keys
+```
+
+Each client sees a count of zero at its next sync and uploads new keys. Until
+then a claim is served the device's fallback key, which the command keeps. A
+device that never syncs, such as a dehydrated device, keeps only its fallback
+key until its owner replaces it. A restored fallback key can itself be stale:
+a client that rotated its fallback key after the backup was made no longer
+holds the restored one, and clearing one-time keys does not change that.
