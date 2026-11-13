@@ -44,17 +44,7 @@ pub(crate) async fn replication_status(
 		.await
 		.unwrap_or(0);
 
-	let role = if services
-		.server
-		.config
-		.rocksdb_primary_url
-		.is_some()
-		&& !services.replication.is_promoted()
-	{
-		"secondary"
-	} else {
-		"primary"
-	};
+	let role = services.replication.role().as_str();
 
 	// For operators and tests: which database this is, whether it is still a
 	// proven exact copy of its primary, and whether it holds a handoff for

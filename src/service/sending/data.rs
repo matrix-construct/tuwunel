@@ -164,6 +164,20 @@ impl Data {
 			})
 	}
 
+	/// The destination of every request waiting in the queue (not yet in
+	/// flight), in key order: one item per request, so a destination's items
+	/// are adjacent. Read-only.
+	pub(super) fn queued_destinations(&self) -> impl Stream<Item = Destination> + Send + '_ {
+		self.servernameevent_data
+			.raw_keys()
+			.ignore_err()
+			.ready_filter_map(|key| {
+				parse_servercurrentevent(key, &[])
+					.ok()
+					.map(|(dest, _)| dest)
+			})
+	}
+
 	pub(super) fn set_latest_educount(&self, server_name: &ServerName, last_count: u64) {
 		self.servername_educount
 			.raw_put(server_name, last_count);
@@ -257,4 +271,62 @@ fn parse_servercurrentevent(key: &[u8], value: &[u8]) -> Result<(Destination, Se
 			},
 		)
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{Destination, SendingEvent, parse_servercurrentevent};
+
+	fn key(prefix: &[u8], suffix: &[u8]) -> Vec<u8> {
+		let mut key = prefix.to_vec();
+		key.extend_from_slice(suffix);
+		key
+	}
+
+	/// The key a replica logged as its first local write: the appservice
+	/// "ns-horizon", PDU id 0x02c6783c_1f0f5a15.
+	#[test]
+	fn observed_appservice_key() {
+		let key: Vec<u8> = b"+ns-horizon\xff"
+			.iter()
+			.copied()
+			.chain([0x00, 0x00, 0x00, 0x00, 0x02, 0xc6, 0x78, 0x3c])
+			.chain([0x00, 0x00, 0x00, 0x00, 0x1f, 0x0f, 0x5a, 0x15])
+			.collect();
+
+		let (dest, event) = parse_servercurrentevent(&key, &[]).expect("parses");
+		assert_eq!(dest, Destination::Appservice("ns-horizon".to_owned()));
+		assert!(matches!(event, SendingEvent::Pdu(_)));
+		assert_eq!(dest.get_prefix(), b"+ns-horizon\xff");
+	}
+
+	/// `queued_destinations` relies on every key of a destination parsing
+	/// back to that destination, and on a destination's keys being adjacent
+	/// in key order, so that `dedup` leaves each destination once.
+	#[test]
+	fn queued_destinations_dedup_in_key_order() {
+		let a = Destination::Federation("a.example".try_into().expect("server name"));
+		let ab = Destination::Federation("a.example.b".try_into().expect("server name"));
+		let asv = Destination::Appservice("ns-horizon".to_owned());
+
+		let mut keys = vec![
+			key(&a.get_prefix(), &[0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1]),
+			key(&ab.get_prefix(), &[0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2]),
+			key(&a.get_prefix(), &[0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3]),
+			key(&asv.get_prefix(), &[0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4]),
+			key(&asv.get_prefix(), &[0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 5]),
+		];
+		keys.sort(); // RocksDB order
+
+		let mut dests: Vec<Destination> = keys
+			.iter()
+			.map(|key| parse_servercurrentevent(key, &[]).expect("parses").0)
+			.collect();
+		dests.dedup();
+
+		assert_eq!(dests.len(), 3, "{dests:?}");
+		assert!(dests.contains(&a));
+		assert!(dests.contains(&ab));
+		assert!(dests.contains(&asv));
+	}
 }

@@ -39,7 +39,7 @@ use ruma::{
 	uint,
 };
 use tuwunel_core::{
-	Error, Event, Result, debug, err, error, extract_variant,
+	Error, Event, Result, at, debug, err, error, extract_variant, info,
 	result::LogErr,
 	trace,
 	utils::{
@@ -65,6 +65,16 @@ type SendingResult = Result<Destination, SendingError>;
 type SendingFuture<'a> = BoxFuture<'a, SendingResult>;
 type SendingFutures<'a> = FuturesUnordered<SendingFuture<'a>>;
 type CurTransactionStatus = HashMap<Destination, TransactionStatus>;
+type RoleWatch = tokio::sync::watch::Receiver<crate::replication::Role>;
+
+/// Why [`Service::work_loop`] returned.
+#[derive(Debug, PartialEq, Eq)]
+enum WorkStop {
+	/// The channel closed: the server is shutting down.
+	Shutdown,
+	/// This process became a replica (`demote()`): stop sending.
+	Replica,
+}
 
 const SELECT_PRESENCE_LIMIT: usize = 256;
 const SELECT_RECEIPT_LIMIT: usize = 256;
@@ -75,23 +85,165 @@ pub const PDU_LIMIT: usize = 50;
 pub const EDU_LIMIT: usize = 100;
 
 impl Service {
+	/// One sender worker.
+	///
+	/// Sends only while this process is the primary. A replica's queue
+	/// (`servercurrentevent_data`, `servernameevent_data`) is the primary's,
+	/// arriving through replication: the primary delivers it, and the replica
+	/// leaves it exactly as written. So a replica waits here, sending nothing
+	/// and writing nothing, until it is promoted; it then starts the way a
+	/// primary starts (netburst of the active transactions) and picks up the
+	/// rest of the queue. A primary that is demoted stops and waits again.
+	///
+	/// A process that is a primary from the start goes straight through, as
+	/// it always did.
 	#[tracing::instrument(skip(self), level = "debug")]
 	pub(super) async fn sender(self: Arc<Self>, id: usize) -> Result {
-		let mut statuses: CurTransactionStatus = CurTransactionStatus::new();
-		let mut futures: SendingFutures<'_> = FuturesUnordered::new();
+		let mut role = self.services.replication.subscribe_role();
+		let mut promoted = false;
 
-		self.startup_netburst(id, &mut futures, &mut statuses)
-			.boxed()
-			.await;
+		loop {
+			if self.services.replication.is_replica() {
+				if !self.wait_until_primary(id, &mut role).await {
+					return Ok(());
+				}
 
-		self.work_loop(id, &mut futures, &mut statuses)
-			.await;
+				promoted = true;
+			}
 
-		if !futures.is_empty() {
-			self.finish_responses(&mut futures).boxed().await;
+			let mut statuses: CurTransactionStatus = CurTransactionStatus::new();
+			let mut futures: SendingFutures<'_> = FuturesUnordered::new();
+
+			self.startup_netburst(id, &mut futures, &mut statuses)
+				.boxed()
+				.await;
+
+			if promoted {
+				self.resume_queued(id, &mut futures, &mut statuses)
+					.boxed()
+					.await;
+			}
+
+			match self
+				.work_loop(id, &mut futures, &mut statuses, &mut role)
+				.await
+			{
+				| WorkStop::Shutdown => {
+					if !futures.is_empty() {
+						self.finish_responses(&mut futures).boxed().await;
+					}
+
+					return Ok(());
+				},
+				| WorkStop::Replica => {
+					// Whatever was in flight may or may not have reached its
+					// destination; its queue entries stay as they are, for
+					// whichever node is primary to (re)send. Recording an
+					// outcome here would be a replica writing to its queue.
+					warn!(
+						id,
+						in_flight = futures.len(),
+						"This node is now a replica; outbound sending stopped."
+					);
+				},
+			}
+		}
+	}
+
+	/// Wait, as a replica, until this process is the primary. Returns false
+	/// if the server shuts down first.
+	///
+	/// Requests dispatched to this worker meanwhile are dropped: their queue
+	/// entries are in the database, which is the record, and
+	/// [`Self::resume_queued`] sends them after a promotion.
+	#[tracing::instrument(name = "replica", level = "debug", skip(self, role))]
+	async fn wait_until_primary(&self, id: usize, role: &mut RoleWatch) -> bool {
+		let receiver = self
+			.channels
+			.get(id)
+			.map(|(_, receiver)| receiver.clone())
+			.expect("Missing channel for sender worker");
+
+		if id == 0 {
+			info!("This node is a replica: outbound sending is paused until it is promoted.");
 		}
 
-		Ok(())
+		loop {
+			role.borrow_and_update();
+			if !self.services.replication.is_replica() {
+				if id == 0 {
+					info!("This node is now the primary: outbound sending starts.");
+				}
+
+				return true;
+			}
+
+			tokio::select! {
+				changed = role.changed() => if changed.is_err() {
+					// The replication service is gone: the server is stopping.
+					return false;
+				},
+				request = receiver.recv_async() => match request {
+					Ok(msg) => trace!(?msg.dest, "replica: not sending"),
+					Err(_) => return false,
+				},
+			}
+		}
+	}
+
+	/// After a runtime promotion: start a transaction for every destination
+	/// that has queued requests but none in flight, so that nothing the old
+	/// primary queued waits for the next event to that destination. Those
+	/// with requests in flight already drain their queue when the netburst's
+	/// transaction completes (`handle_response_ok`).
+	#[expect(clippy::needless_pass_by_ref_mut)]
+	#[tracing::instrument(name = "resume", level = "debug", skip_all)]
+	async fn resume_queued<'a>(
+		&'a self,
+		id: usize,
+		futures: &mut SendingFutures<'a>,
+		statuses: &mut CurTransactionStatus,
+	) {
+		if !self.server.config.startup_netburst {
+			return;
+		}
+
+		let mut dests: Vec<Destination> = self
+			.db
+			.queued_destinations()
+			.ready_filter(|dest| self.shard_id(dest) == id)
+			.collect()
+			.await;
+
+		dests.dedup();
+
+		let mut resumed = 0_usize;
+		for dest in dests {
+			if statuses.contains_key(&dest) {
+				continue;
+			}
+
+			let _cork = self.db.db.cork();
+			let events: Vec<QueueItem> = self
+				.db
+				.queued_requests(&dest)
+				.take(DEQUEUE_LIMIT)
+				.collect()
+				.await;
+
+			if events.is_empty() {
+				continue;
+			}
+
+			self.db.mark_as_active(events.iter());
+			statuses.insert(dest.clone(), TransactionStatus::Running);
+			futures.push(self.send_events(dest, events.into_iter().map(at!(1)).collect()));
+			resumed = resumed.saturating_add(1);
+		}
+
+		if resumed > 0 {
+			info!(id, resumed, "Resumed queued requests left by the previous primary.");
+		}
 	}
 
 	#[tracing::instrument(
@@ -108,7 +260,8 @@ impl Service {
 		id: usize,
 		futures: &mut SendingFutures<'a>,
 		statuses: &mut CurTransactionStatus,
-	) {
+		role: &mut RoleWatch,
+	) -> WorkStop {
 		let receiver = self
 			.channels
 			.get(id)
@@ -116,16 +269,24 @@ impl Service {
 			.expect("Missing channel for sender worker");
 
 		while !receiver.is_closed() {
+			if self.services.replication.is_replica() {
+				return WorkStop::Replica;
+			}
+
 			tokio::select! {
 				Some(response) = futures.next() => {
 					self.handle_response(response, futures, statuses).await;
 				},
 				request = receiver.recv_async() => match request {
 					Ok(request) => self.handle_request(request, futures, statuses).await,
-					Err(_) => return,
+					Err(_) => return WorkStop::Shutdown,
 				},
+				// Only wakes the loop; the check above decides.
+				Ok(()) = role.changed() => {},
 			}
 		}
+
+		WorkStop::Shutdown
 	}
 
 	#[tracing::instrument(name = "response", level = "debug", skip_all)]
@@ -1000,6 +1161,11 @@ impl Service {
 		pushkey: String,
 		reason: &'static str,
 	) {
+		// A replica sends no pushes; leave them held for when it is primary.
+		if self.services.replication.is_replica() {
+			return;
+		}
+
 		let suppressed = self
 			.services
 			.pusher
@@ -1043,6 +1209,11 @@ impl Service {
 	}
 
 	pub async fn flush_suppressed_for_user(&self, user_id: OwnedUserId, reason: &'static str) {
+		// A replica sends no pushes; leave them held for when it is primary.
+		if self.services.replication.is_replica() {
+			return;
+		}
+
 		let suppressed = self
 			.services
 			.pusher

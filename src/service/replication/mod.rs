@@ -34,11 +34,14 @@ use std::{
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Notify, RwLock, watch};
 use tuwunel_core::{Result, err, error, info, warn};
 use tuwunel_database::{Database, FRAME_TYPE_DATA, RawBatchGroup, WalFrame, is_wal_gap_error};
 
+pub use self::role::Role;
 use crate::service::{Args, make_name};
+
+mod role;
 
 /// Marks the error `run_stream` returns when this replica should take its
 /// one-time full checkpoint (`rocksdb_replication_auto_resync`). Worded to
@@ -67,6 +70,14 @@ pub struct Service {
 	dynamic_primary_url: RwLock<Option<String>>,
 	/// Wakes the standby loop immediately when `demote()` is called.
 	demote_notify: Notify,
+	/// Set by `demote()`, together with `dynamic_primary_url`, and like it
+	/// never cleared again. A synchronous view of "a runtime primary URL is
+	/// set" for [`Self::role`].
+	demoted: AtomicBool,
+	/// Publishes [`Self::role`] after every change, for services that must
+	/// stop or start with it (the outbound sender). The value is a
+	/// notification; `role()` stays the authority.
+	role_tx: watch::Sender<Role>,
 	/// Held while a frame is applied and for the whole of `promote()`, so a
 	/// promotion sees the cursor exactly as the last applied frame left it and
 	/// no frame is applied after the handoff has been recorded.
@@ -96,6 +107,12 @@ impl crate::Service for Service {
 			promote_notify: Notify::new(),
 			dynamic_primary_url: RwLock::new(None),
 			demote_notify: Notify::new(),
+			demoted: AtomicBool::new(false),
+			role_tx: watch::Sender::new(Role::derive(
+				args.server.config.rocksdb_primary_url.is_some(),
+				false,
+				false,
+			)),
 			apply_lock: std::sync::Mutex::new(()),
 			was_primary: AtomicBool::new(false),
 			rejoin_tried: AtomicBool::new(false),
@@ -446,6 +463,7 @@ impl Service {
 
 		self.was_primary.store(true, Ordering::Release);
 		self.promoted.store(true, Ordering::Release);
+		self.publish_role();
 		self.promote_notify.notify_waiters();
 		match &handoff {
 			| Some(h) => info!(
@@ -468,6 +486,32 @@ impl Service {
 
 	/// Returns true if this instance has been promoted to primary.
 	pub fn is_promoted(&self) -> bool { self.promoted.load(Ordering::Acquire) }
+
+	/// The role this process is in right now. See [`Role::derive`]; this is
+	/// the only place its inputs are read.
+	#[must_use]
+	pub fn role(&self) -> Role {
+		Role::derive(
+			self.server.config.rocksdb_primary_url.is_some(),
+			self.demoted.load(Ordering::Acquire),
+			self.promoted.load(Ordering::Acquire),
+		)
+	}
+
+	/// True while this process is a replica: it must not act on the
+	/// primary's data on its own (outbound sending, pushes).
+	#[inline]
+	#[must_use]
+	pub fn is_replica(&self) -> bool { self.role().is_replica() }
+
+	/// Watch role changes. The received value is only a hint that something
+	/// changed; re-read [`Self::role`] after each wake-up.
+	#[must_use]
+	pub fn subscribe_role(&self) -> watch::Receiver<Role> { self.role_tx.subscribe() }
+
+	/// Tell role watchers about the current role. Called after every change
+	/// to the inputs of [`Self::role`].
+	fn publish_role(&self) { self.role_tx.send_replace(self.role()); }
 
 	/// Demote this promoted primary back to a secondary replicating from
 	/// `new_primary_url`.
@@ -499,7 +543,9 @@ impl Service {
 		// Store the new primary URL and clear the promoted flag before notifying
 		// the worker so it sees a consistent state on wake-up.
 		*self.dynamic_primary_url.write().await = Some(new_primary_url.clone());
+		self.demoted.store(true, Ordering::Release);
 		self.promoted.store(false, Ordering::Release);
+		self.publish_role();
 		self.demote_notify.notify_waiters();
 
 		info!("Demotion requested; will bootstrap from {new_primary_url}");
