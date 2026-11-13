@@ -1,4 +1,5 @@
 mod add_email;
+mod clear_one_time_keys;
 mod create_user;
 mod deactivate;
 mod deactivate_all;
@@ -154,6 +155,18 @@ pub(super) enum UserCommand {
 	DeleteDevice {
 		user_id: OwnedUserId,
 		device_id: OwnedDeviceId,
+	},
+
+	/// - Clear the one-time keys of every local device, or of one user's
+	///   devices
+	///
+	/// Run it after restoring the database from a backup: keys claimed since
+	/// the backup was taken would otherwise be issued again, and messages
+	/// encrypted with them cannot be decrypted. Clients upload new keys at
+	/// their next sync, and fallback keys are kept.
+	ClearOneTimeKeys {
+		/// Only this local user's devices
+		username: Option<String>,
 	},
 
 	/// - List local users by recent activity.

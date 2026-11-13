@@ -228,3 +228,25 @@ For the simplest database copy, stop Tuwunel and copy the entire
 `database_path` to independent storage. The copied RocksDB directory can be
 restored without conversion. Copy the `media/` directory and any external media
 storage providers as part of the same backup set.
+
+## One-time keys after a restore
+
+Restoring any of these copies also restores the one-time keys that devices
+uploaded for end-to-end encryption. Keys claimed since the copy was made are
+in the pool again, and the server would issue them a second time. Their
+devices discarded the private halves when they first used them, so a message
+encrypted with a reissued key cannot be decrypted. Clear the pool before the
+restored server serves clients:
+
+```text
+!admin users clear-one-time-keys
+```
+
+Each client sees a count of zero at its next sync and uploads new keys. Until
+then a claim is served the device's fallback key, which the command keeps.
+The command can run in the one-time restore process, before its shutdown:
+
+```bash
+sudo -u tuwunel tuwunel --config /etc/tuwunel/tuwunel.toml --restore-backup \
+	--maintenance --execute "users clear-one-time-keys" --execute "server shutdown"
+```

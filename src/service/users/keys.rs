@@ -1,14 +1,19 @@
-use std::{collections::BTreeMap, mem, ops::Deref, sync::Arc};
+use std::{
+	collections::{BTreeMap, BTreeSet},
+	mem,
+	ops::Deref,
+	sync::Arc,
+};
 
 use futures::{
-	Stream, StreamExt, TryFutureExt,
+	Stream, StreamExt, TryFutureExt, TryStreamExt,
 	future::{join, try_join3},
 	pin_mut,
 };
 use ruma::{
 	AnyKeyName, DeviceId, KeyId, OneTimeKeyAlgorithm, OneTimeKeyId, OneTimeKeyName,
-	OwnedDeviceId, OwnedKeyId, OwnedOneTimeKeyId, OwnedRoomId, OwnedServerName, RoomId,
-	SigningKeyId, UInt, UserId,
+	OwnedDeviceId, OwnedKeyId, OwnedOneTimeKeyId, OwnedRoomId, OwnedServerName, OwnedUserId,
+	RoomId, SigningKeyId, UInt, UserId,
 	encryption::{CrossSigningKey, DeviceKeys, OneTimeKey},
 	serde::{Base64, Raw, base64::Standard},
 	signatures::{
@@ -31,8 +36,8 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_database::{
-	Deserialized, Ignore, Interfix, Json, Map, Txn, deserialize_from_slice, serialize_key,
-	serialize_to_vec,
+	Deserialized, Ignore, Interfix, Json, Map, Txn, deserialize_from_slice, deserialize_key,
+	serialize_key, serialize_to_vec,
 };
 
 use super::device::DeviceLock;
@@ -476,6 +481,76 @@ pub async fn remove_one_time_keys(&self, user_id: &UserId, device_id: &DeviceId)
 
 	otk.del_prefix(&(user_id, device_id, Interfix))
 		.await;
+}
+
+/// Drops the one-time keys of every local device, or of one user's devices,
+/// and returns how many keys it dropped and from how many devices.
+///
+/// A database restored from an older backup holds again the keys claimed since
+/// the backup was taken, and `/keys/claim` would issue them a second time.
+/// Their devices discarded the private halves on first use, so a session
+/// opened with one cannot be decrypted. An empty pool issues none of them: a
+/// client sees a count of zero at its next sync and uploads new keys, and a
+/// claim before then is served the device's fallback key, which this leaves in
+/// place. Removing it would leave the device unreachable for new sessions
+/// until it uploads again, and a fallback key restored from the backup can be
+/// stale only if every one-time key of its device was claimed since the backup
+/// was taken.
+///
+/// Every row of the pool goes, read or not: one whose device is gone, and one
+/// that does not read as a key. The scan's own errors are returned rather
+/// than skipped, so a clearing that did not see the whole pool is never
+/// reported as done. Each user whose keys went is marked as changed, which
+/// wakes their syncs — in the same atomic batch as the removal, so a clearing
+/// cut short leaves the whole pool for a retry rather than an empty one whose
+/// clients were never told.
+#[implement(super::Service)]
+pub async fn clear_one_time_keys(&self, user_id: Option<&UserId>) -> Result<(usize, usize)> {
+	let Some(otk) = self.db.onetimekeyid4225_otk.as_ref() else {
+		return Err!(Database("one-time-key column unavailable"));
+	};
+
+	let prefix = user_id
+		.map(|user_id| serialize_key((user_id, Interfix)))
+		.transpose()?;
+
+	let rows: Vec<Vec<u8>> = match &prefix {
+		| Some(prefix) => otk.raw_keys_prefix(prefix).boxed(),
+		| None => otk.raw_keys().boxed(),
+	}
+	.map_ok(<[u8]>::to_vec)
+	.try_collect()
+	.await?;
+
+	let devices: BTreeSet<(OwnedUserId, OwnedDeviceId)> = rows
+		.iter()
+		.filter_map(|row| deserialize_key::<OtkRowKey<'_>>(row).ok())
+		.map(|(user_id, device_id, ..)| (user_id.to_owned(), device_id.to_owned()))
+		.collect();
+
+	let users: BTreeSet<&UserId> = devices
+		.iter()
+		.map(|(user_id, _)| &**user_id)
+		.collect();
+
+	let mut txn = self.services.db.txn();
+	for row in &rows {
+		txn.del_raw(otk, row);
+	}
+
+	// Each count is held until the batch commits, as `add_one_time_keys` holds
+	// its own, so the retirement frontier cannot pass it first.
+	let mut counts = Vec::with_capacity(users.len());
+	for user_id in users {
+		let count = self.services.globals.next_count();
+		txn.raw_put(&self.db.userid_lastonetimekeyupdate, user_id, *count);
+		counts.push(count);
+	}
+
+	txn.try_execute()?;
+	drop(counts);
+
+	Ok((rows.len(), devices.len()))
 }
 
 /// Stores a device's identity keys in place of any it had.
