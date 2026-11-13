@@ -134,6 +134,13 @@ export class TuwunelContainer extends GenericContainer implements HomeserverCont
             throw new Error("PLAYWRIGHT_NETWORK is unset; see docker/playwright.sh");
         }
 
+        // element-web's specs expect homeserver.restart() to wipe the server, as
+        // Synapse's in-memory sqlite does: login-consent registers the same user
+        // again after each restart. Docker empties a tmpfs whenever the container
+        // stops, so a database_path (docker/Dockerfile.playwright) mounted there
+        // comes back empty after restart() as well.
+        this.withTmpFs({"/database": "rw"});
+
         // The baked image entrypoint is shell-form, which ignores CMD; override it
         // with an exec-form entrypoint so the per-container -O flags reach tuwunel.
         // address 0.0.0.0 so siblings on the shared network can reach it.

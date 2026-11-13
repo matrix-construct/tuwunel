@@ -14,6 +14,9 @@ COPY <<EOF /playwright/playwright.toml
     port = 8008
     server_name = "localhost"
     database_path = "/database"
+    # The test container mounts database_path on a tmpfs, and tmpfs only
+    # accepts O_DIRECT from Linux 6.6 on.
+    rocksdb.direct_io = false
     db_pool_max_workers = 64
     argon2_m_cost = 64
     argon2_t_cost = 1
