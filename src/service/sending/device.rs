@@ -6,7 +6,7 @@ use serde::Serialize;
 use tuwunel_core::{Result, implement, utils::stream::BroadbandExt};
 
 use super::{Destination, EduBuf, SendingEvent, Service, TAG_DEVICE_LIST_CHANGED, TAG_TO_DEVICE};
-use crate::appservice::RegistrationInfo;
+use crate::appservice::{RegistrationInfo, receivers};
 
 /// One recipient device of a to-device event paired with its inbox count.
 ///
@@ -33,7 +33,7 @@ struct AsToDeviceEvent<'a> {
 ///
 /// `deliveries` are the concrete recipient devices already written to the
 /// inbox, after `AllDevices` expansion. Each delivery becomes one queue row
-/// per interested appservice, written under one cork; with no interested
+/// per interested appservice with a URL, written under one cork; with no such
 /// appservice nothing is serialized.
 #[implement(Service)]
 #[tracing::instrument(
@@ -55,11 +55,7 @@ where
 	I: Iterator<Item = Delivery<'a>> + Send + 'a,
 {
 	let registrations = self.services.appservice.read().await;
-	let interested = || {
-		registrations
-			.values()
-			.filter(|info| info.is_user_match(target_user))
-	};
+	let interested = || receivers(&registrations).filter(|info| info.is_user_match(target_user));
 
 	// Serialize once, and only when an appservice will receive the events.
 	if interested().next().is_none() {
@@ -78,8 +74,8 @@ where
 }
 
 /// Queue a `device_lists.changed` marker (MSC3202) for delivery to
-/// appservices that opted into transaction extensions and are interested
-/// in `user_id`.
+/// appservices that have a URL, opted into transaction extensions, and are
+/// interested in `user_id`.
 ///
 /// The caller passes the count it already allocated so the marker uniquifies
 /// the transaction hash.
@@ -94,9 +90,7 @@ where
 pub async fn send_device_list_appservices(&self, user_id: &UserId, count: u64) -> Result {
 	let registrations = self.services.appservice.read().await;
 	let extended = || {
-		registrations
-			.values()
-			.filter(|info| info.registration.msc3202_transaction_extensions)
+		receivers(&registrations).filter(|info| info.registration.msc3202_transaction_extensions)
 	};
 
 	if extended().next().is_none() {

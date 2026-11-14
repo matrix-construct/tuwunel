@@ -1,7 +1,7 @@
 use ruma::{OwnedUserId, ServerName, UserId, api::appservice::Registration};
 use tuwunel_core::{Err, Result};
 
-use super::{NamespaceRegex, socket_path};
+use super::{NamespaceRegex, destination, socket_path};
 
 /// MSC4502: the scope granting the targeted room membership query.
 ///
@@ -73,4 +73,12 @@ impl RegistrationInfo {
 			.iter()
 			.any(|requested| requested == scope)
 	}
+
+	/// Whether the registration names a URL to deliver traffic to.
+	///
+	/// A registration without one asked for no traffic, so nothing is queued
+	/// for it.
+	#[inline]
+	#[must_use]
+	pub fn has_destination(&self) -> bool { destination(&self.registration).is_some() }
 }

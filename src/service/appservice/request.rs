@@ -12,6 +12,7 @@ use tuwunel_core::{
 	Err, Result, debug_error, err, implement, trace, utils::string_from_bytes, warn,
 };
 
+use super::destination;
 use crate::client::read_response_capped;
 
 /// Sends a request to an appservice
@@ -29,17 +30,13 @@ where
 	for<'a> T::Authentication: AuthScheme<Input<'a> = SendAccessToken<'a>>,
 	for<'a> T::PathBuilder: PathBuilder<Input<'a> = ()>,
 {
-	let Some(dest) = registration.url else {
+	let Some(dest) = destination(&registration) else {
 		return Ok(None);
 	};
 
-	if dest == *"null" || dest.is_empty() {
-		return Ok(None);
-	}
-
 	trace!("Appservice URL \"{dest}\", Appservice ID: {}", registration.id);
 
-	let (base, client) = self.transport(&dest)?;
+	let (base, client) = self.transport(dest)?;
 	let hs_token = registration.hs_token.as_str();
 	let mut http_request = request
 		.try_into_http_request::<BytesMut>(base, SendAccessToken::IfRequired(hs_token), ())

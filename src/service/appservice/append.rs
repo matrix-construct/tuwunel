@@ -12,16 +12,15 @@ use tuwunel_matrix::{
 	pdu::{Pdu, RawPduId},
 };
 
-use super::RegistrationInfo;
+use super::{RegistrationInfo, receivers};
 
 /// Called by timeline::append() after accepting new PDU.
 #[implement(super::Service)]
 #[tracing::instrument(name = "append", level = "debug", skip_all)]
 pub(crate) async fn append_pdu(&self, pdu_id: RawPduId, pdu: &Pdu) -> Result {
-	let guard = self.read().await;
+	let registrations = self.read().await;
 
-	guard
-		.values()
+	receivers(&registrations)
 		.stream()
 		.for_each_concurrent(automatic_width(), |appservice| {
 			self.append_pdu_to(appservice, pdu_id, pdu)
