@@ -714,15 +714,18 @@ async fn handle_edu_direct_to_device(
 /// A local account we store or forward to-device events for.
 ///
 /// Qualifying accounts are active, the server user once its account exists, or
-/// claimed by an appservice namespace so its puppet events reach the bridge.
+/// an existing account claimed by an appservice namespace so its puppet events
+/// reach the bridge. Without the existence check a broad namespace would let
+/// any peer write rows for local ids nobody holds.
 async fn to_device_deliverable(services: &Services, user_id: &UserId) -> bool {
 	services.globals.user_is_local(user_id)
 		&& ((user_id == services.globals.server_user && services.users.exists(user_id).await)
 			|| services.users.is_active(user_id).await
-			|| services
+			|| (services
 				.appservice
 				.is_interested_in_user(user_id)
-				.await)
+				.await
+				&& services.users.exists(user_id).await))
 }
 
 async fn handle_edu_direct_to_device_user<Event: Send + Sync>(
