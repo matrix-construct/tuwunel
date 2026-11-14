@@ -3,6 +3,12 @@ use tuwunel_core::{Err, Result};
 
 use super::{NamespaceRegex, socket_path};
 
+/// MSC4502: the scope granting the targeted room membership query.
+///
+/// An appservice whose registration requests it may ask whether any user or
+/// server is joined to any room this server is in.
+pub const IS_JOINED_SCOPE: &str = "urn:matrix:client:io.element.msc4502:rooms:is_joined";
+
 /// Appservice registration combined with its compiled regular expressions.
 #[derive(Clone, Debug)]
 pub struct RegistrationInfo {
@@ -54,5 +60,17 @@ impl RegistrationInfo {
 		user_id == self.sender
 			|| (self.users.is_exclusive_match(user_id.as_str())
 				&& user_id.server_name() == self.sender.server_name())
+	}
+
+	/// MSC4502: whether the registration requested `scope`.
+	///
+	/// The match is exact, against the registration's own scope list.
+	#[inline]
+	#[must_use]
+	pub fn has_scope(&self, scope: &str) -> bool {
+		self.registration
+			.scopes
+			.iter()
+			.any(|requested| requested == scope)
 	}
 }

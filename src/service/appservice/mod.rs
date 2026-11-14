@@ -27,10 +27,14 @@ use tuwunel_core::smallstr::SmallString;
 use tuwunel_core::{
 	Err, Result, defer, err, implement,
 	utils::{BoolExt, stream::IterStream},
+	warn,
 };
 use tuwunel_database::Map;
 
-pub use self::{namespace_regex::NamespaceRegex, registration_info::RegistrationInfo};
+pub use self::{
+	namespace_regex::NamespaceRegex,
+	registration_info::{IS_JOINED_SCOPE, RegistrationInfo},
+};
 #[cfg(unix)]
 use crate::client::make_appservice_unix;
 
@@ -54,6 +58,8 @@ struct Data {
 }
 
 type Registrations = BTreeMap<String, RegistrationInfo>;
+
+const KNOWN_SCOPES: [&str; 1] = [IS_JOINED_SCOPE];
 
 #[async_trait]
 impl crate::Service for Service {
@@ -137,14 +143,19 @@ impl Service {
 	/// Loads one registration into the runtime registry at startup.
 	///
 	/// An id already loaded is refused, as is an `as_token` another id holds,
-	/// and a missing sender user is created.
+	/// and a missing sender user is created. An unknown scope is logged and
+	/// ignored, so a registration written for a later release still loads.
 	pub async fn load_appservice(&self, registration: Registration) -> Result {
 		let registration_info =
 			RegistrationInfo::new(registration, self.services.globals.server_name())?;
 
-		let mut registrations = self.registration_info.write().await;
-
 		let id = &registration_info.registration.id;
+
+		if let Some(scope) = registration_info.unknown_scope() {
+			warn!(%id, %scope, "Ignoring an unknown scope in the appservice registration");
+		}
+
+		let mut registrations = self.registration_info.write().await;
 
 		if registrations.contains_key(id) {
 			return Err!("Duplicate id: {id}");
@@ -163,7 +174,7 @@ impl Service {
 	/// An id this method registered before is replaced, and its cached room
 	/// participation is dropped. An id loaded from the configuration or
 	/// `appservice_dir` is refused, since both would load at the next startup
-	/// and collide.
+	/// and collide. A scope this server does not know is refused too.
 	pub async fn register_appservice(&self, registration: Registration) -> Result {
 		self.loaded().await;
 
@@ -173,6 +184,10 @@ impl Service {
 
 		let registration_info =
 			RegistrationInfo::new(registration, self.services.globals.server_name())?;
+
+		if let Some(scope) = registration_info.unknown_scope() {
+			return Err!("Unknown scope {scope:?} in appservice {id}");
+		}
 
 		let mut registrations = self.registration_info.write().await;
 
@@ -326,6 +341,20 @@ impl Service {
 	/// will not complete.
 	#[inline]
 	pub async fn loaded(&self) { self.loaded.wait().await; }
+}
+
+/// MSC4502: the first requested scope this server does not know.
+///
+/// Such a scope grants nothing, since `has_scope` is only asked about known
+/// ones; it is most likely a typo the operator should hear about.
+#[implement(RegistrationInfo)]
+#[must_use]
+pub fn unknown_scope(&self) -> Option<&str> {
+	self.registration
+		.scopes
+		.iter()
+		.map(String::as_str)
+		.find(|scope| !KNOWN_SCOPES.contains(scope))
 }
 
 /// Refuses an `as_token` another id holds, and creates a missing sender user.

@@ -15,8 +15,8 @@ use tuwunel_api::router::RouterExt;
 use tuwunel_core::{Server, err};
 
 use crate::{
-	self as client, State, put_msc4388_route, send_message_event_or_delayed_route,
-	send_state_event_or_delayed_route, sso_callback_route,
+	self as client, State, is_joined_route, put_msc4388_route,
+	send_message_event_or_delayed_route, send_state_event_or_delayed_route, sso_callback_route,
 };
 
 /// Builds the client endpoint routes.
@@ -159,6 +159,7 @@ fn register_client_room_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::join_room_by_id_route)
 		.ruma_route(&client::join_room_by_id_or_alias_route)
 		.ruma_route(&client::joined_members_route)
+		.ruma_route(&is_joined_route)
 		.ruma_route(&client::knock_room_route)
 		.ruma_route(&client::leave_room_route)
 		.ruma_route(&client::forget_room_route)

@@ -2509,6 +2509,18 @@ pub struct AppService {
 	/// default: false
 	#[serde(default)]
 	pub msc3202_transaction_extensions: bool,
+
+	/// Scopes the application service requests, as part of MSC4502.
+	///
+	/// The registration-file key is `io.element.msc4502.scopes`; this
+	/// inline-config key is `scopes`. The one known scope,
+	/// `urn:matrix:client:io.element.msc4502:rooms:is_joined`, lets the
+	/// appservice ask whether any user or server is joined to a room. An
+	/// unknown scope grants nothing and is logged as a warning at startup.
+	///
+	/// default: []
+	#[serde(default)]
+	pub scopes: Vec<String>,
 }
 
 impl From<AppService> for ruma::api::appservice::Registration {
@@ -2536,7 +2548,7 @@ impl From<AppService> for ruma::api::appservice::Registration {
 				rooms: conf.rooms.into_iter().map(Into::into).collect(),
 			},
 			keys_claims: false,
-			scopes: Vec::new(),
+			scopes: conf.scopes,
 		}
 	}
 }
