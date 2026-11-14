@@ -1,12 +1,17 @@
 #![cfg(test)]
 
+use futures::StreamExt;
 use reqwest::Response;
 use serde_json::{Value, json};
 use tuwunel_core::{
 	Result, err,
+	http::{HeaderValue, Request, header::AUTHORIZATION},
 	ruma::{
 		RoomId, UserId,
-		api::appservice::{Namespace, Namespaces, Registration, RegistrationInit},
+		api::{
+			appservice::{Namespace, Namespaces, Registration, RegistrationInit},
+			federation::authentication::{ServerSignaturesInput, XMatrix},
+		},
 		events::room::member::MembershipState,
 	},
 };
@@ -43,7 +48,8 @@ const STABLE_SCOPE: &str = "urn:matrix:client:rooms:is_joined";
 /// masquerading appservice keeps its scope, while a user token or an unscoped
 /// appservice is refused. Once this server leaves, a query for a remote member
 /// still recorded as joined answers `false`. An unknown scope is ignored at
-/// load and refused at registration.
+/// load and refused at registration, and the `.*` namespace these
+/// registrations claim admits federated to-device only for existing accounts.
 #[test]
 fn scoped_appservice_queries_room_membership() -> Result {
 	let token = format!(r#"appservice.inline.as_token="{INLINE_TOKEN}""#);
@@ -143,6 +149,76 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let advertised = accepted(versions).await?["unstable_features"]["io.element.msc4502"] == true;
 
 	assert!(advertised, "/versions does not advertise io.element.msc4502");
+
+	federated_to_device(services, base, &owner_id).await
+}
+
+/// Deliver one federated to-device event to three local ids and count the
+/// rows each got.
+///
+/// The transaction comes from this server itself, signed with its own key as a
+/// peer would sign it. Every id matches the `.*` namespace; only the one with
+/// no account gets nothing.
+async fn federated_to_device(services: &Services, base: &str, owner_id: &UserId) -> Result {
+	let ours = services.globals.server_name();
+	let ghost = UserId::parse(format!("@is_joined_ghost:{ours}"))?;
+	let bot = UserId::parse(format!("@scoped_bot:{ours}"))?;
+	let messages = json!({
+		ghost.as_str(): { "GHOST": { "n": 1 } },
+		bot.as_str(): { "BOT": { "n": 1 } },
+		owner_id.as_str(): { "OWNER": { "n": 1 } },
+	});
+
+	let edu = json!({
+		"edu_type": "m.direct_to_device",
+		"content": {
+			"sender": owner_id,
+			"type": "org.example.is_joined",
+			"message_id": "is-joined-to-device",
+			"messages": messages,
+		},
+	});
+
+	let body = json!({ "origin": ours, "origin_server_ts": 1, "pdus": [], "edus": [edu] });
+	let uri = format!("{base}/_matrix/federation/v1/send/is-joined-to-device");
+	let body = serde_json::to_string(&body)?;
+	let request = Request::builder()
+		.method("PUT")
+		.uri(&uri)
+		.body(body.as_str())?;
+
+	let input = ServerSignaturesInput::new(
+		ours.to_owned(),
+		ours.to_owned(),
+		services.server_keys.keypair(),
+	);
+
+	let signature = XMatrix::try_from_http_request(&request, input)
+		.map_err(|e| err!("signing the transaction failed: {e}"))?;
+
+	let response = services
+		.client
+		.clients
+		.default
+		.put(&uri)
+		.header(AUTHORIZATION, HeaderValue::from(&signature))
+		.body(body)
+		.send()
+		.await?;
+
+	accepted(response).await?;
+
+	for (user_id, device_id, expected) in
+		[(&*ghost, "GHOST", 0), (&*bot, "BOT", 1), (owner_id, "OWNER", 1)]
+	{
+		let rows = services
+			.users
+			.get_to_device_events(user_id, device_id.into(), None, None)
+			.count()
+			.await;
+
+		assert_eq!(rows, expected, "{user_id}");
+	}
 
 	Ok(())
 }
