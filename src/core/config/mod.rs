@@ -2536,6 +2536,7 @@ impl From<AppService> for ruma::api::appservice::Registration {
 				rooms: conf.rooms.into_iter().map(Into::into).collect(),
 			},
 			keys_claims: false,
+			scopes: Vec::new(),
 		}
 	}
 }
