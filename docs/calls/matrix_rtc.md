@@ -463,6 +463,111 @@ The limits are in the `[global.rooms.delayed_events]` section of your
 Setting either to `0` disables delayed events and stops advertising them to
 clients, so callers who drop out stay listed in the call.
 
+### Application service mode
+
+Use [application services](../appservices.md) if you want lk-jwt-service
+to check room membership before issuing call tokens.
+
+The setup above runs lk-jwt-service in its standalone mode, which
+lk-jwt-service has deprecated. Standalone mode never checks room membership.
+Any user of a full-access homeserver gets a token for any room. In
+application service mode, with Tuwunel as its only full-access homeserver,
+lk-jwt-service asks Tuwunel whether each caller is joined to the call's room
+before it issues a token, using
+[MSC4502](https://github.com/matrix-org/matrix-spec-proposals/pull/4502).
+This works for callers from other servers too, as long as Tuwunel is in the
+room.
+
+> [!WARNING]
+> Keep the tokens secret. The `.*` users namespace in this registration
+> lets whoever holds `ASTOKEN` act as any local user. The scope lets them
+> ask about any user or server in any room Tuwunel is in.
+
+1. Generate two more random strings, `ASTOKEN` and `HSTOKEN`, e.g. with
+   `pwgen -s -1 64` for each.
+2. Create a directory for registration files, e.g.
+   `mkdir -p /etc/tuwunel/appservices`, and write the following to
+   `/etc/tuwunel/appservices/lk-jwt-service.yaml`, replacing `ASTOKEN` and
+   `HSTOKEN`:
+
+```yaml
+id: lk-jwt-service
+url: null # lk-jwt-service needs no events
+as_token: ASTOKEN
+hs_token: HSTOKEN
+sender_localpart: _lk_jwt_service
+namespaces:
+  users:
+    - exclusive: false
+      regex: ".*"
+io.element.msc4502.scopes:
+  - "urn:matrix:client:io.element.msc4502:rooms:is_joined"
+```
+
+The namespace is not exclusive, so it reserves no user names. Tuwunel
+queues no events for a registration whose `url` is `null`.
+
+> [!WARNING]
+> An invalid registration file, for example one reusing another
+> registration's `as_token`, stops appservice loading at startup. Tuwunel
+> logs the error. That registration and any loaded after it stay unavailable
+> until you fix the file and restart Tuwunel.
+
+3. Point `appservice_dir` at that directory in the `[global]` section of
+   `tuwunel.toml` and restart Tuwunel:
+
+```toml
+appservice_dir = "/etc/tuwunel/appservices"
+```
+
+Tuwunel loads every `.yaml` and `.yml` file in the directory at each
+start, so keep other files out of it. Because it reads the file again at
+every start, a registration key a later release learns takes effect without
+registering again; a registration made with `!admin appservices register`
+instead is stored as the running release understood it, and must be
+registered again to pick up such a key. An unknown scope grants no
+permission and is logged as a warning at startup. After restarting, send
+`!admin appservices list` in the admin room. Check that the list includes
+`lk-jwt-service`. If it does not, check Tuwunel's startup logs for a
+registration error.
+
+4. Give lk-jwt-service the same file and name your homeserver. Open
+   `compose.yaml` in your MatrixRTC directory. In the `matrix-rtc-jwt`
+   service, add these settings to `environment`:
+
+```yaml
+      - LIVEKIT_AS_REGISTRATION_FILE=/etc/lk-jwt-service/registration.yaml
+      - LIVEKIT_HS_SERVER_NAME=yourdomain.com # Your server_name from tuwunel.toml
+```
+
+   Mount the same registration file in `matrix-rtc-jwt`:
+
+```yaml
+    volumes:
+      - /etc/tuwunel/appservices/lk-jwt-service.yaml:/etc/lk-jwt-service/registration.yaml:ro
+```
+
+   With plain Docker, add the same settings as
+   `-e LIVEKIT_AS_REGISTRATION_FILE="/etc/lk-jwt-service/registration.yaml"`,
+   `-e LIVEKIT_HS_SERVER_NAME="yourdomain.com"` and
+   `-v /etc/tuwunel/appservices/lk-jwt-service.yaml:/etc/lk-jwt-service/registration.yaml:ro`.
+
+> [!WARNING]
+> Keep `LIVEKIT_FULL_ACCESS_HOMESERVERS` set to `yourdomain.com` alone.
+> lk-jwt-service checks membership only while that list names exactly the
+> server in `LIVEKIT_HS_SERVER_NAME`. It logs a warning at startup when
+> the list does not match.
+
+5. lk-jwt-service finds Tuwunel through
+   `https://yourdomain.com/.well-known/matrix/client`, set up in section 3
+   above. If the container cannot reach that address, give it Tuwunel's
+   client API address directly, e.g.
+   `LIVEKIT_CS_API_URL_OVERRIDES=yourdomain.com=http://tuwunel:8008`.
+6. Recreate the lk-jwt-service container. With Docker Compose, run
+   `docker compose up -d` from your MatrixRTC directory.
+
+For call checks and container logs, see [Troubleshooting](#troubleshooting).
+
 ### External TURN Integration
 
 If you follow this guide and also set up Coturn as per the
