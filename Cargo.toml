@@ -367,7 +367,7 @@ features = [
 
 [workspace.dependencies.ruma]
 git = "https://github.com/matrix-construct/ruma"
-rev = "834cbeacbf961926a83968aa16eb56f864985835"
+rev = "81b9d360edc1e689385fe7660795a90c1f6f8b85"
 features = [
     "__compat",
     "appservice-api-c",
@@ -413,11 +413,12 @@ features = [
     "unstable-msc4439",
     "unstable-msc4446",
     "unstable-msc4466",
+    "unstable-msc4502", # targeted room member queries
 ]
 
 [workspace.dependencies.synapse-admin-api]
 git = "https://github.com/matrix-construct/synapse-admin-api"
-rev = "df608b8ae41a6987a5f27402e35c079e28580d9d"
+rev = "edf88f3f943f463a27b1227906bb147296978a3b"
 features = ["server"]
 
 [workspace.dependencies.rustls]
