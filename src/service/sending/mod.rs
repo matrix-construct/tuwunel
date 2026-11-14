@@ -32,7 +32,10 @@ pub use self::{
 	sender::{EDU_LIMIT, PDU_LIMIT},
 };
 use self::{queue::Control, worker::num_senders};
-use crate::rooms::timeline::RawPduId;
+use crate::{
+	appservice::{RegistrationInfo, receivers},
+	rooms::timeline::RawPduId,
+};
 
 type Channel<T> = (Sender<T>, Receiver<T>);
 
@@ -286,10 +289,11 @@ where
 
 /// Queue an EDU for every appservice interested in a room.
 ///
-/// An appservice is interested when it receives ephemeral events and the room
-/// is in its namespace, it is present in the room, or one of the room's local
-/// aliases matches. The serializer writes `EphemeralData`, not a federation
-/// `Edu`, once per matching appservice.
+/// An appservice is interested when it has a URL and receives ephemeral
+/// events, and the room matches it: the room is in its namespace, the
+/// appservice is present in the room, or one of the room's local aliases
+/// matches. The serializer writes `EphemeralData`, not a federation `Edu`,
+/// once per matching appservice.
 #[implement(Service)]
 // Stream::filter names one future type independent of the item borrow, which
 // an async closure's future would capture.
@@ -300,17 +304,15 @@ where
 	F: Fn(&mut dyn Write) -> Result + Send + 'a,
 	&'a F: Send + Sync,
 {
-	self.services
-		.appservice
-		.read()
-		.await
-		.values()
+	let registrations = self.services.appservice.read().await;
+	// fn pointer: a closure fails the future's Send check ("FnOnce is not general enough")
+	let receives_ephemeral: fn(&&RegistrationInfo) -> bool =
+		|appservice| appservice.registration.receive_ephemeral;
+
+	receivers(&registrations)
+		.filter(receives_ephemeral)
 		.stream()
 		.filter(|&appservice| async move {
-			if !appservice.registration.receive_ephemeral {
-				return false;
-			}
-
 			if appservice.rooms.is_match(room_id.as_str()) {
 				return true;
 			}

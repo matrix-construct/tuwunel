@@ -10,9 +10,10 @@ mod thirdparty;
 #[cfg(unix)]
 use std::sync::Mutex;
 use std::{
-	collections::BTreeMap,
+	collections::{BTreeMap, btree_map::Values},
 	ffi::OsStr,
 	fs::{self, read_dir},
+	iter::Filter,
 	sync::Arc,
 };
 
@@ -60,6 +61,13 @@ struct Data {
 type Registrations = BTreeMap<String, RegistrationInfo>;
 
 const KNOWN_SCOPES: [&str; 1] = [IS_JOINED_SCOPE];
+
+/// The registrations [`receivers`] yields.
+///
+/// A named type rather than an opaque one, so a caller may shorten its borrow
+/// of the registry.
+pub type Receivers<'a> =
+	Filter<Values<'a, String, RegistrationInfo>, fn(&&RegistrationInfo) -> bool>;
 
 #[async_trait]
 impl crate::Service for Service {
@@ -343,6 +351,15 @@ impl Service {
 	pub async fn loaded(&self) { self.loaded.wait().await; }
 }
 
+/// The registrations a sender may queue traffic for.
+///
+/// A registration without a URL asked for no traffic, so it is left out.
+pub fn receivers(registrations: &Registrations) -> Receivers<'_> {
+	let has_destination: fn(&&RegistrationInfo) -> bool = |info| info.has_destination();
+
+	registrations.values().filter(has_destination)
+}
+
 /// MSC4502: the first requested scope this server does not know.
 ///
 /// Such a scope grants nothing, since `has_scope` is only asked about known
@@ -435,6 +452,16 @@ fn unix_client(&self, path: &str) -> Result<Client> {
 			Ok(client)
 		},
 	}
+}
+
+/// The registration's URL, absent when it asks for no traffic.
+///
+/// A `null` or empty URL is taken as absent too.
+fn destination(registration: &Registration) -> Option<&str> {
+	registration
+		.url
+		.as_deref()
+		.filter(|url| !url.is_empty() && *url != "null")
 }
 
 fn socket_path(url: &str) -> Result<Option<&str>> {
