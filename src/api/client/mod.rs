@@ -120,9 +120,9 @@ pub(crate) use self::{
 	},
 	membership::{
 		ban_user_route, forget_room_route, get_member_events_route, invite_user_route,
-		join_room_by_id_or_alias_route, join_room_by_id_route, joined_members_route,
-		joined_rooms_route, kick_user_route, knock_room_route, leave_room_route,
-		unban_user_route,
+		is_joined_route, join_room_by_id_or_alias_route, join_room_by_id_route,
+		joined_members_route, joined_rooms_route, kick_user_route, knock_room_route,
+		leave_room_route, unban_user_route,
 	},
 	message::{get_message_events_route, ignored_filter, is_ignored_pdu},
 	openid::create_openid_token_route,

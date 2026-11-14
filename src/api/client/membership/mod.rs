@@ -1,6 +1,7 @@
 mod ban;
 mod forget;
 mod invite;
+mod is_joined;
 mod join;
 mod kick;
 mod knock;
@@ -20,6 +21,7 @@ pub(crate) use self::{
 	ban::ban_user_route,
 	forget::forget_room_route,
 	invite::invite_user_route,
+	is_joined::is_joined_route,
 	join::{join_room_by_id_or_alias_route, join_room_by_id_route},
 	kick::kick_user_route,
 	knock::knock_room_route,
