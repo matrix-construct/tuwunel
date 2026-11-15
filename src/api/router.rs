@@ -3,6 +3,7 @@ pub(crate) mod auth;
 mod client_ip;
 mod handler;
 mod html;
+mod proxy;
 mod request;
 mod response;
 pub mod state;
@@ -17,6 +18,7 @@ pub use self::{
 	client_ip::{ClientIp, RateLimitIp},
 	handler::{RouterExt, RumaHandler},
 	html::ACCOUNT_HEAD,
+	proxy::proxy,
 	request::read_body,
 	response::RumaResponse,
 	state::State,

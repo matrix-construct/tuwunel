@@ -3,6 +3,16 @@
 //! The claim grammar is shared with `fed_proxy`; the send goes through the
 //! appservice's own client pool, so a proxy URL takes the forms `url` does.
 
+use bytes::Bytes;
+use http::{
+	Error as HttpError, HeaderValue, Request as HttpRequest, Uri, header::AUTHORIZATION,
+	uri::PathAndQuery,
+};
+use reqwest::{Request, Response};
+use tuwunel_core::{Result, err, implement, warn};
+
+use super::RegistrationInfo;
+
 /// MSC4512: the API a proxied path belongs to.
 ///
 /// It decides how the forwarded request is authenticated and which identity
@@ -42,4 +52,53 @@ pub fn split_path(path: &str) -> Option<(Root, &str)> {
 	};
 
 	Some((root, remainder))
+}
+
+/// MSC4512: forwards a proxied request to the appservice holding the claim.
+///
+/// The request's URI is the path and query to append to the claim's URL; its
+/// headers are already filtered. The `hs_token` goes in as a bearer token,
+/// never in the query. The response comes back unread, so its body can
+/// stream to the caller.
+#[implement(super::Service)]
+#[tracing::instrument(name = "proxy", level = "debug", skip_all)]
+pub async fn send_proxied(
+	&self,
+	appservice: &RegistrationInfo,
+	request: HttpRequest<Bytes>,
+) -> Result<Response> {
+	let id = &appservice.registration.id;
+	let url = appservice
+		.proxy_url()
+		.ok_or_else(|| err!("Appservice {id} claims no proxy prefix"))?;
+
+	let (base, client) = self.transport(url)?;
+	let request = with_credentials(request, base, &appservice.registration.hs_token)?;
+	let request = Request::try_from(request)?;
+
+	client.execute(request).await.map_err(|e| {
+		let e = e.without_url();
+
+		warn!(appservice = %id, error = ?e, "Could not forward a proxied request");
+		e.into()
+	})
+}
+
+fn with_credentials(
+	request: HttpRequest<Bytes>,
+	base: &str,
+	hs_token: &str,
+) -> Result<HttpRequest<Bytes>> {
+	let (mut parts, body) = request.into_parts();
+	let path = parts
+		.uri
+		.path_and_query()
+		.map_or("/", PathAndQuery::as_str);
+
+	parts.uri = Uri::try_from(format!("{base}{path}")).map_err(HttpError::from)?;
+	parts
+		.headers
+		.insert(AUTHORIZATION, HeaderValue::try_from(format!("Bearer {hs_token}"))?);
+
+	Ok(HttpRequest::from_parts(parts, body))
 }

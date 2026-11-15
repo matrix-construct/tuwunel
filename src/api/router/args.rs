@@ -157,7 +157,7 @@ where
 	}
 }
 
-fn record_auth_context(span: &tracing::Span, auth: &Auth) {
+pub(super) fn record_auth_context(span: &tracing::Span, auth: &Auth) {
 	_ = auth
 		.sender_user
 		.as_deref()
@@ -183,7 +183,7 @@ fn record_auth_context(span: &tracing::Span, auth: &Auth) {
 /// POST and DELETE bodies on other routes become objects for UIA.
 /// A server-signed body must be canonical JSON because its signature covers only
 /// the canonical form; only a zero-byte body is authenticated without content.
-fn parse_json(
+pub(super) fn parse_json(
 	request: &Request,
 	route: TypeId,
 	scheme: Scheme,
@@ -335,7 +335,7 @@ fn restore_body(
 /// Serializes a canonical body directly into the HTTP byte buffer.
 ///
 /// Canonical JSON values are always serializable, including restored UIA bodies.
-fn serialize_body(json_body: &CanonicalJsonValue) -> Bytes {
+pub(super) fn serialize_body(json_body: &CanonicalJsonValue) -> Bytes {
 	let mut buf = BytesMut::new().writer();
 
 	serde_json::to_writer(&mut buf, json_body).expect("value serialization can't fail");

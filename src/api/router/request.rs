@@ -56,9 +56,21 @@ pub(super) type PathParam = SmallString<[u8; 32]>;
 pub(super) async fn from(services: &Services, request: http::Request<Body>) -> Result<Request> {
 	let limited = request.with_limited_body();
 	let (mut parts, body) = limited.into_parts();
-
-	let cookie: CookieJar = parts.extract().await?;
 	let path: Path<PathParams> = parts.extract().await?;
+
+	from_parts(services, parts, body, path).await
+}
+
+/// Builds a request from its parts and the path parameters its route matched.
+///
+/// A request no route matched passes no parameters.
+pub(super) async fn from_parts(
+	services: &Services,
+	parts: Parts,
+	body: Body,
+	path: Path<PathParams>,
+) -> Result<Request> {
+	let cookie = CookieJar::from_headers(&parts.headers);
 
 	let query = parts.uri.query().unwrap_or_default();
 	let query = serde_html_form::from_str(query)

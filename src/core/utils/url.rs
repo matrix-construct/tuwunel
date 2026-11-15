@@ -97,11 +97,57 @@ pub fn is_loopback(url: &Url) -> bool {
 	}
 }
 
+/// Whether a raw URL path survives URL parsing as written.
+///
+/// It holds only RFC 3986 path bytes and no dot segment, even once
+/// percent-decoded. A URL parser rewrites anything else: it turns a backslash
+/// into a separator and resolves dot segments, so a path failing this can
+/// land elsewhere than it reads.
+#[must_use]
+pub fn is_plain_path(path: &str) -> bool {
+	path.bytes().all(is_path_byte) && !has_dot_segment(path)
+}
+
+/// Whether a byte may appear unencoded in a URL path (RFC 3986).
+///
+/// That is an unreserved character, a sub-delimiter, `:`, `@`, `/`, or the
+/// `%` opening a percent-encoded octet. A query or fragment delimiter does
+/// not qualify, nor does a space, a backslash or a control byte.
+#[must_use]
+pub fn is_path_byte(byte: u8) -> bool {
+	is_unreserved_byte(byte) || b"%!$&'()*+,;=:@/".contains(&byte)
+}
+
 /// Drops one trailing slash, if present.
 ///
 /// Only one goes, so `a//` becomes `a/`.
 #[must_use]
 pub fn strip_trailing_slash(value: &str) -> &str { value.strip_suffix('/').unwrap_or(value) }
+
+/// Whether a URL path holds a `.` or `..` segment once percent-decoded.
+///
+/// An encoded slash separates segments as a literal one does, so `%2e%2E`
+/// and `a%2F..` both count. Only one level of encoding is decoded.
+#[must_use]
+pub fn has_dot_segment(path: &str) -> bool {
+	path.split('/')
+		.flat_map(|part| part.split("%2F"))
+		.flat_map(|part| part.split("%2f"))
+		.any(is_dot_segment)
+}
+
+fn is_dot_segment(segment: &str) -> bool {
+	strip_dot(segment).is_some_and(|rest| rest.is_empty() || strip_dot(rest) == Some(""))
+}
+
+fn strip_dot(segment: &str) -> Option<&str> {
+	segment.strip_prefix('.').or_else(|| {
+		segment
+			.get(..3)
+			.filter(|unit| unit.eq_ignore_ascii_case("%2e"))
+			.and_then(|_| segment.get(3..))
+	})
+}
 
 /// Formats a request URI without exposing sensitive components.
 ///
@@ -140,6 +186,61 @@ impl Display for SanitizedUri<'_> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn dot_segments_are_found_through_one_encoding() {
+		for path in [
+			"/a/./b",
+			"/a/../b",
+			"/a/..",
+			"..",
+			"/a/%2e%2e/b",
+			"/a/%2E./b",
+			"/a/.%2e",
+			"/a/%2e/b",
+			"/a%2F..%2Fb",
+			"/a%2f.",
+		] {
+			assert!(has_dot_segment(path), "{path}");
+		}
+
+		for path in [
+			"/a/b",
+			"/a/.../b",
+			"/a/.b/c",
+			"/a/b.",
+			"/a/%252e%252e/b",
+			"/a/%2e%2e%2e",
+			"/a/%2",
+			"",
+			"/",
+		] {
+			assert!(!has_dot_segment(path), "{path}");
+		}
+	}
+
+	#[test]
+	fn path_bytes_exclude_query_fragment_and_whitespace() {
+		assert!(
+			"/_matrix/federation/v1/a%20b:c@d!$&'()*+,;=-._~"
+				.bytes()
+				.all(is_path_byte)
+		);
+
+		for byte in [b'?', b'#', b' ', b'\\', b'"', b'<', b'^', b'`', b'{', b'|', 0, 0x7F, 0x80] {
+			assert!(!is_path_byte(byte), "{byte:#x}");
+		}
+	}
+
+	#[test]
+	fn plain_paths_hold_no_rewritable_byte_or_segment() {
+		assert!(is_plain_path("/_matrix/client/v1/rtc/livekit/get_token"));
+		assert!(is_plain_path("/a/%2Fb/.c"));
+
+		for path in ["/a/../b", "/a/%2e%2e/b", "/a/x\\..\\..\\b", "/a b", "/a?b", "/a#b"] {
+			assert!(!is_plain_path(path), "{path}");
+		}
+	}
 
 	#[test]
 	fn one_trailing_slash_is_stripped() {
