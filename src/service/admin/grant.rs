@@ -5,7 +5,7 @@ use ruma::{
 		StateEventType,
 		room::{
 			member::{MembershipState, RoomMemberEventContent},
-			power_levels::{RoomPowerLevelsEventContent, UserPowerLevel},
+			power_levels::{RoomPowerLevels, RoomPowerLevelsEventContent, UserPowerLevel},
 		},
 	},
 };
@@ -145,8 +145,6 @@ pub async fn make_user_admin(&self, user_id: &UserId) -> Result {
 /// target is neither joined nor invited, the target is invited first.
 #[implement(super::Service)]
 pub async fn make_room_admin(&self, room_id: &RoomId, target: &UserId) -> Result {
-	let state_lock = self.services.state.mutex.lock(room_id).await;
-
 	let power_levels = self
 		.services
 		.state_accessor
@@ -166,20 +164,12 @@ pub async fn make_room_admin(&self, room_id: &RoomId, target: &UserId) -> Result
 		})
 		.await;
 
-	let Some((sender, sender_level)) = sender else {
+	let Some((sender, _)) = sender else {
 		return Err!(Request(InvalidParam("Server not in room")));
 	};
 
-	if !power_levels.user_can_send_state(&sender, StateEventType::RoomPowerLevels) {
-		return Err!(Request(InvalidParam(
-			"No local admin in room with power to update power levels"
-		)));
-	}
-
-	let grant_level: Int = match sender_level {
-		| UserPowerLevel::Infinite => 100.into(),
-		| UserPowerLevel::Int(level) => level,
-	};
+	// Refuse before inviting when the chosen member cannot grant at all.
+	grantable_level(&power_levels, &sender)?;
 
 	let is_joined = self
 		.services
@@ -205,6 +195,17 @@ pub async fn make_room_admin(&self, room_id: &RoomId, target: &UserId) -> Result
 			.await?;
 	}
 
+	// After the invite, which locks this room's state itself; levels re-read under it.
+	let state_lock = self.services.state.mutex.lock(room_id).await;
+
+	let power_levels = self
+		.services
+		.state_accessor
+		.get_power_levels(room_id)
+		.await?;
+
+	let grant_level = grantable_level(&power_levels, &sender)?;
+
 	let mut content = self
 		.services
 		.state_accessor
@@ -228,6 +229,23 @@ pub async fn make_room_admin(&self, room_id: &RoomId, target: &UserId) -> Result
 		)
 		.await
 		.map(|_| ())
+}
+
+/// The power level `sender` grants, refused when it cannot send
+/// `m.room.power_levels`.
+///
+/// A room-version 12 creator's infinite power grants 100.
+fn grantable_level(power_levels: &RoomPowerLevels, sender: &UserId) -> Result<Int> {
+	if !power_levels.user_can_send_state(sender, StateEventType::RoomPowerLevels) {
+		return Err!(Request(InvalidParam(
+			"No local admin in room with power to update power levels"
+		)));
+	}
+
+	match power_levels.for_user(sender) {
+		| UserPowerLevel::Infinite => Ok(100.into()),
+		| UserPowerLevel::Int(level) => Ok(level),
+	}
 }
 
 #[implement(super::Service)]
