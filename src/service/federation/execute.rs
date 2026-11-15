@@ -6,13 +6,16 @@
 use std::{fmt::Debug, mem, time::Duration};
 
 use bytes::Bytes;
+use http::{Request as HttpRequest, StatusCode, header::CONTENT_TYPE};
 use reqwest::{Method, Request, Response, Url};
 use ruma::{
 	ServerName,
 	api::{
 		EndpointError, IncomingResponse, MatrixVersion, OutgoingRequest, OutgoingRequestExt,
 		SupportedVersions,
+		auth_scheme::AuthScheme,
 		error::{Error as RumaError, ErrorBody, ErrorKind},
+		federation::authentication::{ServerSignatures, ServerSignaturesInput},
 	},
 };
 use tokio::time::timeout;
@@ -30,6 +33,8 @@ use crate::{
 	client::{Federation, read_response_capped},
 	resolver::actual::ActualDest,
 };
+
+type RawRequest = HttpRequest<Vec<u8>>;
 
 /// Sends a federation request with the standard federation client.
 ///
@@ -240,6 +245,97 @@ where
 
 	self.perform::<T>(&actual, dest, request, client)
 		.await
+}
+
+/// MSC4512: sends a signed federation request built from a raw method, path
+/// and body.
+///
+/// The destination is validated and resolved as for a typed request, and the
+/// request signed as this server. The remote's status and body come back
+/// whatever the status, the body read up to the response size limit. No
+/// backoff is consulted and no outcome recorded, as for an appservice's
+/// request no peer state should rest on.
+#[implement(super::Service)]
+#[tracing::instrument(name = "fed_raw", level = "debug", skip(self, body))]
+pub async fn execute_raw(
+	&self,
+	dest: &ServerName,
+	method: Method,
+	path_and_query: &str,
+	body: Option<Vec<u8>>,
+) -> Result<(StatusCode, Bytes)> {
+	self.validate_request_destination(dest)?;
+	let actual = self
+		.services
+		.resolver
+		.get_actual_dest(dest)
+		.await?;
+
+	let request = self.raw_request(&actual, dest, method, path_and_query, body)?;
+	let request = Request::try_from(request)?;
+
+	self.validate_url(request.url())?;
+	self.services.server.check_running()?;
+
+	let url = request.url().clone();
+	let method = request.method().clone();
+	let client = &self.services.client.federation;
+	let response = match client.for_srv(actual.srv).execute(request).await {
+		| Ok(response) => response,
+		| Err(error) =>
+			return Err(self
+				.handle_error(dest, &actual, &method, &url, error)
+				.expect_err("always returns error")),
+	};
+
+	let limit = self
+		.services
+		.server
+		.config
+		.network
+		.http
+		.max_response_size;
+
+	let status = response.status();
+	let body = read_response_capped(response, limit).await?;
+
+	Ok((status, body))
+}
+
+#[implement(super::Service)]
+fn raw_request(
+	&self,
+	actual: &ActualDest,
+	dest: &ServerName,
+	method: Method,
+	path_and_query: &str,
+	body: Option<Vec<u8>>,
+) -> Result<RawRequest> {
+	let builder = HttpRequest::builder()
+		.method(method)
+		.uri(format!("{}{path_and_query}", actual.to_string()));
+
+	let request = match body {
+		| None => builder.body(Vec::new())?,
+		| Some(body) => builder
+			.header(CONTENT_TYPE, "application/json")
+			.body(body)?,
+	};
+
+	let input = ServerSignaturesInput::new(
+		self.services.server.name.clone(),
+		dest.to_owned(),
+		self.services.server_keys.keypair(),
+	);
+
+	signed(request, input)
+}
+
+fn signed(mut request: RawRequest, input: ServerSignaturesInput<'_>) -> Result<RawRequest> {
+	ServerSignatures::add_authentication(&mut request, input)
+		.map_err(|e| err!(BadServerResponse("Failed to sign the federation request: {e}")))?;
+
+	Ok(request)
 }
 
 #[implement(super::Service)]

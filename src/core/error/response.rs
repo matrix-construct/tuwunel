@@ -104,7 +104,8 @@ pub(super) fn bad_request_code(kind: &ErrorKind) -> StatusCode {
 		| NotYetUploaded | ConnectionTimeout => StatusCode::GATEWAY_TIMEOUT,
 
 		// 502
-		| BadStatus(..) | ConnectionFailed => StatusCode::BAD_GATEWAY,
+		| BadStatus(..) | ConnectionFailed | UnstableFedProxyConnectionFailed =>
+			StatusCode::BAD_GATEWAY,
 
 		// 429
 		| LimitExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
@@ -128,6 +129,8 @@ pub(super) fn bad_request_code(kind: &ErrorKind) -> StatusCode {
 		| CannotLeaveServerNoticeRoom
 		| WrongRoomKeysVersion { .. }
 		| ResourceLimitExceeded { .. }
+		| UnstableFedProxyDestinationDenied
+		| UnstableFedProxyPathNotAllowed
 		| Forbidden => StatusCode::FORBIDDEN,
 
 		// 401

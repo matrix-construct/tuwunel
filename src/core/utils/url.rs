@@ -3,10 +3,13 @@
 //! These helpers provide reusable matching rules that the URL parser does not
 //! expose directly.
 
-use std::fmt::{self, Display, Write};
+use std::{
+	borrow::Cow,
+	fmt::{self, Display, Write},
+};
 
 use http::Uri;
-use url::{Host, Url};
+use url::{Host, Url, form_urlencoded::Serializer};
 
 use super::string::is_unreserved_byte;
 
@@ -116,6 +119,25 @@ pub fn is_plain_path(path: &str) -> bool {
 #[must_use]
 pub fn is_path_byte(byte: u8) -> bool {
 	is_unreserved_byte(byte) || b"%!$&'()*+,;=:@/".contains(&byte)
+}
+
+/// Appends form-encoded query pairs to a path.
+///
+/// With no pairs the path comes back borrowed and unchanged, without a `?`.
+#[must_use]
+pub fn with_query<Pairs, Key, Value>(path: &str, pairs: Pairs) -> Cow<'_, str>
+where
+	Pairs: ExactSizeIterator<Item = (Key, Value)>,
+	Key: AsRef<str>,
+	Value: AsRef<str>,
+{
+	match pairs.len() {
+		| 0 => Cow::Borrowed(path),
+		| _ => Serializer::for_suffix(format!("{path}?"), path.len().saturating_add(1))
+			.extend_pairs(pairs)
+			.finish()
+			.into(),
+	}
 }
 
 /// Drops one trailing slash, if present.
@@ -240,6 +262,17 @@ mod tests {
 		for path in ["/a/../b", "/a/%2e%2e/b", "/a/x\\..\\..\\b", "/a b", "/a?b", "/a#b"] {
 			assert!(!is_plain_path(path), "{path}");
 		}
+	}
+
+	#[test]
+	fn query_pairs_are_form_encoded_onto_the_path() {
+		let none: [(&str, &str); 0] = [];
+
+		assert!(matches!(with_query("/p", none.into_iter()), Cow::Borrowed("/p")));
+		assert_eq!(
+			with_query("/p", [("a", "1 2"), ("b&", "=")].into_iter()),
+			"/p?a=1+2&b%26=%3D"
+		);
 	}
 
 	#[test]

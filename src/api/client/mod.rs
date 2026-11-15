@@ -73,7 +73,7 @@ pub(crate) use self::{
 		set_global_account_data_route, set_room_account_data_route,
 	},
 	alias::{create_alias_route, delete_alias_route, get_alias_route},
-	appservice::appservice_ping,
+	appservice::{appservice_ping, fed_proxy_route},
 	backup::{
 		add_backup_keys_for_room_route, add_backup_keys_for_session_route, add_backup_keys_route,
 		create_backup_version_route, delete_backup_keys_for_room_route,
