@@ -79,16 +79,27 @@ pub(crate) async fn get_member_events_route(
 /// Lists all members of a room.
 ///
 /// - The sender user must be in the room
-/// - TODO: An appservice just needs a puppet joined
+/// - An appservice just needs its sender or one of its namespaced users joined
 pub(crate) async fn joined_members_route(
 	State(services): State<crate::State>,
 	body: Ruma<joined_members::v3::Request>,
 ) -> Result<joined_members::v3::Response> {
-	if !services
+	// Sequenced rather than raced, so a member's point get skips the appservice
+	// lookup.
+	let permitted = services
 		.state_accessor
 		.user_can_peek(body.sender_user(), &body.room_id)
 		.await
-	{
+		|| match body.appservice_info.as_ref() {
+			| Some(appservice) =>
+				services
+					.state_cache
+					.appservice_in_room(&body.room_id, appservice)
+					.await,
+			| None => false,
+		};
+
+	if !permitted {
 		return Err!(Request(Forbidden("You aren't a member of the room.")));
 	}
 
