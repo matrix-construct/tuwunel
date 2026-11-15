@@ -478,10 +478,27 @@ before it issues a token, using
 This works for callers from other servers too, as long as Tuwunel is in the
 room.
 
+The registration below also lets clients and other Matrix servers reach
+lk-jwt-service through Tuwunel, using
+[MSC4512](https://github.com/matrix-org/matrix-spec-proposals/pull/4512).
+Tuwunel authenticates requests to
+`/_matrix/client/v1/rtc/livekit/...` and
+`/_matrix/federation/v1/rtc/livekit/...` and forwards them to
+lk-jwt-service.
+
+Communication between Matrix servers is called federation. Other
+homeservers can reach your lk-jwt-service over federation without a
+public lk-jwt-service URL. In turn,
+lk-jwt-service can have Tuwunel sign and send federation requests under
+that prefix, to get your users a token from another server's
+lk-jwt-service.
+
 > [!WARNING]
 > Keep the tokens secret. The `.*` users namespace in this registration
 > lets whoever holds `ASTOKEN` act as any local user. The scope lets them
-> ask about any user or server in any room Tuwunel is in.
+> ask about any user or server in any room Tuwunel is in. The proxy prefix
+> lets them send federation requests as your server under
+> `/_matrix/federation/<version>/rtc/livekit`.
 
 1. Generate two more random strings, `ASTOKEN` and `HSTOKEN`, e.g. with
    `pwgen -s -1 64` for each.
@@ -502,10 +519,20 @@ namespaces:
       regex: ".*"
 io.element.msc4502.scopes:
   - "urn:matrix:client:io.element.msc4502:rooms:is_joined"
+io.element.msc4512.proxy_prefix: "rtc/livekit"
+io.element.msc4512.proxy_url: "http://127.0.0.1:8081" # lk-jwt-service, as Tuwunel reaches it
 ```
 
 The namespace is not exclusive, so it reserves no user names. Tuwunel
 queues no events for a registration whose `url` is `null`.
+
+Set `proxy_url` to an address Tuwunel can use to reach lk-jwt-service.
+Use the port `compose.yaml` publishes when Tuwunel runs on the same
+host. When both containers share a Docker network, use
+`http://matrix-rtc-jwt:8081`.
+
+Only one registration may claim `rtc/livekit`. Tuwunel logs an invalid or
+already claimed prefix at startup and loads the registration without it.
 
 > [!WARNING]
 > An invalid registration file, for example one reusing another
@@ -565,6 +592,22 @@ registration error.
    `LIVEKIT_CS_API_URL_OVERRIDES=yourdomain.com=http://tuwunel:8008`.
 6. Recreate the lk-jwt-service container. With Docker Compose, run
    `docker compose up -d` from your MatrixRTC directory.
+
+#### Call tokens through Tuwunel
+
+Element Call gets its call token from the homeserver, and so through
+Tuwunel, when the advertised transport has a `url` and no
+`livekit_service_url`. Such a transport is configured in the
+`[global.well_known]` section of `tuwunel.toml`:
+
+```toml
+[[global.well_known.rtc_transports]]
+type = "m.livekit"
+url = "wss://matrix-rtc.yourdomain.com"
+```
+
+A transport with `livekit_service_url`, as `livekit_url` from section 3
+produces, keeps clients asking lk-jwt-service directly.
 
 For call checks and container logs, see [Troubleshooting](#troubleshooting).
 

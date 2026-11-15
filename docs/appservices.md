@@ -112,6 +112,12 @@ Fields under `[global.appservice.<ID>]`:
 | `device_management` | `false` | Allow the appservice to manage devices on behalf of virtual users ([MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190)). |
 | `msc3202_transaction_extensions` | `false` | Include end-to-bridge encryption bookkeeping (device-list changes, one-time-key counts, unused fallback key types) in pushes, so encrypting bridges work without a `/sync` loop ([MSC3202](https://github.com/matrix-org/matrix-spec-proposals/pull/3202), paired with to-device delivery from [MSC4203](https://github.com/matrix-org/matrix-spec-proposals/pull/4203)). The registration-file key is `org.matrix.msc3202`. |
 | `scopes` | `[]` | Permissions the appservice requests, called scopes ([MSC4502](https://github.com/matrix-org/matrix-spec-proposals/pull/4502)). The one known scope, `urn:matrix:client:io.element.msc4502:rooms:is_joined`, lets it ask whether any user or server is joined to a room this server is in. An unknown scope grants no permission. Tuwunel logs it at startup, and `!admin appservices register` rejects a registration containing one. The registration-file key is `io.element.msc4502.scopes`. |
+| `proxy_prefix` | none | Path prefix the appservice claims ([MSC4512](https://github.com/matrix-org/matrix-spec-proposals/pull/4512)). Set to `rtc/livekit`, the only allowed prefix, together with `proxy_url`. Only one appservice may claim it. The registration-file key is `io.element.msc4512.proxy_prefix`. |
+| `proxy_url` | none | Base URL that requests under `proxy_prefix` are forwarded to, or `unix:///absolute/path.sock` on Unix ([MSC4512](https://github.com/matrix-org/matrix-spec-proposals/pull/4512)). The registration-file key is `io.element.msc4512.proxy_url`. |
+
+With a valid proxy claim, Tuwunel authenticates requests under `/_matrix/client/<version>/<prefix>` and `/_matrix/federation/<version>/<prefix>` and forwards them to `proxy_url`. The appservice may also have Tuwunel sign and send requests to other Matrix servers under that prefix. These server-to-server requests are called federation requests.
+
+At startup, Tuwunel logs and ignores an invalid proxy claim or one another appservice already holds. An otherwise valid registration still loads without the proxy claim. The `!admin appservices register` command rejects registrations with either problem.
 
 Namespace entries under `[[global.appservice.<ID>.users]]`, `aliases`, and `rooms`:
 
