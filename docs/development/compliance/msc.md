@@ -29,14 +29,14 @@
 
 | ✅ `yes` | 🟨 `part` | 🟥 `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 291 | 61 | 446 | 312 | 1110 |
+| 292 | 61 | 445 | 312 | 1110 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 189 | 22 | 13 | 57 | 281 |
-| open | 66 | 24 | 347 | 181 | 618 |
+| open | 67 | 24 | 346 | 181 | 618 |
 | closed | 36 | 15 | 86 | 74 | 211 |
 
 ## Merged
@@ -354,7 +354,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4517 | 🟥 ● | 0/0 | Federated thirdparty lookups | no server= parameter and no federation thirdparty routes; local lookups only |
 | MSC4514 | 🟥 ● | 0/0 | EDU size limit | no 65536 byte EDU cap; only the 24 MiB global request body limit applies |
 | MSC4513 | ✅ ◐ | 90/90 | Standard HTTP status codes for all endpoints, current and future | central kind to status map emits 413, 429, 502, 504 with Matrix error bodies |
-| MSC4512 | 🟥 ● | 0/0 | Delegating parts of the Client-Server and Server-Server API to application se... | Appservice API delegation absent; sidecar handler implementation excluded |
+| MSC4512 | ✅ ● | 80/90 | Delegating parts of the Client-Server and Server-Server API to application se... | Unstable keys and paths, rtc/livekit only; bad fields answer M_BAD_JSON |
 | MSC4511 | 🟥 ● | 0/0 | Topological query API with sparse fieldsets and Merkleized metadata | no topological query endpoint, sparse fieldsets or Merkleized metadata |
 | MSC4509 | 🟥 ● | 0/0 | Auto join on accepted knock | no auto-join on accepted knock; prev_sender emission is pre-existing |
 | MSC4507 | 🟥 ● | 0/0 | Return additional room state from `/_matrix/federation/v1/hierarchy/{roomId}` | federation /hierarchy has no additional_state param or m.public_state |
