@@ -1,6 +1,6 @@
 use axum::extract::State;
-use futures::StreamExt;
-use ruma::{MilliSecondsSinceUnixEpoch, UInt, UserId, api::Direction};
+use futures::{StreamExt, TryFutureExt, join};
+use ruma::{MilliSecondsSinceUnixEpoch, OwnedUserId, UInt, api::Direction};
 use synapse_admin_api::users::list_users::{
 	v2::{self, UserMinorDetails},
 	v3,
@@ -8,7 +8,7 @@ use synapse_admin_api::users::list_users::{
 use tuwunel_core::{
 	Result,
 	utils::{
-		IterStream, ReadyExt,
+		ReadyExt, TryFutureExtExt,
 		math::{ruma_from_usize, usize_from_ruma},
 		stream::WidebandExt,
 	},
@@ -19,7 +19,7 @@ use crate::{Ruma, require_admin};
 /// The `deactivated` query filter, whose semantics differ between v2 and v3.
 #[derive(Clone, Copy)]
 enum DeactivatedFilter {
-	/// Include both active and deactivated users (v3 absent).
+	/// Include both active and deactivated users (v3 absent or v2 `true`).
 	Any,
 
 	/// Only deactivated users (v3 `true`).
@@ -27,21 +27,18 @@ enum DeactivatedFilter {
 
 	/// Exclude deactivated users (v2 absent/false, v3 `false`).
 	Exclude,
-
-	/// Include deactivated users (v2 `true`).
-	Include,
 }
 
 /// Filter and pagination parameters shared by the v2 and v3 list endpoints.
 struct ListParams<'a> {
-	from: usize,
-	limit: usize,
+	from: UInt,
+	limit: Option<UInt>,
 	name: Option<&'a str>,
 	user_id: Option<&'a str>,
 	admins: Option<bool>,
 	locked: bool,
 	deactivated: DeactivatedFilter,
-	dir: Direction,
+	dir: Option<Direction>,
 }
 
 /// # `GET /_synapse/admin/v2/users`
@@ -52,19 +49,19 @@ pub(crate) async fn admin_list_users_v2_route(
 	require_admin(&services, body.sender_user()).await?;
 
 	let deactivated = match body.deactivated {
-		| true => DeactivatedFilter::Include,
+		| true => DeactivatedFilter::Any,
 		| false => DeactivatedFilter::Exclude,
 	};
 
 	let params = ListParams {
-		from: usize_from_ruma(body.from),
-		limit: body.limit.map_or(100, usize_from_ruma),
+		from: body.from,
+		limit: body.limit,
 		name: body.name.as_deref(),
 		user_id: body.user_id.as_deref(),
 		admins: body.admins,
 		locked: body.locked,
 		deactivated,
-		dir: body.dir.unwrap_or(Direction::Forward),
+		dir: body.dir,
 	};
 
 	let (users, next_token, total) = list_users(services, &params).await;
@@ -86,14 +83,14 @@ pub(crate) async fn admin_list_users_v3_route(
 	};
 
 	let params = ListParams {
-		from: usize_from_ruma(body.from),
-		limit: body.limit.map_or(100, usize_from_ruma),
+		from: body.from,
+		limit: body.limit,
 		name: body.name.as_deref(),
 		user_id: body.user_id.as_deref(),
 		admins: body.admins,
 		locked: body.locked,
 		deactivated,
-		dir: body.dir.unwrap_or(Direction::Forward),
+		dir: body.dir,
 	};
 
 	let (users, next_token, total) = list_users(services, &params).await;
@@ -109,38 +106,50 @@ async fn list_users(
 	services: crate::State,
 	params: &ListParams<'_>,
 ) -> (Vec<UserMinorDetails>, Option<String>, UInt) {
-	let mut names: Vec<String> = services
+	let from = usize_from_ruma(params.from);
+	let limit = params.limit.map_or(100, usize_from_ruma);
+	let dir = params.dir.unwrap_or(Direction::Forward);
+
+	let name_lower = params
+		.name
+		.map(str::to_lowercase)
+		.filter(|name| !name.is_empty());
+	let user_id_lower = params.user_id.map(str::to_lowercase);
+
+	let mut matched: Vec<UserMinorDetails> = services
 		.users
 		.stream()
 		.ready_filter(|user_id| services.globals.user_is_local(user_id))
-		.map(ToString::to_string)
+		.map(ToOwned::to_owned)
+		.wide_filter_map(async |user_id| {
+			user_minor_details(
+				services,
+				user_id,
+				user_id_lower.as_deref(),
+				name_lower.as_deref(),
+				params.admins,
+				params.locked,
+				params.deactivated,
+			)
+			.await
+		})
 		.collect()
 		.await;
 
-	names.sort_unstable();
-
-	if matches!(params.dir, Direction::Backward) {
-		names.reverse();
+	if matches!(dir, Direction::Backward) {
+		matched.reverse();
 	}
-
-	let matched: Vec<UserMinorDetails> = names
-		.iter()
-		.map(String::as_str)
-		.stream()
-		.wide_filter_map(async |name| user_minor_details(services, name, params).await)
-		.collect()
-		.await;
 
 	let matched_count = matched.len();
 	let total = ruma_from_usize(matched_count);
 
 	let page: Vec<UserMinorDetails> = matched
 		.into_iter()
-		.skip(params.from)
-		.take(params.limit)
+		.skip(from)
+		.take(limit)
 		.collect();
 
-	let end = params.from.saturating_add(page.len());
+	let end = from.saturating_add(page.len());
 	let next_token = (end < matched_count).then(|| end.to_string());
 
 	(page, next_token, total)
@@ -151,24 +160,30 @@ async fn list_users(
 /// out.
 async fn user_minor_details(
 	services: crate::State,
-	name: &str,
-	params: &ListParams<'_>,
+	user_id: OwnedUserId,
+	user_id_filter: Option<&str>,
+	name_filter: Option<&str>,
+	admin_filter: Option<bool>,
+	locked_filter: bool,
+	deactivated_filter: DeactivatedFilter,
 ) -> Option<UserMinorDetails> {
-	let user_id = UserId::parse(name).ok()?;
-
-	let displayname = services.profile.displayname(&user_id).await.ok();
-
-	if let Some(needle) = params.user_id.filter(|_| params.name.is_none())
-		&& !name.contains(needle)
+	if name_filter.is_none()
+		&& let Some(needle) = user_id_filter
+		&& !user_id.as_str().to_lowercase().contains(needle)
 	{
 		return None;
 	}
 
-	if let Some(needle) = params.name {
-		let in_localpart = user_id.localpart().contains(needle);
+	let displayname = services.profile.displayname(&user_id).await.ok();
+
+	if let Some(needle) = name_filter {
+		let in_localpart = user_id
+			.localpart()
+			.to_lowercase()
+			.contains(needle);
 		let in_displayname = displayname
 			.as_deref()
-			.is_some_and(|display| display.contains(needle));
+			.is_some_and(|display| display.to_lowercase().contains(needle));
 
 		if !in_localpart && !in_displayname {
 			return None;
@@ -176,14 +191,14 @@ async fn user_minor_details(
 	}
 
 	let admin = services.admin.user_is_admin(&user_id).await;
-	if let Some(want_admin) = params.admins
+	if let Some(want_admin) = admin_filter
 		&& want_admin != admin
 	{
 		return None;
 	}
 
 	let locked = services.users.is_locked(&user_id).await;
-	if locked && !params.locked {
+	if locked && !locked_filter {
 		return None;
 	}
 
@@ -193,8 +208,8 @@ async fn user_minor_details(
 		.await
 		.unwrap_or(false);
 
-	let keep = match params.deactivated {
-		| DeactivatedFilter::Any | DeactivatedFilter::Include => true,
+	let keep = match deactivated_filter {
+		| DeactivatedFilter::Any => true,
 		| DeactivatedFilter::Only => deactivated,
 		| DeactivatedFilter::Exclude => !deactivated,
 	};
@@ -206,17 +221,17 @@ async fn user_minor_details(
 	let avatar_url = services
 		.profile
 		.avatar_url(&user_id)
-		.await
-		.ok()
-		.map(|url| url.to_string());
+		.map_ok(|url| url.to_string())
+		.ok();
 
-	let erased = services.users.is_erased(&user_id).await;
+	let erased = services.users.is_erased(&user_id);
 
 	let last_seen_ts = services
 		.users
 		.all_devices_metadata(&user_id)
-		.ready_fold(None, |max, device| max.max(device.last_seen_ts))
-		.await;
+		.ready_fold(None, |max, device| max.max(device.last_seen_ts));
+
+	let (avatar_url, erased, last_seen_ts) = join!(avatar_url, erased, last_seen_ts);
 
 	Some(UserMinorDetails {
 		displayname,
@@ -228,6 +243,6 @@ async fn user_minor_details(
 		last_seen_ts,
 		// tuwunel has no creation timestamp; emit a 0 sentinel (strict clients reject null).
 		creation_ts: Some(MilliSecondsSinceUnixEpoch(UInt::from(0_u32))),
-		..UserMinorDetails::new(name.to_owned())
+		..UserMinorDetails::new(user_id.into())
 	})
 }
