@@ -2549,6 +2549,8 @@ impl From<AppService> for ruma::api::appservice::Registration {
 			},
 			keys_claims: false,
 			scopes: conf.scopes,
+			proxy_prefix: None,
+			proxy_url: None,
 		}
 	}
 }
