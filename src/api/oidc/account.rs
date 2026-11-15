@@ -10,19 +10,29 @@ mod session_end_execute;
 mod session_list;
 mod session_view;
 
+use std::fmt;
+
 use axum::{
-	extract::{Form, Request, State},
+	extract::{RawForm, Request, State},
 	response::{Html, IntoResponse, Redirect, Response},
 };
+use futures::StreamExt;
 use http::{
 	HeaderValue, Method, StatusCode,
 	header::{CACHE_CONTROL, CONTENT_TYPE, REFERRER_POLICY},
 };
-use ruma::OwnedDeviceId;
+use itertools::Itertools;
+use ruma::{DeviceId, OwnedDeviceId, UserId};
+use serde_html_form::{from_bytes, from_str};
 use tuwunel_api::router::ACCOUNT_HEAD;
 use tuwunel_core::{
 	Err, Error, Result, err,
-	utils::{BoolExt, html::escape as html_escape},
+	smallvec::SmallVec,
+	utils::{
+		BoolExt,
+		html::escape as html_escape,
+		stream::{IterStream, WidebandExt},
+	},
 };
 use tuwunel_service::Services;
 use url::Url;
@@ -65,6 +75,16 @@ static ACCOUNT_JS_INCLUDE: &str = r#"
 /// Cache-control header value.
 static ACCOUNT_CACHE_CONTROL: &str = "no-store";
 
+/// Sessions named by repeated `device_id` parameters.
+///
+/// A link names one session; only the session list's sign-out form names more.
+type DeviceIds = SmallVec<[OwnedDeviceId; 1]>;
+
+/// The selected sessions that still exist.
+///
+/// Each borrows its device ID from the request's parameters.
+type Sessions<'a> = SmallVec<[&'a DeviceId; 1]>;
+
 #[derive(Debug, Default, serde::Deserialize)]
 struct AccountQueryParams {
 	action: Option<String>,
@@ -74,7 +94,8 @@ struct AccountQueryParams {
 #[derive(Debug, Default, serde::Deserialize)]
 pub(crate) struct AccountCallbackParams {
 	action: Option<String>,
-	device_id: Option<String>,
+	#[serde(default, rename = "device_id")]
+	device_ids: DeviceIds,
 	#[serde(rename = "loginToken")]
 	login_token: Option<String>,
 	displayname: Option<String>,
@@ -84,11 +105,10 @@ pub(crate) async fn get_account_route(
 	State(services): State<crate::State>,
 	request: Request,
 ) -> impl IntoResponse {
-	let params: AccountQueryParams =
-		match serde_html_form::from_str(request.uri().query().unwrap_or_default()) {
-			| Err(e) => return account_error_response(&e.into()),
-			| Ok(params) => params,
-		};
+	let params: AccountQueryParams = match from_str(request.uri().query().unwrap_or_default()) {
+		| Err(e) => return account_error_response(&e.into()),
+		| Ok(params) => params,
+	};
 
 	let action = params
 		.action
@@ -164,23 +184,20 @@ pub(crate) async fn get_account_callback_route(
 	State(services): State<crate::State>,
 	request: Request,
 ) -> impl IntoResponse {
-	let params: AccountCallbackParams =
-		match serde_html_form::from_str(request.uri().query().unwrap_or_default()) {
-			| Err(e) => return account_error_response(&e.into()),
-			| Ok(params) => params,
-		};
+	let query = request.uri().query().unwrap_or_default();
 
-	match handle_account_callback(&services, Method::GET, params).await {
-		| Ok(html) => account_html_response(StatusCode::OK, html),
-		| Err(e) => account_error_response(&e),
-	}
+	account_callback_response(&services, Method::GET, query.as_bytes()).await
 }
 
 pub(crate) async fn post_account_callback_route(
 	State(services): State<crate::State>,
-	Form(body): Form<AccountCallbackParams>,
+	RawForm(body): RawForm,
 ) -> impl IntoResponse {
-	match handle_account_callback(&services, Method::POST, body).await {
+	account_callback_response(&services, Method::POST, &body).await
+}
+
+async fn account_callback_response(services: &Services, method: Method, form: &[u8]) -> Response {
+	match handle_account_callback(services, method, form).await {
 		| Ok(html) => account_html_response(StatusCode::OK, html),
 		| Err(e) => account_error_response(&e),
 	}
@@ -205,8 +222,12 @@ pub(crate) async fn account_css_route() -> impl IntoResponse {
 async fn handle_account_callback(
 	services: &Services,
 	method: Method,
-	params: AccountCallbackParams,
+	form: &[u8],
 ) -> Result<String> {
+	// Repeated keys parse, since a selection of sessions repeats `device_id`.
+	let params: AccountCallbackParams = from_bytes(form)
+		.map_err(|e| err!(Request(InvalidParam("Invalid account management parameters: {e}"))))?;
+
 	let login_token = params.login_token.as_deref();
 
 	let fallback_action = method
@@ -242,18 +263,12 @@ async fn handle_account_callback(
 	// MSC4191 stable action names dispatch through the prototype aliases.
 	let action = normalize_account_action(action);
 
-	// Read-only pages consume the token immediately. Pages with a POST confirmation
-	// step peek at the token so it can be embedded in the form and consumed only
-	// when the user confirms the action. This avoids creating a second short-lived
-	// token on every GET, preventing accumulation of orphaned tokens when the user
-	// navigates back. sessions_list: read-only, consumes the token immediately.
-	// session_view: read-only display, but has a "Sign out" link that POSTs later —
-	// use peek so the same token can be submitted in the confirmation form.
-	// session_end / profile: confirmation-form flow, use peek (consumed on POST).
-	let user_id = match action {
-		| "org.matrix.sessions_list" => consume_login_token(services, login_token).await?,
-		| _ if method == Method::POST => consume_login_token(services, login_token).await?,
-		| _ if method == Method::GET => peek_login_token(services, login_token).await?,
+	// A GET peeks so its page can embed the token, and a POST consumes it; a sign-out
+	// consumes only once its selection resolves, so a refused one keeps the token.
+	let user_id = match method {
+		| Method::POST if action != "org.matrix.session_end" =>
+			consume_login_token(services, login_token).await?,
+		| Method::GET | Method::POST => peek_login_token(services, login_token).await?,
 		| _ =>
 			return Err!(HttpJson(METHOD_NOT_ALLOWED, {
 				"errcode": "M_UNRECOGNIZED",
@@ -261,12 +276,14 @@ async fn handle_account_callback(
 			})),
 	};
 
+	let login_token = login_token.unwrap_or_default();
+
 	match action {
 		| "org.matrix.sessions_list" if method == Method::GET =>
-			sessions_list_html(services, &user_id).await,
+			sessions_list_html(services, &user_id, login_token).await,
 
 		| "org.matrix.profile" if method == Method::GET =>
-			profile_html(services, &user_id, login_token.unwrap_or_default()).await,
+			profile_html(services, &user_id, login_token).await,
 
 		| "org.matrix.profile" if method == Method::POST => {
 			// Sanitize: strip control chars, limit to 255 Unicode code points.
@@ -292,58 +309,36 @@ async fn handle_account_callback(
 
 			profile_saved_html(&user_id, displayname).await
 		},
-		| "org.matrix.session_view" if method == Method::GET =>
-			session_view_html(
-				services,
-				&user_id,
-				params.device_id.as_deref().unwrap_or_default(),
-				login_token.unwrap_or_default(),
-			)
-			.await,
 
 		| "org.matrix.session_end" if method == Method::POST =>
-			session_end_execute_html(
-				services,
-				&user_id,
-				params.device_id.as_deref().unwrap_or_default(),
-			)
-			.await,
+			session_end_execute_html(services, &user_id, &params.device_ids, login_token).await,
 
-		| "org.matrix.session_end" if method == Method::GET => {
-			// Authenticate first (peek), then show a POST confirmation form.
-			// Actual deletion happens only on POST to prevent CSRF via GET.
-			let device_id = params.device_id.clone().unwrap_or_default();
-			if device_id.is_empty() {
-				return Err!(Request(InvalidParam("device_id is required")));
-			}
+		// Deletion happens only on the confirming POST, so a GET cannot forge it.
+		| "org.matrix.session_end" if method == Method::GET =>
+			session_end_confirm_html(services, &user_id, &params.device_ids, login_token).await,
 
-			let device_id_owned: OwnedDeviceId = device_id.into();
-			if !services
-				.users
-				.device_exists(&user_id, &device_id_owned)
-				.await
-			{
-				return Err!(Request(NotFound("Session not found")));
-			}
-
-			session_end_confirm_html(
-				&user_id,
-				device_id_owned.as_str(),
-				login_token.unwrap_or_default(),
-			)
-			.await
-		},
 		| "org.matrix.account_deactivate" if method == Method::POST =>
 			account_deactivate_execute_html(services, &user_id).await,
 
 		| "org.matrix.account_deactivate" if method == Method::GET =>
-			account_deactivate_confirm_html(&user_id, login_token.unwrap_or_default()).await,
+			account_deactivate_confirm_html(&user_id, login_token).await,
 
 		| "org.matrix.cross_signing_reset" if method == Method::POST =>
 			cross_signing_reset_execute_html(services, &user_id).await,
 
 		| "org.matrix.cross_signing_reset" if method == Method::GET =>
-			cross_signing_reset_confirm_html(&user_id, login_token.unwrap_or_default()).await,
+			cross_signing_reset_confirm_html(&user_id, login_token).await,
+
+		| "org.matrix.session_view" if method == Method::GET => {
+			let device_id = params
+				.device_ids
+				.first()
+				.map(OwnedDeviceId::as_ref)
+				.map(DeviceId::as_str)
+				.unwrap_or_default();
+
+			session_view_html(services, &user_id, device_id, login_token).await
+		},
 
 		| _ => Err!(Request(InvalidParam("Unsupported account management action"))),
 	}
@@ -417,6 +412,65 @@ fn normalize_account_action(action: &str) -> &str {
 		| "org.matrix.device_delete" => "org.matrix.session_end",
 		| other => other,
 	}
+}
+
+/// Resolves a selection to the sessions that still exist.
+///
+/// The result is sorted and free of repeats. An empty selection is an invalid
+/// parameter, and a selection whose sessions are all gone is not found.
+async fn selected_sessions<'a>(
+	services: &Services,
+	user_id: &UserId,
+	device_ids: &'a [OwnedDeviceId],
+) -> Result<Sessions<'a>> {
+	let requested = device_ids
+		.iter()
+		.map(OwnedDeviceId::as_ref)
+		.filter(|device_id: &&DeviceId| device_id.as_str().is_empty().is_false());
+
+	if requested.clone().next().is_none() {
+		return Err!(Request(InvalidParam("Select at least one session")));
+	}
+
+	let sessions: Sessions<'a> = requested
+		.sorted_unstable()
+		.dedup()
+		.stream()
+		.wide_filter_map(async |device_id| {
+			services
+				.users
+				.device_exists(user_id, device_id)
+				.await
+				.then_some(device_id)
+		})
+		.collect()
+		.await;
+
+	if sessions.is_empty() {
+		return Err!(Request(NotFound("Session not found")));
+	}
+
+	Ok(sessions)
+}
+
+/// Renders an item per selected session from its escaped device ID.
+///
+/// Each page supplies the item's markup; the confirmation form's items also
+/// carry the ID in a hidden input.
+fn session_items(
+	sessions: &[&DeviceId],
+	item: impl Fn(&mut String, &str) -> fmt::Result,
+) -> String {
+	sessions
+		.iter()
+		.copied()
+		.map(DeviceId::as_str)
+		.map(html_escape)
+		.fold(String::new(), |mut out, escaped| {
+			item(&mut out, &escaped).ok();
+
+			out
+		})
 }
 
 fn ts_cell(ts_secs: u64) -> String {

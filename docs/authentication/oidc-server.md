@@ -374,8 +374,13 @@ for users authenticated through the OIDC server. From it a user can:
 - View their active OIDC sessions and see which client and identity provider
   each belongs to
 - Sort their sessions by name, device ID, IP address, or last activity
-- End individual sessions
+- End individual sessions, or select several and end them together
 - Edit their profile
+
+To end several sessions together, confirm your selection within
+`login_token_ttl` (two minutes by default) of signing in to the
+account-management page. If that time has passed, sign in again and select the
+sessions again.
 
 The page URL is advertised to clients as `account_management_uri` in the
 authorization server metadata (MSC4191).

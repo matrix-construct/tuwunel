@@ -6,6 +6,9 @@
 )]
 mod client;
 
+#[path = "oidc_completion/session_selection.rs"]
+mod session_selection;
+
 use std::{iter::once, net::TcpListener, time::Duration};
 
 use futures::{
@@ -24,7 +27,7 @@ use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{Config, Result, ruma::UserId};
 use tuwunel_service::{Services, oauth::server::AuthRequest, users::Register};
 
-use self::client::wait_until_ready;
+use self::{client::wait_until_ready, session_selection::session_selection};
 
 struct Case<'a> {
 	redirect: &'a str,
@@ -136,6 +139,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	concurrent_authorization_code_exchange_is_single_use(services, &client, base, &user).await?;
 	stale_refusal_burns_token(services, &client, base).await?;
 	account_state(services, &client, base, &user).await?;
+	session_selection(services, &client, base, &user).await?;
 
 	for (redirect, native, waived, automatic) in [
 		("https://trusted.example/callback?existing=a%26b", false, true, true),
