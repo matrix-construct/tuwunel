@@ -123,6 +123,11 @@ impl crate::Service for Service {
 /// rebuilds and explicit clears remove cached entries, but do not fence an
 /// in-flight lookup from republishing an older result. Deleting a room's
 /// membership indexes does not invalidate this cache.
+///
+/// A caller that may run alongside a re-registration must hold the appservice
+/// registry's read guard across the call, since the re-registration's clear
+/// relies on it; one holding a copied registration and no guard takes
+/// `appservice_in_room_uncached` instead.
 #[implement(Service)]
 #[tracing::instrument(level = "trace", skip_all)]
 pub async fn appservice_in_room(&self, room_id: &RoomId, appservice: &RegistrationInfo) -> bool {
@@ -138,11 +143,9 @@ pub async fn appservice_in_room(&self, room_id: &RoomId, appservice: &Registrati
 		return cached;
 	}
 
-	let in_room = self.is_joined(&appservice.sender, room_id).await
-		|| self
-			.room_members(room_id)
-			.ready_any(|user_id| appservice.is_user_match(user_id))
-			.await;
+	let in_room = self
+		.appservice_in_room_uncached(room_id, appservice)
+		.await;
 
 	self.appservice_in_room_cache
 		.write()
@@ -152,6 +155,25 @@ pub async fn appservice_in_room(&self, room_id: &RoomId, appservice: &Registrati
 		.insert(appservice.registration.id.clone(), in_room);
 
 	in_room
+}
+
+/// Tests whether an appservice participates in a room, bypassing the memo.
+///
+/// A registration participates when its sender or a namespace-matching user is
+/// joined, read from current membership. The memo is neither read nor filled,
+/// so the answer cannot be stale and the call needs no registry guard.
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+pub async fn appservice_in_room_uncached(
+	&self,
+	room_id: &RoomId,
+	appservice: &RegistrationInfo,
+) -> bool {
+	self.is_joined(&appservice.sender, room_id).await
+		|| self
+			.room_members(room_id)
+			.ready_any(|user_id| appservice.is_user_match(user_id))
+			.await
 }
 
 /// Returns the appservice membership cache's room count and capacity.
@@ -171,9 +193,9 @@ pub fn get_appservice_in_room_cache_usage(&self) -> (usize, usize) {
 
 /// Clears every memoized appservice membership decision.
 ///
-/// Persistent membership indexes are not changed. Later uncached lookups
-/// recompute and cache their answers from current joined membership, but a
-/// lookup already in flight can republish an older result after the clear.
+/// Persistent membership indexes are not changed. Later lookups that miss the
+/// memo recompute and cache their answers from current joined membership, but
+/// a lookup already in flight can republish an older result after the clear.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn clear_appservice_in_room_cache(&self) {

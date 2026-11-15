@@ -96,9 +96,10 @@ pub(crate) async fn joined_members_route(
 			.appservice_info
 			.as_ref()
 			.map_async(|appservice| {
+				// A copy taken outside the registry guard must bypass the memo.
 				services
 					.state_cache
-					.appservice_in_room(&body.room_id, appservice)
+					.appservice_in_room_uncached(&body.room_id, appservice)
 			})
 			.unwrap_or_default()
 			.await;

@@ -44,8 +44,9 @@ const BRIDGE: Bridge<'static> = Bridge {
 /// An appservice lists a room's joined members through one of its users.
 ///
 /// Its own sender user never joins the room. The request on the appservice
-/// token is refused while none of its namespaced users is joined, and is
-/// served once one is. An ordinary user outside the room stays refused.
+/// token is refused while none of its namespaced users is joined, served once
+/// one is, and refused again after that user leaves. An ordinary user outside
+/// the room stays refused.
 #[test]
 fn appservice_lists_joined_members_through_its_user() -> Result {
 	boot(
@@ -98,6 +99,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert_eq!(joined.len(), 2, "unexpected members: {members}");
 
 	expect_status(joined_members(&outsider, &room_id).await?, 403)?;
+	bot.act(&room_id, "leave").await?;
+	expect_status(joined_members(&bridge, &room_id).await?, 403)?;
 
 	Ok(())
 }
