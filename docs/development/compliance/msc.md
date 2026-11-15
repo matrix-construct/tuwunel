@@ -641,7 +641,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3593 | 🟥 ● | 0/0 | Safety Controls through a generic Administration API | none of the proposed /admin/* endpoints exist; tuwunel uses admin room |
 | MSC3571 | 🟥 ● | 0/0 | Aggregation pagination | no /aggregations endpoint; no aggregation pagination |
 | MSC3570 | 🟥 ◐ | 0/0 | Relation history visibility changes | no special history visibility for relations; new room version needed |
-| MSC3547 | 🟥 ● | 0/0 | Allow appservice bot user to read any rooms the appservice is part of | members.rs:77 TODO stands; an appservice must still masquerade or be joined |
+| MSC3547 | 🟥 ● | 0/0 | Allow appservice bot user to read any rooms the appservice is part of | Only /joined_members admits an AS; no versions flag, other 6 routes unchanged |
 | MSC3488 | 🟥 ◐ | 10/10 | m.location: Extending events with location data | location event types pass through; no m.tile_server in well-known |
 | MSC3480 | 🟥 ◐ | 10/20 | Make device names private | allow_device_name_federation config gates device name exposure |
 | MSC3469 | 🟥 ○ | 0/0 | Mandate HTTP Range on Content Repository Endpoints | depends on object_store / hyper response writer for ranges |

@@ -10,7 +10,10 @@ use ruma::{
 		room::member::{MembershipState, RoomMemberEventContent},
 	},
 };
-use tuwunel_core::{Err, Result, at, err, is_equal_to, is_not_equal_to, utils::stream::ReadyExt};
+use tuwunel_core::{
+	Err, Result, at, err, is_equal_to, is_not_equal_to,
+	utils::{future::OptionFutureExt, option::OptionExt, stream::ReadyExt},
+};
 use tuwunel_matrix::{Event, PduCount};
 
 use crate::Ruma;
@@ -78,17 +81,29 @@ pub(crate) async fn get_member_events_route(
 ///
 /// Lists all members of a room.
 ///
-/// - The sender user must be in the room
-/// - TODO: An appservice just needs a puppet joined
+/// - The sender user must be in the room, or the room must be world-readable
+/// - An appservice needs its sender or one of its namespaced users joined
 pub(crate) async fn joined_members_route(
 	State(services): State<crate::State>,
 	body: Ruma<joined_members::v3::Request>,
 ) -> Result<joined_members::v3::Response> {
-	if !services
+	// Sequenced, not raced: a member's point get skips the appservice lookup.
+	let permitted = services
 		.state_accessor
 		.user_can_peek(body.sender_user(), &body.room_id)
 		.await
-	{
+		|| body
+			.appservice_info
+			.as_ref()
+			.map_async(|appservice| {
+				services
+					.state_cache
+					.appservice_in_room(&body.room_id, appservice)
+			})
+			.unwrap_or_default()
+			.await;
+
+	if !permitted {
 		return Err!(Request(Forbidden("You aren't a member of the room.")));
 	}
 
