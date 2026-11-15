@@ -80,14 +80,17 @@ static PAGE_HTML: &str = const_format!(
 			Signed in as <strong>{{uid}}</strong>. {{dlen}} active session(s).
 		</p>
 		<table>
-			<tr>
-				<th>Name</th>
-				<th>Device ID</th>
-				<th>Last seen IP</th>
-				<th>Last seen</th>
-				<th class="center">Actions</th>
-			</tr>
-			{{rows}}
+			<thead>
+				<tr>
+					<th data-sort="text">Name</th>
+					<th data-sort="text">Device ID</th>
+					<th data-sort="text">Last seen IP</th>
+					<th data-sort="time" aria-sort="descending">Last seen</th>
+					<th class="center">Actions</th>
+				</tr>
+			</thead>
+			<tbody>{{rows}}
+			</tbody>
 		</table>
 		<div class="nav">
 			<a href="/_tuwunel/oidc/account?action=org.matrix.profile">View Profile</a>

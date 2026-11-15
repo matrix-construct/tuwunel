@@ -135,6 +135,27 @@ button.danger: hover {
 	margin-top: 1.2em
 }
 
+button.sort {
+	padding: 0;
+	background: none;
+	color: inherit;
+	font: inherit;
+	font-weight: bold
+}
+
+button.sort:hover {
+	background: none;
+	text-decoration: underline
+}
+
+th[aria-sort=ascending] button.sort::after {
+	content: " \25B2"
+}
+
+th[aria-sort=descending] button.sort::after {
+	content: " \25BC"
+}
+
 /* Native login and registration */
 body.auth-page,
 .auth-page * {

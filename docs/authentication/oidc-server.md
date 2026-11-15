@@ -373,6 +373,7 @@ for users authenticated through the OIDC server. From it a user can:
 
 - View their active OIDC sessions and see which client and identity provider
   each belongs to
+- Sort their sessions by name, device ID, IP address, or last activity
 - End individual sessions
 - Edit their profile
 
