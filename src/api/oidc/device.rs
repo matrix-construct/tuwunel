@@ -8,10 +8,12 @@ use axum::{
 	extract::{Form, Request, State},
 	response::{Html, IntoResponse, Redirect, Response},
 };
+use axum_extra::extract::cookie::CookieJar;
 use http::{
 	StatusCode,
 	header::{CACHE_CONTROL, PRAGMA, REFERRER_POLICY},
 };
+use ruma::UserId;
 use serde::Deserialize;
 use serde_json::json;
 use tuwunel_core::{Err, Error, Result, err};
@@ -20,12 +22,13 @@ use tuwunel_service::{
 	oauth::server::{DEVICE_GRANT_INTERVAL_SECS, DEVICE_GRANT_LIFETIME, format_user_code},
 	users::LoginProviderId,
 };
-use url::Url;
+use url::{ParseError, Url};
 
 use self::{consent::consent_html, entry::entry_html, error::error_html, result::result_html};
 use super::{
-	consume_login_token_with_provider, oauth_error, peek_login_token_with_provider,
-	require_account_usable, sso_redirect_url, url_encode,
+	browser_session::{removal_cookie, session_token, session_user},
+	consume_login_token_with_provider, mint_login_token, oauth_error,
+	peek_login_token_with_provider, require_account_usable, sso_redirect_url, url_encode,
 };
 use crate::ClientIp;
 
@@ -123,11 +126,15 @@ fn device_authorization_error(e: Error) -> Response {
 	oauth_error(StatusCode::BAD_REQUEST, "invalid_request", &e.sanitized_message())
 }
 
-/// RFC 8628 §3.3: the `verification_uri`. Shows a user-code entry form, or
-/// sends the user through native or SSO authentication before consent.
+/// RFC 8628 §3.3: the `verification_uri`.
+///
+/// Shows a user-code entry form, or sends the user through native or SSO
+/// authentication before consent; a browser already signed in goes straight to
+/// consent.
 pub(crate) async fn get_device_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
+	cookies: CookieJar,
 	request: Request,
 ) -> impl IntoResponse {
 	if services
@@ -147,19 +154,29 @@ pub(crate) async fn get_device_route(
 			| Ok(params) => params,
 		};
 
-	match handle_device_verify(&services, params.user_code.as_deref()) {
+	let user_code = params.user_code.as_deref();
+
+	match handle_device_verify(&services, user_code, session_token(&cookies)).await {
 		| Ok(response) => response,
 		| Err(e) => device_error_response(&e),
 	}
 }
 
-fn handle_device_verify(services: &Services, user_code: Option<&str>) -> Result<Response> {
+async fn handle_device_verify(
+	services: &Services,
+	user_code: Option<&str>,
+	session: Option<&str>,
+) -> Result<Response> {
 	let Some(user_code) = user_code.filter(|code| !code.is_empty()) else {
 		return Ok(device_html_response(StatusCode::OK, entry_html(None)));
 	};
 
 	// Validating the code before authentication exposes the RFC 8628 §5.1
 	// brute-force oracle, so defer it to the authenticated callback.
+	if let Some(user_id) = session_user(services, session).await {
+		return device_session_redirect(services, user_code, user_id);
+	}
+
 	match services.config.authentication.oidc.native_auth {
 		| true => device_native_redirect(services, user_code),
 		| false => {
@@ -170,19 +187,56 @@ fn handle_device_verify(services: &Services, user_code: Option<&str>) -> Result<
 	}
 }
 
+/// Sends a signed-in browser to consent as a password sign-in would.
+///
+/// The fresh login token stands in for the one the password page would mint.
+/// The code is not looked at here; the callback checks it once the user is
+/// known.
+fn device_session_redirect(
+	services: &Services,
+	user_code: &str,
+	user_id: &UserId,
+) -> Result<Response> {
+	let issuer = services.oauth.get_server()?.issuer_url()?;
+	let base = issuer.trim_end_matches('/');
+	let login_token = mint_login_token(services, user_id);
+	let callback_url = device_callback_url(base, user_code, &login_token)
+		.map_err(|_| err!(Request(InvalidParam("Failed to build device callback URL"))))?;
+
+	Ok(device_redirect_response(Redirect::to(callback_url.as_str())))
+}
+
+/// The consent page for a user code, authenticated by a login token.
+///
+/// The password page and a signed-in browser both hand the user over here.
+pub(super) fn device_callback_url(
+	base: &str,
+	user_code: &str,
+	login_token: &str,
+) -> Result<Url, ParseError> {
+	Url::parse_with_params(&format!("{base}/_tuwunel/oidc/device_callback"), [
+		("user_code", user_code),
+		("loginToken", login_token),
+	])
+}
+
 fn device_native_redirect(services: &Services, user_code: &str) -> Result<Response> {
+	let native_url = device_native_url(services, user_code)?;
+
+	Ok(device_redirect_response(Redirect::temporary(native_url.as_str())))
+}
+
+fn device_native_url(services: &Services, user_code: &str) -> Result<Url> {
 	let issuer = services.oauth.get_server()?.issuer_url()?;
 	let base = issuer.trim_end_matches('/');
 
-	let native_url = Url::parse(&format!("{base}/_tuwunel/oidc/native"))
+	Url::parse(&format!("{base}/_tuwunel/oidc/native"))
 		.map(|mut url| {
 			url.query_pairs_mut()
 				.append_pair("user_code", user_code);
 			url
 		})
-		.map_err(|_| err!(Request(InvalidParam("Failed to build native login URL"))))?;
-
-	Ok(device_redirect_response(Redirect::temporary(native_url.as_str())))
+		.map_err(|_| err!(Request(InvalidParam("Failed to build native login URL"))))
 }
 
 pub(super) fn device_sso_redirect(
@@ -279,12 +333,14 @@ async fn handle_device_callback_get(
 		&grant.user_code,
 		&grant.scope,
 		token.unwrap_or_default(),
+		services.config.authentication.oidc.native_auth,
 	))
 }
 
 pub(crate) async fn post_device_callback_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
+	cookies: CookieJar,
 	Form(body): Form<DeviceCallbackParams>,
 ) -> impl IntoResponse {
 	if services
@@ -298,8 +354,8 @@ pub(crate) async fn post_device_callback_route(
 		);
 	}
 
-	match handle_device_callback_post(&services, body).await {
-		| Ok(html) => device_html_response(StatusCode::OK, html),
+	match handle_device_callback_post(&services, body, session_token(&cookies)).await {
+		| Ok(response) => response,
 		| Err(e) => device_error_response(&e),
 	}
 }
@@ -307,7 +363,8 @@ pub(crate) async fn post_device_callback_route(
 async fn handle_device_callback_post(
 	services: &Services,
 	body: DeviceCallbackParams,
-) -> Result<String> {
+	session: Option<&str>,
+) -> Result<Response> {
 	let user_code = body.user_code.as_deref().unwrap_or_default();
 	let action = body.action.as_deref().unwrap_or_default();
 	let login = consume_login_token_with_provider(services, body.login_token.as_deref()).await?;
@@ -323,10 +380,12 @@ async fn handle_device_callback_post(
 				.approve_device_grant(user_code, user_id, idp_id)
 				.await?;
 
-			Ok(result_html(
+			let html = result_html(
 				"Device approved",
 				"You have signed in. Return to your device; it will continue automatically.",
-			))
+			);
+
+			Ok(device_html_response(StatusCode::OK, html))
 		},
 
 		| "deny" => {
@@ -334,10 +393,29 @@ async fn handle_device_callback_post(
 				.deny_device_grant(user_code, user_id, idp_id)
 				.await?;
 
-			Ok(result_html(
+			let html = result_html(
 				"Sign-in denied",
 				"The sign-in request was denied. You can close this page.",
-			))
+			);
+
+			Ok(device_html_response(StatusCode::OK, html))
+		},
+
+		| "switch" => {
+			server
+				.release_device_grant(user_code, &user_id, idp_id.as_deref())
+				.await?;
+
+			if let Some(session) = session {
+				services
+					.users
+					.end_browser_session(session, &user_id);
+			}
+
+			let native_url = device_native_url(services, user_code)?;
+			let redirect = device_redirect_response(Redirect::to(native_url.as_str()));
+
+			Ok((removal_cookie(), redirect).into_response())
 		},
 
 		| _ => Err!(Request(InvalidParam("Unknown action"))),

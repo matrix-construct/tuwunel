@@ -786,6 +786,21 @@
 #
 #native_auth = false
 
+# Sets how long a browser stays signed in after a password sign-in on the
+# built-in login page, in seconds.
+#
+# While it lasts, approving a new device from that browser, as in QR code
+# login, goes straight to the approval page without asking for the
+# password again. The lifetime counts from the sign-in and is not extended
+# by use; a lowered value applies to existing sign-ins at once, a value
+# above 7776000 (90 days) counts as 90 days, and 0 turns browser sign-in
+# off. Changing the password, deactivating the account or signing out of
+# all devices ends it early.
+#
+# reloadable: yes
+#
+#browser_session_ttl = 2592000
+
 # Requires OIDC clients to request an
 # [MSC2967](https://github.com/matrix-org/matrix-spec-proposals/pull/2967)
 # device scope.

@@ -756,6 +756,11 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
+		name: "useridbrowsersession_createdat",
+		ttl: 60 * 60 * 24 * 90, // the browser_session_ttl cap; reads also check expiry
+		..descriptor::RANDOM_SMALL_CACHE
+	},
+	Descriptor {
 		name: "useridcount_notification",
 		limit_size: 1024 * 1024 * 256,
 		..descriptor::RANDOM_SMALL_CACHE

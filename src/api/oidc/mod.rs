@@ -2,6 +2,7 @@ pub(crate) mod account;
 pub(crate) mod auth_issuer;
 pub(crate) mod auth_metadata;
 pub(crate) mod authorize;
+mod browser_session;
 pub(crate) mod complete;
 pub(crate) mod device;
 pub(crate) mod jwks;
@@ -23,7 +24,7 @@ use ruma::{OwnedUserId, UserId};
 use serde_json::json;
 use tuwunel_api::router::{ClientIp, RateLimitIp, State};
 pub(crate) use tuwunel_core::utils::url::{redirect_allowlisted, url_encode};
-use tuwunel_core::{Result, err, mod_ctor, mod_dtor};
+use tuwunel_core::{Result, err, mod_ctor, mod_dtor, utils::random_string};
 use tuwunel_service::{Services, users::LoginToken};
 use url::Url;
 
@@ -50,6 +51,8 @@ pub(crate) use self::{
 
 const OIDC_REQ_ID_LENGTH: usize = 32;
 
+const LOGIN_TOKEN_LENGTH: usize = 32;
+
 fn oauth_error(status: StatusCode, error: &str, description: &str) -> Response<Body> {
 	let body = json!({
 		"error": error,
@@ -63,6 +66,16 @@ fn oauth_error(status: StatusCode, error: &str, description: &str) -> Response<B
 async fn require_account_usable(services: &Services, user_id: &UserId) -> Result {
 	services.users.deactivated_check(user_id).await?;
 	services.users.locked_check(user_id).await
+}
+
+/// Mints the single-use login token our own pages hand to their callbacks.
+///
+/// It carries no provider, as for a user authenticated by password.
+fn mint_login_token(services: &Services, user_id: &UserId) -> String {
+	let token = random_string(LOGIN_TOKEN_LENGTH);
+	let _expires_in = services.users.create_login_token(user_id, &token);
+
+	token
 }
 
 async fn consume_login_token(services: &Services, token: Option<&str>) -> Result<OwnedUserId> {

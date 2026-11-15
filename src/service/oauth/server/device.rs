@@ -276,6 +276,38 @@ pub async fn deny_device_grant(
 	Ok(())
 }
 
+/// Releases a pending grant from the user and provider its consent page was
+/// first shown to, so another account can verify it.
+///
+/// Only the bound party can release it: a caller the grant is not bound to
+/// changes nothing. The grant keeps its attempt count.
+#[implement(super::Server)]
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn release_device_grant(
+	&self,
+	user_code: &str,
+	user_id: &UserId,
+	idp_id: Option<&str>,
+) -> Result {
+	let device_code = self.resolve_device_code(user_code).await?;
+	let _lock = self.device_locks.lock(&device_code).await;
+	let grant = self.get_device_grant(&device_code).await?;
+
+	self.ensure_pending_device_grant(&grant)?;
+
+	if !device_authentication_matches(&grant, user_id, idp_id) {
+		return Ok(());
+	}
+
+	let grant = DeviceGrant { authentication: None, ..grant };
+
+	self.db
+		.oidcdevicecode_devicegrant
+		.raw_put(&*grant.device_code, Cbor(&grant));
+
+	Ok(())
+}
+
 /// Poll a device grant by its `device_code` (RFC 8628 §3.4). A terminal outcome
 /// consumes the grant; a pending grant is left in place for the next poll.
 #[implement(super::Server)]

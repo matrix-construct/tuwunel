@@ -36,6 +36,7 @@ pub(crate) async fn logout_route(
 ///   last seen ts)
 /// - Forgets all to-device events
 /// - Triggers device list updates
+/// - Signs every browser out of the built-in login page
 ///
 /// Note: This is equivalent to calling [`GET
 /// /_matrix/client/r0/logout`](fn.logout_route.html) from each device of this
@@ -46,9 +47,18 @@ pub(crate) async fn logout_all_route(
 	ClientIp(client): ClientIp,
 	body: Ruma<logout_all::v3::Request>,
 ) -> Result<logout_all::v3::Response> {
+	let sender_user = body.sender_user();
+
+	// A browser left signed in could approve a new device after this. Fallible,
+	// so before the devices go: a failure leaves the caller's token to retry with.
 	services
 		.users
-		.remove_devices(body.sender_user(), None)
+		.end_browser_sessions(sender_user)
+		.await?;
+
+	services
+		.users
+		.remove_devices(sender_user, None)
 		.await;
 
 	Ok(logout_all::v3::Response::new())

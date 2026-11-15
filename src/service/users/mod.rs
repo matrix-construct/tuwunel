@@ -1,3 +1,4 @@
+mod browser_session;
 mod create;
 mod dehydrated_device;
 pub mod device;
@@ -38,6 +39,7 @@ pub type LoginProviderId = SmallString<[u8; 32]>;
 type LoginTokenId = SmallString<[u8; 48]>;
 
 pub use self::{
+	browser_session::BrowserSession,
 	dehydrated_device::DehydratedDevice,
 	invite_filter::InviteFilter,
 	keys::{DeviceListChange, DeviceListRecord, parse_master_key},
@@ -115,6 +117,7 @@ struct Data {
 	userid_selfsigningkeyid: Arc<Map>,
 	userid_suspended: Arc<Map>,
 	userid_usersigningkeyid: Arc<Map>,
+	useridbrowsersession_createdat: Arc<Map>,
 }
 
 impl crate::Service for Service {
@@ -156,6 +159,7 @@ impl crate::Service for Service {
 				userid_selfsigningkeyid: args.db["userid_selfsigningkeyid"].clone(),
 				userid_suspended: args.db["userid_suspended"].clone(),
 				userid_usersigningkeyid: args.db["userid_usersigningkeyid"].clone(),
+				useridbrowsersession_createdat: args.db["useridbrowsersession_createdat"].clone(),
 			},
 		}))
 	}
@@ -264,6 +268,8 @@ impl Service {
 			)));
 		}
 
+		// The one step here that can fail, so before anything irreversible.
+		self.end_browser_sessions(user_id).await?;
 		self.remove_devices(user_id, None).await;
 
 		// Set the password to "" to indicate a deactivated account. Hashes will never
@@ -533,7 +539,10 @@ impl Service {
 	/// A real password is hashed at the configured Argon2id cost and marks the
 	/// account as password-origin. `None` stores the disabled marker and the
 	/// sentinel is stored verbatim; neither is hashed. Changing the password of
-	/// an account whose origin is neither password nor SSO is rejected.
+	/// an account whose origin is neither password nor SSO is rejected. Setting
+	/// a password or the sentinel first ends the user's browser sessions, and
+	/// failing to end them fails the call; disabling leaves them to be refused
+	/// at use.
 	pub async fn set_password(&self, user_id: &UserId, password: Option<&str>) -> Result {
 		let _password_guard = self.changing_password.lock(user_id).await;
 
@@ -790,6 +799,12 @@ async fn set_password_locked(&self, user_id: &UserId, password: Option<&str>) ->
 		if !allowed_origins.iter().any(is_equal_to!(&origin)) {
 			return Err!(Request(InvalidParam("Cannot change password of an {origin:?} user.")));
 		}
+	}
+
+	// Before the write, so a failure leaves the old password for a retry. Disabling
+	// needs none: a deactivated account's sessions are refused at use.
+	if password.is_some() {
+		self.end_browser_sessions(user_id).await?;
 	}
 
 	match password {

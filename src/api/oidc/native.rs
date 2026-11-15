@@ -2,8 +2,9 @@ use std::{fmt::Write, net::IpAddr};
 
 use axum::{
 	extract::{Form, Request, State},
-	response::{Redirect, Response},
+	response::{IntoResponse, Redirect, Response},
 };
+use axum_extra::extract::cookie::CookieJar;
 use const_str::format as const_format;
 use http::StatusCode;
 use itertools::Either::{Left, Right};
@@ -16,7 +17,7 @@ use tuwunel_core::{
 	config::IdentityProvider,
 	err,
 	smallstr::SmallString,
-	utils::{self, BoolExt, hash::verify_password, html::escape as html_escape},
+	utils::{BoolExt, hash::verify_password, html::escape as html_escape},
 };
 use tuwunel_service::{Services, users::Register};
 use url::Url;
@@ -27,8 +28,9 @@ use super::{
 		account_sso_redirect, validate_account_action,
 	},
 	authorization_sso_url,
-	device::device_sso_redirect,
-	require_account_usable, url_encode,
+	browser_session::{session_cookie, session_token},
+	device::{device_callback_url, device_sso_redirect},
+	mint_login_token, require_account_usable, url_encode,
 };
 use crate::{ClientIp, RateLimitIp};
 
@@ -38,8 +40,6 @@ type AccountAction = SmallString<[u8; 32]>;
 type DeviceId = SmallString<[u8; 24]>;
 type IdpId = SmallString<[u8; 32]>;
 type ProviderChoice<'a> = (&'a str, &'a str);
-
-const LOGIN_TOKEN_LENGTH: usize = 32;
 
 #[derive(Debug, Default, Deserialize)]
 struct NativeQuery {
@@ -210,9 +210,10 @@ pub(crate) async fn native_submit_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
 	address: LoginAddress,
+	cookies: CookieJar,
 	Form(body): Form<NativeSubmit>,
 ) -> Response {
-	match native_submit(&services, client, address, &body).await {
+	match native_submit(&services, client, address, &body, session_token(&cookies)).await {
 		| Ok(response) => response,
 		| Err(e) => render_submit_error(&services, &body, &e).await,
 	}
@@ -223,6 +224,7 @@ async fn native_submit(
 	client: IpAddr,
 	address: LoginAddress,
 	body: &NativeSubmit,
+	replaces: Option<&str>,
 ) -> Result<Response> {
 	require_native(services)?;
 	// Always-on anti-brute-force floor; the oidc_rc_* throttle below is opt-in.
@@ -242,14 +244,15 @@ async fn native_submit(
 		| _ => verify_credentials(services, &body.username, &body.password, address).await?,
 	};
 
-	let token = utils::random_string(LOGIN_TOKEN_LENGTH);
-	let _expires_in = services
-		.users
-		.create_login_token(&user_id, &token);
-
+	let token = mint_login_token(services, &user_id);
 	let redirect = complete_redirect(services, context, &token)?;
+	let session = services
+		.users
+		.create_browser_session(&user_id, replaces);
 
-	Ok(account_redirect_response(redirect))
+	let response = account_redirect_response(redirect);
+
+	Ok((session.map(session_cookie), response).into_response())
 }
 
 /// Re-render the page a failed submission came from, carrying its error.
@@ -531,11 +534,7 @@ fn complete_redirect(services: &Services, flow: Flow<'_>, login_token: &str) -> 
 	let base = issuer.trim_end_matches('/');
 
 	let url = match flow {
-		| Flow::Device(user_code) =>
-			Url::parse_with_params(&format!("{base}/_tuwunel/oidc/device_callback"), [
-				("user_code", user_code),
-				("loginToken", login_token),
-			]),
+		| Flow::Device(user_code) => device_callback_url(base, user_code, login_token),
 		| Flow::Authorization(req_id) =>
 			Url::parse_with_params(&format!("{base}/_tuwunel/oidc/_complete"), [
 				("oidc_req_id", req_id),

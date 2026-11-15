@@ -357,6 +357,22 @@ pub struct Oidc {
 	#[serde(default)]
 	pub native_auth: bool,
 
+	/// Sets how long a browser stays signed in after a password sign-in on the
+	/// built-in login page, in seconds.
+	///
+	/// While it lasts, approving a new device from that browser, as in QR code
+	/// login, goes straight to the approval page without asking for the
+	/// password again. The lifetime counts from the sign-in and is not extended
+	/// by use; a lowered value applies to existing sign-ins at once, a value
+	/// above 7776000 (90 days) counts as 90 days, and 0 turns browser sign-in
+	/// off. Changing the password, deactivating the account or signing out of
+	/// all devices ends it early.
+	///
+	/// reloadable: yes
+	/// default: 2592000
+	#[serde(default = "default_browser_session_ttl")]
+	pub browser_session_ttl: u64,
+
 	/// Requires OIDC clients to request an
 	/// [MSC2967](https://github.com/matrix-org/matrix-spec-proposals/pull/2967)
 	/// device scope.
@@ -652,6 +668,7 @@ impl Default for Oidc {
 	fn default() -> Self {
 		Self {
 			native_auth: Default::default(),
+			browser_session_ttl: default_browser_session_ttl(),
 			require_device_scope: Default::default(),
 			require_pkce: true_fn(),
 			strict_scope: Default::default(),
@@ -680,6 +697,8 @@ impl Default for RefreshToken {
 fn default_openid_token_ttl() -> u64 { 60 * 60 }
 
 fn default_access_token_ttl() -> u64 { 604_800 }
+
+fn default_browser_session_ttl() -> u64 { 60 * 60 * 24 * 30 }
 
 fn default_m_cost() -> u32 { 19 * 1024 }
 

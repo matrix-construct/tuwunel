@@ -45,6 +45,29 @@ lazily after their lifetime expires. Creating a session above the configured
 count evicts the oldest session. The MSC4388 request limiter is separate from
 OIDC throttling.
 
+## Approving from a signed-in browser
+
+Skipping the password applies to accounts that sign in with a password on this
+server. With an identity provider, the provider's own sign-in session decides
+whether you type anything.
+
+When you sign in with a password on the built-in login page, your browser stays
+signed in for `authentication.oidc.browser_session_ttl` seconds, 30 days by
+default. If you open a new device's approval page in that browser during this
+time, you skip the password step. You still need to approve the request.
+
+The lifetime counts from the password sign-in and is not extended by use.
+Changing your password, deactivating your account or signing out of all devices
+ends the browser session early.
+
+To approve with a different account, select "Use another account" on the
+approval page. This signs the browser out and returns you to the login page.
+
+To turn off browser sign-in, set `authentication.oidc.browser_session_ttl` to
+`0` in your Tuwunel configuration file and reload the configuration with
+`!admin server reload-config` in the admin room. Browsers already signed in
+then go back to the password page.
+
 ## Reverse proxies
 
 Do not cache responses under either unstable rendezvous namespace:

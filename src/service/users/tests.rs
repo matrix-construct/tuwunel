@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, iter::once, sync::Arc};
+use std::{collections::BTreeMap, iter::once, sync::Arc, time::Duration};
 
 use futures::{StreamExt, TryStreamExt, future::join, pin_mut, poll};
 use ruma::{
@@ -9,8 +9,8 @@ use ruma::{
 	user_id,
 };
 use serde_json::{Value, from_value, json};
-use tokio::sync::Notify;
-use tuwunel_core::{Result, config::Figment, utils::to_canonical_object};
+use tokio::{sync::Notify, time::sleep};
+use tuwunel_core::{Config, Result, config::Figment, utils::to_canonical_object};
 use tuwunel_database::{Cbor, Deserialized, Json, Map, serialize_key};
 
 use super::{PASSWORD_SENTINEL, Service, device::DeviceLock};
@@ -619,6 +619,128 @@ fn restore(map: &Map, rows: &[Row]) {
 	for (key, val) in rows {
 		map.insert(key, val);
 	}
+}
+
+#[tokio::test]
+async fn browser_session_lasts_until_ended() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let users = &fixture.services.users;
+	let owner = user_id!("@session-owner:localhost");
+	let other = user_id!("@session-other:localhost");
+	let session = users
+		.create_browser_session(owner, None)
+		.expect("sessions are on by default");
+
+	assert_eq!(session.lifetime.as_secs(), 60 * 60 * 24 * 30);
+	assert_eq!(users.find_browser_session(&session.token).await, Some(owner));
+
+	let forged = session
+		.token
+		.replace(owner.as_str(), other.as_str());
+
+	let unknown = format!("{}.{owner}", "x".repeat(32));
+
+	for token in ["", "garbled", "short.@session-owner:localhost", &forged, &unknown] {
+		assert_eq!(users.find_browser_session(token).await, None, "{token}");
+	}
+
+	users.end_browser_session(&session.token, other);
+	assert_eq!(users.find_browser_session(&session.token).await, Some(owner));
+
+	let replacement = users
+		.create_browser_session(other, Some(&session.token))
+		.expect("replacement session");
+
+	let replaced = users.find_browser_session(&session.token).await;
+	let found = users
+		.find_browser_session(&replacement.token)
+		.await;
+
+	assert_eq!((replaced, found), (None, Some(other)));
+
+	users.end_browser_session(&replacement.token, other);
+
+	let ended = users
+		.find_browser_session(&replacement.token)
+		.await;
+
+	assert_eq!(ended, None);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn ending_sessions_spares_a_longer_user_id() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let users = &fixture.services.users;
+	let short = user_id!("@session:localhost");
+	let long = user_id!("@session:localhost.example");
+	let create = |user_id| {
+		users
+			.create_browser_session(user_id, None)
+			.expect("sessions are on by default")
+	};
+
+	let (first, second, kept) = (create(short), create(short), create(long));
+
+	users.end_browser_sessions(short).await?;
+
+	assert_eq!(users.find_browser_session(&first.token).await, None);
+	assert_eq!(users.find_browser_session(&second.token).await, None);
+	assert_eq!(users.find_browser_session(&kept.token).await, Some(long));
+
+	users
+		.set_password(long, Some(NEW_PASSWORD))
+		.await?;
+
+	assert_eq!(users.find_browser_session(&kept.token).await, None);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn browser_session_expires_and_turns_off() -> Result {
+	let config = Figment::new().merge(("authentication.oidc.browser_session_ttl", 1));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let users = &fixture.services.users;
+	let owner = user_id!("@session-expiry:localhost");
+	let session = users
+		.create_browser_session(owner, None)
+		.expect("a one second session");
+
+	assert_eq!(users.find_browser_session(&session.token).await, Some(owner));
+
+	sleep(Duration::from_millis(1100)).await;
+	assert_eq!(users.find_browser_session(&session.token).await, None);
+
+	let config = Config::clone(&fixture.services.server.config);
+
+	fixture
+		.services
+		.config
+		.replace(without_sessions(config))?;
+
+	assert!(
+		users
+			.create_browser_session(owner, None)
+			.is_none()
+	);
+
+	Ok(())
+}
+
+fn without_sessions(mut config: Config) -> Config {
+	config.authentication.oidc.browser_session_ttl = 0;
+	config
 }
 
 fn key_pair(version: &str) -> Ed25519KeyPair {

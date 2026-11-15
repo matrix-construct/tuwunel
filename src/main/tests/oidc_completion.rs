@@ -6,6 +6,9 @@
 )]
 mod client;
 
+#[path = "oidc_completion/browser_session.rs"]
+mod browser_session;
+
 #[path = "oidc_completion/session_selection.rs"]
 mod session_selection;
 
@@ -27,7 +30,10 @@ use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{Config, Result, ruma::UserId};
 use tuwunel_service::{Services, oauth::server::AuthRequest, users::Register};
 
-use self::{client::wait_until_ready, session_selection::session_selection};
+use self::{
+	browser_session::browser_session, client::wait_until_ready,
+	session_selection::session_selection,
+};
 
 struct Case<'a> {
 	redirect: &'a str,
@@ -140,6 +146,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	stale_refusal_burns_token(services, &client, base).await?;
 	account_state(services, &client, base, &user).await?;
 	session_selection(services, &client, base, &user).await?;
+	browser_session(services, base, &user).await?;
 
 	for (redirect, native, waived, automatic) in [
 		("https://trusted.example/callback?existing=a%26b", false, true, true),

@@ -161,10 +161,14 @@ constrained device), Tuwunel supports the device grant. The flow:
    user code, an `expires_in`, and a polling `interval`.
 2. The device shows the user the `user_code` and asks them to visit the
    verification URI on another device (phone or laptop).
-3. The user opens the page, enters the code (which is then verified against the
-   upstream identity provider as in any other login), and approves the request
+3. The user opens the page and enters the code, unless the link already
+   includes it. With `native_auth` enabled, they sign in on the built-in login
+   page. Otherwise, they sign in through the identity provider. A browser
+   already signed in to the built-in login page skips the password (see
+   [QR code login](qr-login.md#approving-from-a-signed-in-browser)).
+4. Tuwunel checks the code after sign-in. The user then approves the request
    on the consent page.
-4. Meanwhile the device polls `POST /_tuwunel/oidc/token` with
+5. Meanwhile the device polls `POST /_tuwunel/oidc/token` with
    `grant_type=urn:ietf:params:oauth:grant-type:device_code` and its
    `device_code`. Until the user approves, the token endpoint answers
    `authorization_pending`; once approved it returns the tokens.
