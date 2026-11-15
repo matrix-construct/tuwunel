@@ -178,7 +178,7 @@ impl AuthDispatch for AppserviceToken {
 			| Token::Invalid => unknown_token(),
 			| Token::Expired => expired_token(),
 			| Token::User(_) =>
-				Err!(Request(Unauthorized("Appservice tokens must be used on this endpoint."))),
+				Err!(Request(Forbidden("Appservice tokens must be used on this endpoint."))),
 			| Token::Appservice(info) => Ok(Auth {
 				appservice_info: Some(*info),
 				..Auth::default()
