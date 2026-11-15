@@ -97,6 +97,12 @@ pub fn is_loopback(url: &Url) -> bool {
 	}
 }
 
+/// Drops one trailing slash, if present.
+///
+/// Only one goes, so `a//` becomes `a/`.
+#[must_use]
+pub fn strip_trailing_slash(value: &str) -> &str { value.strip_suffix('/').unwrap_or(value) }
+
 /// Formats a request URI without exposing sensitive components.
 ///
 /// Query values are always replaced. A matched route template can replace
@@ -134,6 +140,13 @@ impl Display for SanitizedUri<'_> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn one_trailing_slash_is_stripped() {
+		for (value, expected) in [("a", "a"), ("a/", "a"), ("a//", "a/"), ("/", ""), ("", "")] {
+			assert_eq!(strip_trailing_slash(value), expected, "{value}");
+		}
+	}
 
 	#[test]
 	fn redacts_query() {

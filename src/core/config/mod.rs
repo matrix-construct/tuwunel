@@ -2521,6 +2521,31 @@ pub struct AppService {
 	/// default: []
 	#[serde(default)]
 	pub scopes: Vec<String>,
+
+	/// The path prefix the application service claims for proxied requests,
+	/// as part of MSC4512.
+	///
+	/// The registration-file key is `io.element.msc4512.proxy_prefix`; this
+	/// inline-config key is `proxy_prefix`. Authenticated requests under
+	/// `/_matrix/client/<version>/<prefix>` and
+	/// `/_matrix/federation/<version>/<prefix>` are forwarded to `proxy_url`,
+	/// and the appservice may send federation requests under the prefix
+	/// through the MSC4512 `fed_proxy` endpoint. The one allowed prefix is
+	/// `rtc/livekit`. Give it together with `proxy_url`; an invalid claim, or
+	/// one another appservice holds, is ignored with a warning at startup.
+	///
+	/// example: "rtc/livekit"
+	pub proxy_prefix: Option<String>,
+
+	/// The URL proxied requests under `proxy_prefix` are forwarded to, as part
+	/// of MSC4512.
+	///
+	/// The registration-file key is `io.element.msc4512.proxy_url`; this
+	/// inline-config key is `proxy_url`. It takes the forms `url` takes,
+	/// `unix:///absolute/path.sock` included.
+	///
+	/// example: "http://lk-jwt-service:8080"
+	pub proxy_url: Option<String>,
 }
 
 impl From<AppService> for ruma::api::appservice::Registration {
@@ -2549,8 +2574,8 @@ impl From<AppService> for ruma::api::appservice::Registration {
 			},
 			keys_claims: false,
 			scopes: conf.scopes,
-			proxy_prefix: None,
-			proxy_url: None,
+			proxy_prefix: conf.proxy_prefix,
+			proxy_url: conf.proxy_url,
 		}
 	}
 }

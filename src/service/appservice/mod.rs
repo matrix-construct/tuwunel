@@ -1,6 +1,7 @@
 mod append;
 mod namespace_regex;
 mod ping;
+pub mod proxy;
 mod registration_info;
 pub(crate) mod request;
 #[cfg(test)]
@@ -34,7 +35,7 @@ use tuwunel_database::Map;
 
 pub use self::{
 	namespace_regex::NamespaceRegex,
-	registration_info::{IS_JOINED_SCOPE, RegistrationInfo},
+	registration_info::{IS_JOINED_SCOPE, PROXY_PREFIXES, RegistrationInfo, proxy_claim},
 };
 #[cfg(unix)]
 use crate::client::make_appservice_unix;
@@ -152,27 +153,40 @@ impl Service {
 	///
 	/// An id already loaded is refused, as is an `as_token` another id holds,
 	/// and a missing sender user is created. An unknown scope is logged and
-	/// ignored, so a registration written for a later release still loads.
+	/// ignored, so a registration written for a later release still loads; so
+	/// is an invalid proxy claim, or one an earlier registration holds.
 	pub async fn load_appservice(&self, registration: Registration) -> Result {
 		let registration_info =
 			RegistrationInfo::new(registration, self.services.globals.server_name())?;
 
-		let id = &registration_info.registration.id;
+		let id = registration_info.registration.id.clone();
 
 		if let Some(scope) = registration_info.unknown_scope() {
 			warn!(%id, %scope, "Ignoring an unknown scope in the appservice registration");
 		}
 
+		if let Err(error) = proxy_claim(&registration_info.registration) {
+			warn!(%id, %error, "Ignoring the invalid proxy claim in the appservice registration");
+		}
+
 		let mut registrations = self.registration_info.write().await;
 
-		if registrations.contains_key(id) {
+		if registrations.contains_key(&id) {
 			return Err!("Duplicate id: {id}");
 		}
+
+		let registration_info = match claim_holder(&registrations, &registration_info) {
+			| None => registration_info,
+			| Some(holder) => {
+				warn!(%id, %holder, "Ignoring a proxy claim another appservice holds");
+				registration_info.without_proxy_claim()
+			},
+		};
 
 		self.admit_registration(&registrations, &registration_info)
 			.await?;
 
-		registrations.insert(id.clone(), registration_info);
+		registrations.insert(id, registration_info);
 
 		Ok(())
 	}
@@ -182,7 +196,8 @@ impl Service {
 	/// An id this method registered before is replaced, and its cached room
 	/// participation is dropped. An id loaded from the configuration or
 	/// `appservice_dir` is refused, since both would load at the next startup
-	/// and collide. A scope this server does not know is refused too.
+	/// and collide. A scope this server does not know is refused too, as is an
+	/// invalid proxy claim or one another appservice holds.
 	pub async fn register_appservice(&self, registration: Registration) -> Result {
 		self.loaded().await;
 
@@ -197,10 +212,18 @@ impl Service {
 			return Err!("Unknown scope {scope:?} in appservice {id}");
 		}
 
+		if let Err(error) = proxy_claim(&registration_info.registration) {
+			return Err!("Invalid proxy claim in appservice {id}: {error}");
+		}
+
 		let mut registrations = self.registration_info.write().await;
 
 		if registrations.contains_key(&id) && self.is_persisted(&id).await.is_false() {
 			return Err!("Cannot replace config appservice {id}");
+		}
+
+		if let Some(holder) = claim_holder(&registrations, &registration_info) {
+			return Err!("Appservice {holder} already claims the proxy prefix of {id}");
 		}
 
 		self.admit_registration(&registrations, &registration_info)
@@ -278,6 +301,19 @@ impl Service {
 			.find(|info| info.registration.as_token == token)
 			.cloned()
 			.ok_or_else(|| err!(Request(NotFound("Missing or invalid appservice token"))))
+	}
+
+	/// MSC4512: the registration whose proxy claim covers a proxied path.
+	///
+	/// `remainder` is the path after its version segments, as
+	/// [`proxy::split_path`] returns it. At most one registration holds a
+	/// prefix, so at most one matches.
+	pub async fn find_proxy_claim(&self, remainder: &str) -> Option<RegistrationInfo> {
+		self.read()
+			.await
+			.values()
+			.find(|info| info.proxy_covers(remainder))
+			.cloned()
 	}
 
 	/// Checks if a given user id matches any exclusive appservice regex
@@ -372,6 +408,22 @@ pub fn unknown_scope(&self) -> Option<&str> {
 		.iter()
 		.map(String::as_str)
 		.find(|scope| !KNOWN_SCOPES.contains(scope))
+}
+
+/// MSC4512: the id of another registration holding the same proxy prefix.
+///
+/// The registration's own id is passed over, so re-registering it works.
+fn claim_holder<'a>(
+	registrations: &'a Registrations,
+	registration_info: &RegistrationInfo,
+) -> Option<&'a str> {
+	let prefix = registration_info.proxy_prefix?;
+	let id = &registration_info.registration.id;
+
+	registrations
+		.values()
+		.find(|loaded| loaded.registration.id != *id && loaded.proxy_prefix == Some(prefix))
+		.map(|holder| holder.registration.id.as_str())
 }
 
 /// Refuses an `as_token` another id holds, and creates a missing sender user.
