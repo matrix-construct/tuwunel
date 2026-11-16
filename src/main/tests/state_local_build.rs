@@ -27,6 +27,8 @@ use self::{
 
 #[path = "state_local_build/auth_chain.rs"]
 mod auth_chain;
+#[path = "state_local_build/backfill.rs"]
+mod backfill;
 #[path = "state_local_build/baseline.rs"]
 mod baseline;
 #[expect(dead_code)] // This fixture uses only registration.
@@ -35,6 +37,8 @@ mod client;
 mod derived;
 #[path = "state_local_build/disabled.rs"]
 mod disabled;
+#[expect(dead_code)] // Membership routes are not driven here.
+mod federation;
 #[path = "state_local_build/helpers.rs"]
 mod helpers;
 #[path = "state_local_build/memo.rs"]

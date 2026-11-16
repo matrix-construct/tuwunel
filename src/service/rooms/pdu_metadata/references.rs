@@ -1,8 +1,9 @@
 use futures::{Stream, StreamExt, TryFutureExt};
 use ruma::{EventId, OwnedEventId, RoomId};
 use tuwunel_core::{
-	Result, implement, trace,
+	Err, Result, implement, trace,
 	utils::{
+		result::NotFound,
 		stream::{BroadbandExt, ReadyExt, TryIgnore, WidebandExt},
 		u64_from_u8,
 	},
@@ -105,6 +106,43 @@ pub async fn is_event_soft_failed(&self, event_id: &EventId) -> bool {
 		.get(event_id)
 		.await
 		.is_ok()
+}
+
+/// Returns a soft-failed event of a room, which outlier storage alone holds.
+///
+/// The event must carry a soft-fail marker, have no accepted timeline row, be
+/// stored as an outlier and belong to `room_id`. Any other event is not found,
+/// so a marker stranded on an accepted event leaves that event to the timeline.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub async fn get_soft_failed_outlier(&self, room_id: &RoomId, event_id: &EventId) -> Result<Pdu> {
+	// Almost every event on the federation serving paths carries no marker.
+	if !self.is_event_soft_failed(event_id).await {
+		return Err!(Request(NotFound("Event is not soft-failed.")));
+	}
+
+	let accepted = self
+		.services
+		.timeline
+		.get_pdu_id(event_id)
+		.await
+		.present()?;
+
+	if accepted.is_some() {
+		return Err!(Request(NotFound("Soft-failed event has a timeline row.")));
+	}
+
+	let pdu = self
+		.services
+		.timeline
+		.get_outlier_pdu(event_id)
+		.await?;
+
+	if pdu.room_id != room_id {
+		return Err!(Request(NotFound("Soft-failed event belongs to another room.")));
+	}
+
+	Ok(pdu)
 }
 
 /// Clears the soft-fail markers belonging to a room.
