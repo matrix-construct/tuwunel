@@ -11,7 +11,11 @@ use tuwunel_service::{
 };
 
 use super::{
-	backfill::{soft_failed_served_when_referenced, soft_failed_stays_out_of_backfill},
+	backfill::{
+		backfill_edges_rise_past_stored_history, backfill_seeds_keep_the_first_frontier,
+		soft_failed_served_when_referenced, soft_failed_stays_out_of_backfill,
+		withheld_frontier_seeds_backfill,
+	},
 	derived::sibling_state_prevs_both_resolve,
 	helpers::{
 		ExpectedPass, ExpectedWalkOutcome, assert_one_settled_walk, assert_prev_walk,
@@ -96,6 +100,33 @@ pub(super) async fn enabled_baseline(
 		.map_err(step(label))?;
 
 	soft_failed_stays_out_of_backfill(services, user_id, &withheld_room)
+		.await
+		.map_err(step(label))?;
+
+	let label = "withheld backfill frontier";
+	let seed_room = create_room(services, base, token)
+		.await
+		.map_err(step(label))?;
+
+	withheld_frontier_seeds_backfill(services, user_id, &seed_room)
+		.await
+		.map_err(step(label))?;
+
+	let label = "backfill edges";
+	let edge_room = create_room(services, base, token)
+		.await
+		.map_err(step(label))?;
+
+	backfill_edges_rise_past_stored_history(services, user_id, &edge_room)
+		.await
+		.map_err(step(label))?;
+
+	let label = "backfill seeds";
+	let seeds_room = create_room(services, base, token)
+		.await
+		.map_err(step(label))?;
+
+	backfill_seeds_keep_the_first_frontier(services, user_id, &seeds_room)
 		.await
 		.map_err(step(label))?;
 

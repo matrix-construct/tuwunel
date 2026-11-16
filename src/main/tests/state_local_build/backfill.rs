@@ -1,6 +1,8 @@
+use futures::StreamExt;
 use serde_json::{Value, value::to_raw_value};
 use tuwunel_core::{
-	Err, Result, async_noinline, err,
+	Err, Result, async_noinline, at, err,
+	itertools::Itertools,
 	ruma::{
 		CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, RoomId, UserId,
 		api::federation::backfill::get_backfill::v1::Request as BackfillRequest,
@@ -40,6 +42,35 @@ const WITHHELD_TOKEN: &str = "state-local-build-withheld-access-token";
 const WITHHELD: &str = "soft-failed message offered by backfill";
 const PROMOTED: &str = "plain outlier offered by backfill";
 const FOREIGN_SERVER: &str = "policy.invalid";
+const ACCEPTED: &str = "accepted message under the soft-failed events";
+const SEED_OUTLIER: &str = "plain outlier under the oldest event";
+const BRANCH_OUTLIER: &str = "plain outlier under a soft-failed branch";
+const DEEPER: &str = "deeper soft-failed message under the oldest event";
+const NEARER: &str = "nearer soft-failed message under the oldest event";
+const LEFT: &str = "soft-failed branch over the accepted message";
+const RIGHT: &str = "soft-failed branch over a plain outlier";
+const SPLIT: &str = "soft-failed message naming both branches";
+const REJOIN: &str = "soft-failed message naming the second branch again";
+const ABOVE_CHAIN: &str = "references the soft-failed chain";
+const ABOVE_FORK: &str = "references the chain and the accepted message";
+const ABOVE_OUTLIER: &str = "references a plain outlier";
+const ABOVE_SPLIT: &str = "references the soft-failed fork";
+const ABOVE_BRANCHES: &str = "references every soft-failed branch";
+const STORED: &str = "accepted message under the backfill scan";
+const SCAN_OUTLIER: &str = "plain outlier under the backfill scan";
+const DEEP: &str = "backfilled message over the plain outlier";
+const MISSING_WITHHELD: &str = "soft-failed message over the plain outlier";
+const BEYOND: &str = "backfilled message over the soft-failed message missing history";
+const STORED_WITHHELD: &str = "soft-failed message over the accepted message";
+const THROUGH: &str = "backfilled message over the soft-failed message with stored history";
+const SHALLOW: &str = "backfilled message over the accepted message";
+const ABOVE_GAP: &str = "references the plain outlier under the backfill scan";
+const SEEDS_GAP: &str = "plain outlier behind the accepted backfilled message";
+const SEEDS_LOST: &str = "plain outlier no candidate supplies";
+const SEEDS_STORED: &str = "accepted backfilled message over a missing predecessor";
+const SEEDS_SCANNED: &str = "backfilled message over the predecessor no candidate supplies";
+const SEEDS_WITHHELD: &str = "soft-failed message over the accepted backfilled message";
+const SEEDS_FIRST: &str = "backfilled message over the soft-failed message";
 
 // Enough to reach the room's create event from any request below.
 const WHOLE_ROOM: u32 = 50;
@@ -322,6 +353,264 @@ pub(super) async fn soft_failed_stays_out_of_backfill<'a>(
 	Ok(())
 }
 
+/// The backfill frontier holds every event below which history is missing.
+///
+/// The soft-failed outliers are stored as backfill leaves a refused event: an
+/// outlier row and a marker, with no timeline row. The walk passes through them
+/// to the end of a chain and reaches every branch of a withheld fork once. A
+/// branch over an accepted predecessor stays, since that predecessor's own
+/// history may still be missing.
+// size firewall
+#[async_noinline]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn withheld_frontier_seeds_backfill<'a>(
+	services: &'a Services,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
+) -> Result {
+	let accepted = append_message(services, user_id, room_id, ACCEPTED).await?;
+	let (gap, _) = sign_outlier_message(services, user_id, room_id, SEED_OUTLIER).await?;
+	let (branch_gap, _) =
+		sign_outlier_message(services, user_id, room_id, BRANCH_OUTLIER).await?;
+
+	let gap: &EventId = gap.event_id.as_ref();
+
+	let deeper = withheld_over(services, user_id, room_id, [gap], DEEPER).await?;
+	let nearer = withheld_over(services, user_id, room_id, [&deeper], NEARER).await?;
+	let left = withheld_over(services, user_id, room_id, [&accepted], LEFT).await?;
+	let right = withheld_over(services, user_id, room_id, [&branch_gap.event_id], RIGHT).await?;
+	let split = withheld_over(services, user_id, room_id, [&left, &right], SPLIT).await?;
+	let rejoin = withheld_over(services, user_id, room_id, [&right], REJOIN).await?;
+
+	let above_chain = message_over(services, user_id, room_id, [&nearer], ABOVE_CHAIN).await?;
+	let above_fork =
+		message_over(services, user_id, room_id, [&accepted, &nearer], ABOVE_FORK).await?;
+
+	let above_outlier = message_over(services, user_id, room_id, [gap], ABOVE_OUTLIER).await?;
+	let above_split = message_over(services, user_id, room_id, [&split], ABOVE_SPLIT).await?;
+	let above_branches =
+		message_over(services, user_id, room_id, [&split, &rejoin, &nearer], ABOVE_BRANCHES)
+			.await?;
+
+	let (deeper, left, right): (&EventId, &EventId, &EventId) =
+		(deeper.as_ref(), left.as_ref(), right.as_ref());
+
+	let frontier = frontier_below(services, room_id, &above_chain).await?;
+
+	assert_eq!(frontier, [deeper], "the walk stopped short of the chain's end");
+
+	let frontier = frontier_below(services, room_id, &above_fork).await?;
+
+	assert_eq!(
+		frontier,
+		[above_fork.as_ref(), deeper],
+		"the walk did not keep both the accepted and the withheld predecessor"
+	);
+
+	let frontier = frontier_below(services, room_id, &above_outlier).await?;
+
+	assert_eq!(frontier, [above_outlier], "the walk passed over a plain outlier");
+
+	let frontier = frontier_below(services, room_id, &above_split).await?;
+	let frontier: Vec<_> = frontier.into_iter().sorted().collect();
+	let split: Vec<_> = [left, right].into_iter().sorted().collect();
+
+	assert_eq!(frontier, split, "the fork lost a branch over an accepted predecessor");
+
+	let frontier = frontier_below(services, room_id, &above_branches).await?;
+	let frontier: Vec<_> = frontier.into_iter().sorted().collect();
+	let branches: Vec<_> = [left, right, deeper]
+		.into_iter()
+		.sorted()
+		.collect();
+
+	assert_eq!(
+		frontier, branches,
+		"the walk did not reach every branch of a withheld fork once"
+	);
+
+	Ok(())
+}
+
+/// The backfill scan rises past events whose history is stored to those still
+/// missing some, and finds none once the room's history is whole.
+///
+/// Each event goes in through backfill, so it lies below the one before it in
+/// stream order, as the last batches over a converging fork leave them. The
+/// first event and the one over a soft-failed message name only stored
+/// history; the next two miss it, the first behind a soft-failed message. The
+/// create event ends the scan, so a later event over the same gap is not met.
+// size firewall
+#[async_noinline]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn backfill_edges_rise_past_stored_history<'a>(
+	services: &'a Services,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
+) -> Result {
+	let accepted = append_message(services, user_id, room_id, STORED).await?;
+	let (gap, gap_json) = sign_outlier_message(services, user_id, room_id, SCAN_OUTLIER).await?;
+	let gap: &EventId = gap.event_id.as_ref();
+
+	let deep = backfilled_over(services, user_id, room_id, [gap], DEEP).await?;
+	let missing = withheld_over(services, user_id, room_id, [gap], MISSING_WITHHELD).await?;
+	let beyond = backfilled_over(services, user_id, room_id, [&missing], BEYOND).await?;
+	let stored = withheld_over(services, user_id, room_id, [&accepted], STORED_WITHHELD).await?;
+
+	backfilled_over(services, user_id, room_id, [&stored], THROUGH).await?;
+	let shallow = backfilled_over(services, user_id, room_id, [&accepted], SHALLOW).await?;
+
+	message_over(services, user_id, room_id, [gap], ABOVE_GAP).await?;
+
+	let (_, first) = services
+		.timeline
+		.first_item_in_room(room_id)
+		.await?;
+
+	assert_eq!(first.event_id, shallow, "the last backfilled event is not the room's first");
+
+	let found = edges(services, room_id).await;
+
+	assert_eq!(found, [beyond, deep], "the scan did not rise to the events missing history");
+
+	let prepended = ingest(services, room_id, gap_json).await?;
+
+	assert!(prepended, "backfill withheld the plain outlier under the scan");
+
+	let found = edges(services, room_id).await;
+
+	assert!(found.is_empty(), "the scan found missing history in a whole room");
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn edges(services: &Services, room_id: &RoomId) -> Vec<OwnedEventId> {
+	services
+		.timeline
+		.backfill_edges(room_id)
+		.map(|pdu| pdu.event_id)
+		.collect()
+		.await
+}
+
+/// The backfill seeds keep the first event's frontier ahead of the scanned
+/// event's.
+///
+/// The first event names only a soft-failed message over an accepted one whose
+/// own predecessor is missing, so the scan passes it for a later event over a
+/// predecessor no candidate may supply. The soft-failed message, whose request
+/// reaches the missing history, still leads the seeds.
+// size firewall
+#[async_noinline]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn backfill_seeds_keep_the_first_frontier<'a>(
+	services: &'a Services,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
+) -> Result {
+	let (gap, _) = sign_outlier_message(services, user_id, room_id, SEEDS_GAP).await?;
+	let (lost, _) = sign_outlier_message(services, user_id, room_id, SEEDS_LOST).await?;
+	let (gap, lost): (&EventId, &EventId) = (gap.event_id.as_ref(), lost.event_id.as_ref());
+
+	let stored = backfilled_over(services, user_id, room_id, [gap], SEEDS_STORED).await?;
+	let scanned = backfilled_over(services, user_id, room_id, [lost], SEEDS_SCANNED).await?;
+	let withheld = withheld_over(services, user_id, room_id, [&stored], SEEDS_WITHHELD).await?;
+	let first = backfilled_over(services, user_id, room_id, [&withheld], SEEDS_FIRST).await?;
+
+	let found = edges(services, room_id).await;
+
+	assert_eq!(found, [scanned.clone(), stored], "the scan did not pass the first event");
+
+	let found = seeds(services, room_id, &first, &scanned).await?;
+
+	assert_eq!(found, [withheld, scanned], "the seeds lost the first event's frontier");
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn seeds(
+	services: &Services,
+	room_id: &RoomId,
+	first: &EventId,
+	scanned: &EventId,
+) -> Result<Vec<OwnedEventId>> {
+	let (_, oldest) = services
+		.timeline
+		.first_item_in_room(room_id)
+		.await?;
+
+	assert_eq!(oldest.event_id, first, "the last backfilled event is not the room's first");
+
+	let scanned = services.timeline.get_pdu(scanned).await?;
+	let seeds = services
+		.timeline
+		.backfill_seeds(room_id, &oldest, Some(&scanned))
+		.collect()
+		.await;
+
+	Ok(seeds)
+}
+
+// size firewall
+#[async_noinline]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn withheld_over<'a, const N: usize>(
+	services: &'a Services,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
+	prev_events: [&'a EventId; N],
+	body: &'a str,
+) -> Result<OwnedEventId> {
+	set_forward_extremities(services, room_id, prev_events).await;
+	let (pdu, json) = sign_message(services, user_id, room_id, body).await?;
+
+	services
+		.timeline
+		.add_pdu_outlier(&pdu.event_id, &json);
+
+	services
+		.pdu_metadata
+		.mark_event_soft_failed(&pdu.event_id);
+
+	Ok(pdu.event_id)
+}
+
+// size firewall
+#[async_noinline]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn backfilled_over<'a, const N: usize>(
+	services: &'a Services,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
+	prev_events: [&'a EventId; N],
+	body: &'a str,
+) -> Result<OwnedEventId> {
+	set_forward_extremities(services, room_id, prev_events).await;
+	let (pdu, json) = sign_message(services, user_id, room_id, body).await?;
+
+	let prepended = ingest(services, room_id, json).await?;
+
+	assert!(prepended, "backfill did not prepend {body:?}");
+
+	Ok(pdu.event_id)
+}
+
+// size firewall
+#[async_noinline]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn message_over<'a, const N: usize>(
+	services: &'a Services,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
+	prev_events: [&'a EventId; N],
+	body: &'a str,
+) -> Result<OwnedEventId> {
+	set_forward_extremities(services, room_id, prev_events).await;
+	append_message(services, user_id, room_id, body).await
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 async fn restrict_history(
 	services: &Services,
@@ -410,6 +699,23 @@ fn with_foreign_signature(mut json: CanonicalJsonObject) -> CanonicalJsonObject 
 	}
 
 	json
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn frontier_below(
+	services: &Services,
+	room_id: &RoomId,
+	oldest: &EventId,
+) -> Result<Vec<OwnedEventId>> {
+	let oldest = services.timeline.get_pdu(oldest).await?;
+	let frontier = services
+		.timeline
+		.backfill_frontier(room_id, &oldest)
+		.map(at!(0))
+		.collect()
+		.await;
+
+	Ok(frontier)
 }
 
 fn count(pdus: &[Value], body: &str) -> usize { bodies(pdus).filter(|&b| b == body).count() }

@@ -4,21 +4,29 @@
 //! remote timestamp claims are checked against the ingested event. Backfilled
 //! events receive negative stream counts so they sort before normal history.
 
-use std::{collections::HashSet, iter::once, num::NonZeroUsize};
+use std::{
+	collections::{BTreeSet, HashSet, VecDeque},
+	convert::identity,
+	iter::once,
+	num::NonZeroUsize,
+	pin::pin,
+};
 
 use futures::{
-	FutureExt, StreamExt, TryFutureExt,
+	FutureExt, Stream, StreamExt, TryFutureExt,
 	future::{join, try_join, try_join4},
+	stream::unfold,
 };
 use rand::seq::SliceRandom;
 use ruma::{
-	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, ServerName,
-	api::Direction, events::TimelineEventType,
+	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedServerName,
+	RoomId, ServerName, api::Direction, events::TimelineEventType,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{
 	Err, Result, at, debug, debug_warn, implement, is_false,
+	smallvec::SmallVec,
 	utils::{
 		BoolExt, IterStream, ReadyExt,
 		future::{BoolExt as FutureBoolExt, TryExtExt},
@@ -30,7 +38,7 @@ use tuwunel_database::Json;
 use tuwunel_matrix::{
 	PduEvent,
 	event::Event,
-	pdu::{PduCount, PduId, RawPduId},
+	pdu::{PduCount, PduId, PrevEvents, RawPduId},
 };
 
 use super::{ExtractBody, bias_count};
@@ -39,6 +47,9 @@ use crate::{
 	fetcher::{Op, Opts},
 	rooms::state_accessor::plain_text_topic,
 };
+
+#[cfg(test)]
+mod tests;
 
 /// Events requested per backfill batch.
 const BACKFILL_LIMIT: NonZeroUsize = NonZeroUsize::new(100).unwrap();
@@ -55,11 +66,73 @@ struct TimestampHit {
 	origin_server_ts: MilliSecondsSinceUnixEpoch,
 }
 
+/// One backfill request.
+///
+/// It holds where the request starts, the candidates still left for the room's
+/// oldest event, the frontier seeds already asked, and the counted requests
+/// left.
+#[cfg_attr(test, derive(Debug, PartialEq))]
+struct Attempt {
+	seed: Seed,
+	anchor: Candidates,
+	asked: Passed,
+	remaining: usize,
+}
+
+/// Where a backfill request starts.
+///
+/// The first move off the oldest event is the call's only uncounted request.
+/// Once the call has fallen back to the oldest event, frontier seeds not yet
+/// asked wait until no candidate is left for it.
+#[cfg_attr(test, derive(Debug, PartialEq))]
+enum Seed {
+	/// The room's oldest event, before the seed walk has moved.
+	Oldest,
+
+	/// Another event the walk reached, asked of every candidate: a withheld one,
+	/// or the oldest event still missing history.
+	Frontier(OwnedEventId),
+
+	/// The room's oldest event again, asked of the candidates left for it.
+	Fallback,
+}
+
+type Passed = BTreeSet<OwnedEventId>;
+
+type Pending = VecDeque<(OwnedEventId, PrevEvents)>;
+
+type Frontier = SmallVec<[OwnedEventId; 1]>;
+
+type Unheld = SmallVec<[OwnedEventId; 1]>;
+
+/// The outcome of one backfill request.
+///
+/// From the first request `Empty` and `Prepended` can lead to another; from any
+/// later one, every outcome can.
+enum Batch {
+	/// No candidate answered.
+	Unanswered,
+
+	/// At least one event was prepended.
+	Prepended,
+
+	/// The origin answered, and nothing was prepended.
+	Empty(OwnedServerName),
+}
+
 /// Attempts federation backfill when a request reaches local history's edge.
 ///
 /// Backfill is skipped after the create event and for effectively empty rooms
-/// that are not world-readable. No candidate, a remote fetch failure, or an
-/// empty accepted chunk is treated as a successful best-effort outcome.
+/// that are not world-readable. The first request asks from the room's oldest
+/// event. Before it, a scan finds the oldest event still missing history, which
+/// lies above the first once a later batch left that one's history whole; after
+/// each batch the frontier is walked from the first event and then from that
+/// one, and its events are asked in turn while requests are left, every branch
+/// of a withheld fork even after a prepend. A first batch that prepends nothing
+/// is otherwise asked again of the remaining candidates, and a seed that cannot
+/// progress returns to the oldest event first. No candidate, a remote fetch
+/// failure, or an empty accepted chunk is treated as a successful best-effort
+/// outcome.
 #[implement(super::Service)]
 #[tracing::instrument(name = "backfill", level = "debug", skip(self))]
 pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Result {
@@ -91,7 +164,7 @@ pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Re
 		return Ok(());
 	}
 
-	let mut eligible = self.backfill_candidates(room_id).await;
+	let eligible = self.backfill_candidates(room_id).await;
 
 	let no_backfill = || {
 		warn!(%room_id, "No servers could backfill, but backfill was needed");
@@ -105,53 +178,65 @@ pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Re
 		return no_backfill();
 	}
 
-	for _ in 0..BACKFILL_BATCH_ATTEMPTS {
-		let opts = Opts::new(Op::Backfill, room_id.to_owned())
-			.event_id(first_pdu.event_id().to_owned())
-			.candidates(eligible.iter().cloned())
-			.attempt_limit(BACKFILL_ATTEMPT_LIMIT)
-			.backfill_limit(BACKFILL_LIMIT);
+	// The first event's own walk already covers it when the scan stops there.
+	let scanned = pin!(self.backfill_edges(room_id))
+		.next()
+		.map(|edge| edge.filter(|edge| edge.event_id != first_pdu.event_id))
+		.await;
 
-		let Ok(outcome) = self.services.fetcher.fetch(opts).await else {
-			return no_backfill();
+	// The oldest event goes first: a responder holding a withheld seed only as an
+	// outlier answers it with nothing.
+	let first = Attempt {
+		seed: Seed::Oldest,
+		anchor: eligible.clone(),
+		asked: Passed::new(),
+		remaining: BACKFILL_BATCH_ATTEMPTS,
+	};
+
+	let attempts = unfold(Some(first), async |attempt| {
+		let attempt: Attempt = attempt?;
+		let (event_id, candidates) = match &attempt.seed {
+			| Seed::Frontier(event_id) => (event_id.as_ref(), &eligible),
+			| Seed::Oldest | Seed::Fallback => (first_pdu.event_id(), &attempt.anchor),
 		};
 
-		let pdus: Vec<Box<RawJsonValue>> = serde_json::from_slice(&outcome.bytes)?;
-		let batch_size = pdus.len();
-		let prepended = pdus
-			.into_iter()
-			.stream()
-			.fold(0_usize, async |prepended, pdu| {
-				let inserted = self
-					.backfill_pdu(room_id, &outcome.origin, pdu)
-					.await
-					.inspect_err(|e| debug_warn!(%room_id, %e, "Failed to add backfilled pdu"))
-					.unwrap_or(false);
-
-				prepended.saturating_add(usize::from(inserted))
-			})
+		let batch = self
+			.backfill_batch(room_id, event_id, candidates)
 			.await;
 
-		debug!(
-			%room_id,
-			origin = %outcome.origin,
-			batch_size,
-			prepended,
-			"Processed backfill response",
-		);
+		let next = match &batch {
+			| Ok(batch) if walks(&attempt, batch) => {
+				// Walked again after each batch, so withheld events the batch stored
+				// extend the frontier.
+				let frontier: Frontier = self
+					.backfill_seeds(room_id, &first_pdu, scanned.as_ref())
+					.collect()
+					.boxed() // size firewall
+					.await;
 
-		if prepended > 0 {
-			return Ok(());
-		}
+				retry(attempt, batch, first_pdu.event_id(), &frontier)
+			},
+			| _ => None,
+		};
 
-		eligible.retain(|server| server != &outcome.origin);
-		if eligible.is_empty() {
-			break;
-		}
+		Some((batch, next))
+	});
+
+	let (prepended, last) = attempts
+		.ready_fold((false, None), |(prepended, _), batch| {
+			(prepended || matches!(batch, Ok(Batch::Prepended)), Some(batch))
+		})
+		.await;
+
+	match (prepended, last) {
+		| (_, Some(Err(error))) => Err(error),
+		| (true, _) => Ok(()),
+		| (false, Some(Ok(Batch::Unanswered))) => no_backfill(),
+		| (false, _) => {
+			warn!(%room_id, "Backfill was required but prepended no events");
+			Ok(())
+		},
 	}
-
-	warn!(%room_id, "Backfill was required but prepended no events");
-	Ok(())
 }
 
 #[implement(super::Service)]
@@ -231,6 +316,263 @@ async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 		})
 		.collect()
 		.await
+}
+
+/// Asks the candidates for the events before `seed` and ingests the batch.
+///
+/// A fetch no candidate answers is `Unanswered` and an unparsable response is
+/// an error, while each event's own ingestion failure only leaves it out of the
+/// count.
+#[implement(super::Service)]
+#[tracing::instrument(skip(self, eligible), level = "debug")]
+async fn backfill_batch(
+	&self,
+	room_id: &RoomId,
+	seed: &EventId,
+	eligible: &Candidates,
+) -> Result<Batch> {
+	let opts = Opts::new(Op::Backfill, room_id.to_owned())
+		.event_id(seed.to_owned())
+		.candidates(eligible.iter().cloned())
+		.attempt_limit(BACKFILL_ATTEMPT_LIMIT)
+		.backfill_limit(BACKFILL_LIMIT);
+
+	let Ok(outcome) = self.services.fetcher.fetch(opts).await else {
+		return Ok(Batch::Unanswered);
+	};
+
+	let pdus: Vec<Box<RawJsonValue>> = serde_json::from_slice(&outcome.bytes)?;
+	let batch_size = pdus.len();
+	let prepended = pdus
+		.into_iter()
+		.stream()
+		.fold(0_usize, async |prepended, pdu| {
+			let inserted = self
+				.backfill_pdu(room_id, &outcome.origin, pdu)
+				.await
+				.inspect_err(|e| debug_warn!(%room_id, %e, "Failed to add backfilled pdu"))
+				.unwrap_or(false);
+
+			prepended.saturating_add(usize::from(inserted))
+		})
+		.await;
+
+	debug!(
+		%room_id,
+		%seed,
+		origin = %outcome.origin,
+		batch_size,
+		prepended,
+		"Processed backfill response",
+	);
+
+	let batch = match prepended {
+		| 0 => Batch::Empty(outcome.origin.clone()),
+		| _ => Batch::Prepended,
+	};
+
+	Ok(batch)
+}
+
+/// Finds the events, oldest first, below which history is still missing.
+///
+/// The scan rises from the room's first event in stream order and ends at the
+/// create event. It passes each event whose frontier names only events already
+/// in the timeline: the event backfill prepended last can be such a one, and
+/// asking from it could then never fetch anything new. An unreadable event is
+/// passed over.
+#[implement(super::Service)]
+pub fn backfill_edges<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+) -> impl Stream<Item = PduEvent> + Send + 'a {
+	self.pdus(None, room_id, None)
+		.ready_filter_map(move |item| {
+			item.map(at!(1))
+				.inspect_err(|error| debug_warn!(%room_id, %error, "Skipped an unreadable event"))
+				.ok()
+		})
+		.ready_take_while(|pdu| *pdu.event_type() != TimelineEventType::RoomCreate)
+		.filter_map(async |pdu| {
+			self.misses_history(room_id, &pdu)
+				.await
+				.then_some(pdu)
+		})
+}
+
+/// Walks the frontier from the room's first event, then from the scanned event.
+///
+/// The first event's seeds come first, so a scanned event only adds requests
+/// behind them.
+#[implement(super::Service)]
+pub fn backfill_seeds<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+	first: &'a PduEvent,
+	scanned: Option<&'a PduEvent>,
+) -> impl Stream<Item = OwnedEventId> + Send + 'a {
+	once(first)
+		.chain(scanned)
+		.stream()
+		.flat_map(|root| self.backfill_frontier(room_id, root))
+		.map(at!(0))
+}
+
+/// Whether the frontier from `pdu` names an event missing from the timeline.
+///
+/// A predecessor whose timeline id cannot be read counts as missing.
+#[implement(super::Service)]
+async fn misses_history(&self, room_id: &RoomId, pdu: &PduEvent) -> bool {
+	self.backfill_frontier(room_id, pdu)
+		.flat_map(|(_, unheld)| unheld.into_iter().stream())
+		.any(async |prev| self.get_pdu_id(&prev).is_err().await)
+		.await
+}
+
+/// Finds the events below which backfill still has history to ask for.
+///
+/// The walk starts at `oldest` and passes breadth first through each
+/// predecessor stored as a soft-failed outlier of the room, which backfill
+/// would withhold. It yields every event it reaches, `oldest` first, that names
+/// a predecessor of any other kind, with those predecessors, since a request
+/// from that event reaches them. An event met a second time is not walked
+/// again.
+#[implement(super::Service)]
+pub fn backfill_frontier<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+	oldest: &'a PduEvent,
+) -> impl Stream<Item = (OwnedEventId, Unheld)> + Send + 'a {
+	let root = (oldest.event_id.clone(), oldest.prev_events.clone());
+	let start = (Pending::from([root]), Passed::new());
+
+	unfold(start, async |(pending, passed)| {
+		let ((event_id, prev_events), pending) = pop(pending)?;
+		let (pending, passed, unheld) = prev_events
+			.iter()
+			.stream()
+			.then(async |prev| {
+				let withheld = self
+					.services
+					.pdu_metadata
+					.get_soft_failed_outlier(room_id, prev)
+					.ok()
+					.await;
+
+				(prev, withheld)
+			})
+			.ready_fold((pending, passed, Unheld::new()), enqueue)
+			.await;
+
+		let reaches = unheld.is_empty().is_false();
+
+		Some((reaches.then_some((event_id, unheld)), (pending, passed)))
+	})
+	.ready_filter_map(identity)
+}
+
+fn pop(mut pending: Pending) -> Option<((OwnedEventId, PrevEvents), Pending)> {
+	let next = pending.pop_front()?;
+
+	Some((next, pending))
+}
+
+fn enqueue(
+	(mut pending, mut passed, mut unheld): (Pending, Passed, Unheld),
+	(prev, withheld): (&OwnedEventId, Option<PduEvent>),
+) -> (Pending, Passed, Unheld) {
+	match withheld {
+		| None => unheld.push(prev.clone()),
+		| Some(PduEvent { event_id, prev_events, .. }) =>
+			if passed.insert(event_id.clone()) {
+				pending.push_back((event_id, prev_events));
+			},
+	}
+
+	(pending, passed, unheld)
+}
+
+/// Whether a request can follow `batch`, so the walk is worth running.
+///
+/// It holds whenever `retry` can answer one: the first request leads on unless
+/// no candidate answered it, and every later one is counted.
+fn walks(attempt: &Attempt, batch: &Batch) -> bool {
+	match attempt.seed {
+		| Seed::Oldest => !matches!(batch, Batch::Unanswered),
+		| Seed::Frontier(_) | Seed::Fallback => attempt.remaining > 1,
+	}
+}
+
+/// The request after one backfill request, while any are left.
+///
+/// `frontier` is the walk after `batch` from the oldest event and then from the
+/// call's scanned event. An answered first request is followed by the first
+/// other frontier event; after a prepend the oldest event is not asked again. A
+/// seed that progressed is followed by the next frontier event not yet asked,
+/// so a prepend does not end the call while a branch of a withheld fork is left
+/// and the budget allows another request; one that made no progress hands the
+/// call to the oldest event's remaining candidates first. Once the seeds are
+/// spent, the oldest event is asked again of those candidates if it is itself
+/// on the frontier. The request the walk first moves after is not counted, so a
+/// walk resumed over stored withheld events keeps the whole budget.
+fn retry(
+	attempt: Attempt,
+	batch: &Batch,
+	oldest: &EventId,
+	frontier: &[OwnedEventId],
+) -> Option<Attempt> {
+	let Attempt { seed, anchor, asked, remaining } = attempt;
+	let charged = remaining.saturating_sub(1);
+	let anchor: Candidates = match (&seed, batch) {
+		| (Seed::Frontier(_), _) => anchor,
+		| (_, Batch::Empty(origin)) => anchor
+			.into_iter()
+			.filter(|server| server != origin)
+			.collect(),
+
+		// The oldest event was answered, or none of its candidates answered.
+		| _ => Candidates::new(),
+	};
+
+	let stuck = match (&seed, batch) {
+		| (Seed::Frontier(seed), Batch::Empty(_)) => frontier.contains(seed),
+		| (Seed::Frontier(_), Batch::Unanswered) => true,
+		| _ => false,
+	};
+
+	let next = frontier
+		.iter()
+		.find(|event_id| *event_id != oldest && !asked.contains(*event_id))
+		.cloned();
+
+	let reask = !anchor.is_empty();
+	let oldest_open = reask && frontier.iter().any(|event_id| event_id == oldest);
+	let (seed, remaining) = match (seed, batch, next) {
+		| (Seed::Oldest, Batch::Empty(_) | Batch::Prepended, Some(next)) =>
+			(Seed::Frontier(next), remaining),
+		| (Seed::Oldest, Batch::Empty(_), None) => (Seed::Oldest, charged),
+		| (Seed::Oldest, ..) => return None,
+		| (Seed::Frontier(_), ..) if stuck && reask => (Seed::Fallback, charged),
+		| (Seed::Fallback, Batch::Empty(_), _) if reask => (Seed::Fallback, charged),
+		| (_, _, Some(next)) => (Seed::Frontier(next), charged),
+		| (Seed::Frontier(_), ..) if oldest_open => (Seed::Fallback, charged),
+		| _ => return None,
+	};
+
+	let asked = match &seed {
+		| Seed::Oldest | Seed::Fallback => asked,
+		| Seed::Frontier(seed) => ask(asked, seed.clone()),
+	};
+
+	// A frontier seed is asked of every candidate, and there is at least one.
+	let due = remaining > 0 && (matches!(seed, Seed::Frontier(_)) || reask);
+
+	due.then_some(Attempt { seed, anchor, asked, remaining })
+}
+
+fn ask(mut asked: Passed, seed: OwnedEventId) -> Passed {
+	asked.insert(seed);
+	asked
 }
 
 #[implement(super::Service)]
