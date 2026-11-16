@@ -14,6 +14,8 @@ use ruma::{
 use serde::Deserialize;
 use tuwunel_core::{implement, utils::future::TryExtExt};
 
+use super::is_ignored;
+
 /// A recipient's invite filtering state, evaluable against any sender.
 ///
 /// Holds the ignored-user list alongside every `invite_permission_config`
@@ -188,11 +190,7 @@ fn blocks_all(&self) -> bool {
 /// module defers to for everything short of a blanket block.
 #[implement(InviteFilter)]
 #[inline]
-fn ignores(&self, sender: &UserId) -> bool {
-	self.ignored
-		.as_ref()
-		.is_some_and(|content| content.ignored_users.contains_key(sender))
-}
+fn ignores(&self, sender: &UserId) -> bool { is_ignored(self.ignored.as_ref(), sender) }
 
 /// Whether the recipient configured no filtering at all.
 ///

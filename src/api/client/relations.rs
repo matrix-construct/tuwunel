@@ -30,7 +30,7 @@ use tuwunel_matrix::{
 	event::{Event, RelationTypeEqual},
 	pdu::{PduCount, PduId},
 };
-use tuwunel_service::Services;
+use tuwunel_service::{Services, rooms::pdu_metadata::RequesterQuery};
 
 use crate::{Ruma, is_ignored_pdu};
 
@@ -181,10 +181,22 @@ async fn paginate_relations_with_filter(
 		}));
 	}
 
+	let ignored = services.users.ignored_users(sender_user).await;
+
+	let query = RequesterQuery {
+		shortroomid,
+		target: target.count,
+		from,
+		to,
+		dir,
+		user_id: sender_user,
+		ignored: ignored.as_ref(),
+	};
+
 	let fetch = |depth: usize, count: PduCount| {
 		services
 			.pdu_metadata
-			.get_relations(shortroomid, count, from, dir, Some(sender_user))
+			.requester_relations(RequesterQuery { target: count, ..query })
 			.map(move |(count, pdu)| (depth, count, pdu))
 			.ready_filter(|(_, count, _)| matches!(count, PduCount::Normal(_)))
 			.boxed() // Unpin for select_all
@@ -199,7 +211,6 @@ async fn paginate_relations_with_filter(
 
 		Some(((depth, count, pdu), relations))
 	})
-	.ready_take_while(|&(_, count, _)| Some(count) != to)
 	.ready_filter(|(_, _, pdu)| {
 		filter_event_type
 			.as_ref()

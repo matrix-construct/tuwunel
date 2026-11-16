@@ -52,7 +52,7 @@ use tuwunel_matrix::{
 };
 use tuwunel_service::{
 	Services, appservice::RegistrationInfo, profile::check_member_content,
-	rooms::state::RoomMutexGuard,
+	rooms::state::RoomMutexGuard, users::is_ignored,
 };
 
 use crate::{Ruma, utils::invite_check};
@@ -562,7 +562,7 @@ async fn process_invites(
 /// other failed invite is handled, while an ignored one proceeds and is
 /// withheld from the invitee afterwards.
 fn invite_allowed(ignored: Option<&IgnoredUserListEventContent>, invitee: &UserId) -> bool {
-	ignored.is_none_or(|content| !content.ignored_users.contains_key(invitee))
+	!is_ignored(ignored, invitee)
 }
 
 async fn finalize_alias_and_directory(

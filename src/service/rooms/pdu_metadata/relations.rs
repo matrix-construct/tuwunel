@@ -8,7 +8,10 @@ use futures::{
 use ruma::{
 	EventId, OwnedUserId, UserId,
 	api::Direction,
-	events::{reaction::ReactionEventContent, relation::RelationType},
+	events::{
+		ignored_user_list::IgnoredUserListEventContent, reaction::ReactionEventContent,
+		relation::RelationType,
+	},
 };
 use tuwunel_core::{
 	Result,
@@ -23,7 +26,7 @@ use tuwunel_core::{
 use tuwunel_database::keyval::Key;
 use tuwunel_matrix::{Event, Pdu, PduCount, PduId, RawPduId, event::RelationTypeEqual};
 
-use super::Service;
+use super::{Service, is_ignored_event};
 use crate::{integrity::undecodable_as, rooms::short::ShortRoomId};
 
 type StartKey = ArrayVec<u8, 16>;
@@ -55,6 +58,34 @@ pub struct RelationQuery<'a> {
 
 	/// Maximum number of raw relation rows to visit.
 	pub(crate) limit: usize,
+}
+
+/// Parameters for one requester's walk of the events related to a target.
+///
+/// A recursive walk varies only `target` between levels, so it keeps one query
+/// and updates that field.
+#[derive(Clone, Copy)]
+pub struct RequesterQuery<'a> {
+	/// Numeric room identifier containing the relation rows.
+	pub shortroomid: ShortRoomId,
+
+	/// Event position targeted by each relation row.
+	pub target: PduCount,
+
+	/// Optional exclusive cursor for the first relation row.
+	pub from: Option<PduCount>,
+
+	/// Optional exclusive position at which the walk stops.
+	pub to: Option<PduCount>,
+
+	/// Direction in which relation rows are visited.
+	pub dir: Direction,
+
+	/// Requesting user, who alone sees the unsigned fields private to its events.
+	pub user_id: &'a UserId,
+
+	/// The requester's ignored-user list; `None` ignores nobody.
+	pub ignored: Option<&'a IgnoredUserListEventContent>,
 }
 
 #[implement(Service)]
@@ -150,6 +181,30 @@ pub async fn has_incoming_relation(
 			sender_matches && rel_type_matches
 		})
 		.await
+}
+
+/// Walks the related events one requester may be shown.
+///
+/// MSC2675: a redacted child no longer relates to the target, and a child from
+/// a sender the requester ignores is never sent to them, so both are skipped.
+/// The walk stops at `to` before skipping anything, so an event there bounds
+/// the walk whether or not it is shown.
+#[implement(Service)]
+pub fn requester_relations<'a>(
+	&'a self,
+	RequesterQuery {
+		shortroomid,
+		target,
+		from,
+		to,
+		dir,
+		user_id,
+		ignored,
+	}: RequesterQuery<'a>,
+) -> impl Stream<Item = (PduCount, Pdu)> + Send + 'a {
+	self.get_relations(shortroomid, target, from, dir, Some(user_id))
+		.ready_take_while(move |(count, _)| to.is_none_or(|to| count.is_before(to, dir)))
+		.ready_filter(move |(_, pdu)| !pdu.is_redacted() && !is_ignored_event(ignored, pdu))
 }
 
 #[implement(Service)]

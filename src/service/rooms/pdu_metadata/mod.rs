@@ -2,19 +2,24 @@ use std::sync::Arc;
 
 use ruma::{
 	OwnedRoomId,
-	events::{AnySyncMessageLikeEvent, room::encrypted::Relation},
+	events::{
+		AnySyncMessageLikeEvent, ignored_user_list::IgnoredUserListEventContent,
+		room::encrypted::Relation,
+	},
 	serde::Raw,
 };
 use serde::Deserialize;
 use tuwunel_core::Result;
 use tuwunel_database::Map;
-use tuwunel_matrix::Pdu;
+use tuwunel_matrix::{Event, Pdu};
+
+use crate::users::is_ignored;
 
 mod bundling;
 mod purge;
 mod references;
 mod relations;
-pub use relations::RelationQuery;
+pub use relations::{RelationQuery, RequesterQuery};
 pub(crate) mod typed_relations;
 
 #[cfg(test)]
@@ -83,4 +88,12 @@ impl crate::Service for Service {
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+}
+
+/// Whether a requester's ignored-user list hides `pdu`.
+///
+/// State events stay visible whoever sent them, as the spec's ignored-user
+/// module requires, so that room state reads the same to every member.
+fn is_ignored_event<E: Event>(ignored: Option<&IgnoredUserListEventContent>, pdu: &E) -> bool {
+	pdu.state_key().is_none() && is_ignored(ignored, pdu.sender())
 }

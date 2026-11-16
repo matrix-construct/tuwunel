@@ -135,6 +135,19 @@ impl Count {
 		}
 	}
 
+	/// Whether this count is met before `other` in a walk in direction `dir`.
+	///
+	/// A forward walk meets lower counts first and a backward walk higher ones;
+	/// equal counts precede neither.
+	#[inline]
+	#[must_use]
+	pub fn is_before(self, other: Self, dir: Direction) -> bool {
+		match dir {
+			| Direction::Forward => self < other,
+			| Direction::Backward => self > other,
+		}
+	}
+
 	/// Adds an unsigned offset without integer overflow.
 	///
 	/// Backfilled offsets are cast to `i64` and must not exceed `i64::MAX`.

@@ -171,14 +171,9 @@ impl Service {
 	/// Returns true/false based on whether the recipient/receiving user has
 	/// blocked the sender
 	pub async fn user_is_ignored(&self, sender_user: &UserId, recipient_user: &UserId) -> bool {
-		self.ignored_users(recipient_user)
-			.await
-			.is_some_and(|ignored| {
-				ignored
-					.ignored_users
-					.keys()
-					.any(|blocked_user| blocked_user == sender_user)
-			})
+		let ignored = self.ignored_users(recipient_user).await;
+
+		is_ignored(ignored.as_ref(), sender_user)
 	}
 
 	/// The users a user ignores account-wide.
@@ -838,4 +833,12 @@ async fn set_password_locked(&self, user_id: &UserId, password: Option<&str>) ->
 #[must_use]
 pub fn is_password_hash(value: &str) -> bool {
 	value != PASSWORD_DISABLED && value != PASSWORD_SENTINEL
+}
+
+/// Whether an ignored-user list names `user_id`.
+///
+/// An absent list ignores nobody.
+#[must_use]
+pub fn is_ignored(ignored: Option<&IgnoredUserListEventContent>, user_id: &UserId) -> bool {
+	ignored.is_some_and(|content| content.ignored_users.contains_key(user_id))
 }

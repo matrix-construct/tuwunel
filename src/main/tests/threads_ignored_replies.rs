@@ -7,18 +7,27 @@ use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Err, Result, err, implement,
-	ruma::{EventId, OwnedEventId, RoomId, UserId},
+	ruma::{EventId, OwnedEventId, RoomId},
 	utils::BoolExt,
 };
 use tuwunel_service::Services;
 
-use self::client::{Client, field, register, wait_until_ready};
+use self::client::{Client, register, wait_until_ready};
 
 mod client;
+
+#[path = "client/event.rs"]
+mod event;
 
 #[expect(dead_code)] // Only the self-membership action is used from the add-on.
 #[path = "client/membership.rs"]
 mod membership;
+
+#[path = "client/put.rs"]
+mod put;
+
+#[path = "client/thread.rs"]
+mod thread;
 
 const IGNORED_TOKEN: &str = "threads-ignored-replies-ignored-token";
 const READER_TOKEN: &str = "threads-ignored-replies-reader-token";
@@ -81,7 +90,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	visible.act(&room, "join").await?;
 
 	let root_visible = visible
-		.message(&room, "root-visible", "visible root")
+		.send_text(&room, "root-visible", "visible root")
 		.await?;
 
 	ignored
@@ -93,7 +102,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	let root_reader = reader
-		.message(&room, "root-reader", "reader root")
+		.send_text(&room, "root-reader", "reader root")
 		.await?;
 
 	ignored
@@ -101,7 +110,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	let root_mixed = visible
-		.message(&room, "root-mixed", "mixed root")
+		.send_text(&room, "root-mixed", "mixed root")
 		.await?;
 
 	ignored
@@ -113,7 +122,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	let root_ignored = ignored
-		.message(&room, "root-ignored", "ignored root")
+		.send_text(&room, "root-ignored", "ignored root")
 		.await?;
 
 	visible
@@ -220,28 +229,6 @@ fn thread_summary(event: &Value) -> Option<&Value> {
 }
 
 #[implement(Client, params = "<'_>")]
-async fn message(&self, room_id: &RoomId, txn: &str, body: &str) -> Result<OwnedEventId> {
-	self.send(room_id, txn, &json!({ "msgtype": "m.text", "body": body }))
-		.await
-}
-
-#[implement(Client, params = "<'_>")]
-async fn reply(&self, room_id: &RoomId, txn: &str, root: &EventId) -> Result<OwnedEventId> {
-	let content = json!({
-		"msgtype": "m.text",
-		"body": "thread reply",
-		"m.relates_to": {
-			"rel_type": "m.thread",
-			"event_id": root,
-			"is_falling_back": true,
-			"m.in_reply_to": { "event_id": root },
-		},
-	});
-
-	self.send(room_id, txn, &content).await
-}
-
-#[implement(Client, params = "<'_>")]
 async fn edit(&self, room_id: &RoomId, txn: &str, root: &EventId) -> Result<OwnedEventId> {
 	let content = json!({
 		"msgtype": "m.text",
@@ -250,46 +237,9 @@ async fn edit(&self, room_id: &RoomId, txn: &str, root: &EventId) -> Result<Owne
 		"m.relates_to": { "rel_type": "m.replace", "event_id": root },
 	});
 
-	self.send(room_id, txn, &content).await
-}
+	let path = format!("rooms/{room_id}/send/m.room.message/{txn}");
 
-#[implement(Client, params = "<'_>")]
-async fn send(&self, room_id: &RoomId, txn: &str, content: &Value) -> Result<OwnedEventId> {
-	let response: Value = self
-		.services
-		.client
-		.clients
-		.default
-		.put(self.url(&format!("rooms/{room_id}/send/m.room.message/{txn}")))
-		.bearer_auth(self.token)
-		.json(content)
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	field(&response, "event_id")?
-		.try_into()
-		.map_err(Into::into)
-}
-
-#[implement(Client, params = "<'_>")]
-async fn set_ignored(&self, user_id: &UserId, ignored: &UserId) -> Result {
-	let path = format!("user/{user_id}/account_data/m.ignored_user_list");
-
-	self.services
-		.client
-		.clients
-		.default
-		.put(self.url(&path))
-		.bearer_auth(self.token)
-		.json(&json!({ "ignored_users": { ignored.as_str(): {} } }))
-		.send()
-		.await?
-		.error_for_status()?;
-
-	Ok(())
+	self.put_event(&path, &content).await
 }
 
 #[implement(Client, params = "<'_>")]
