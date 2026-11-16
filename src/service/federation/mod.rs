@@ -23,6 +23,7 @@ use self::peer::MAX_BACKOFF;
 /// These items classify failures, expose retry eligibility, and preserve the
 /// ranking policy shared by federation request paths.
 pub use self::{
+	execute::is_local_refusal,
 	peer::{Classification, PeerBackoff, ShouldAttempt, is_content_rejection},
 	rank::{Candidates, WhenAllBackedOff},
 };

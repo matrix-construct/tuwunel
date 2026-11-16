@@ -54,6 +54,29 @@ where
 	self.execute_on(client, dest, request).await
 }
 
+/// Sends a federation request that may name this server as its destination.
+///
+/// Any other destination is served exactly as by [`super::Service::execute`].
+/// A room's policy server may share this server's name, so its requests have
+/// to reach us whether or not federation loopback is configured.
+#[implement(super::Service)]
+#[tracing::instrument(skip_all, name = "request", level = "debug")]
+pub async fn execute_allow_self<T>(
+	&self,
+	dest: &ServerName,
+	request: T,
+) -> Result<T::IncomingResponse>
+where
+	T: OutgoingRequest + Debug + Send,
+	T::Authentication: FedAuth,
+	T::PathBuilder: FedPath,
+{
+	let client = &self.services.client.federation;
+
+	self.execute_on_allow_self(client, dest, request)
+		.await
+}
+
 /// Sends a bounded, backoff-aware client key lookup over federation.
 ///
 /// `/keys/query` and `/keys/claim` requests skip servers already in backoff and
@@ -152,13 +175,18 @@ async fn record_outcome(&self, dest: &ServerName, error: Option<&Error>) {
 	}
 }
 
-// Only `require_remote_permitted` raises this on the send path; a peer's 403 is `Federation`.
-fn is_local_refusal(error: &Error) -> bool {
+/// Whether a request failed because this server's configuration refused it.
+///
+/// Only `require_remote_permitted` raises this on the send path, when
+/// federation is disabled or the destination is forbidden; a peer's 403 arrives
+/// as `Federation`.
+#[must_use]
+pub fn is_local_refusal(error: &Error) -> bool {
 	matches!(error, Error::Request(ErrorKind::Forbidden, ..))
 }
 
-/// Executes one Feds request while permitting only this server as a
-/// self-destination and preserving ordinary peer-status recording.
+/// Executes one Feds or policy-server request while permitting only this
+/// server as a self-destination and preserving ordinary peer-status recording.
 ///
 /// Other federation entry points retain the configured loopback gate. A request
 /// refused because federation is disabled or the server is forbidden records

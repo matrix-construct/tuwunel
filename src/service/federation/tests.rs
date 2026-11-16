@@ -819,3 +819,33 @@ async fn a_named_retry_deadline_holds_back_the_peer() -> Result {
 
 	Ok(())
 }
+
+#[tokio::test]
+async fn the_allow_self_entry_point_can_ask_this_server() -> Result {
+	let config = Figment::new()
+		.merge(("server_name", "127.0.0.1:2"))
+		.merge(("network.http.ip_range_denylist", Vec::<String>::new()));
+
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let federation = &fixture.services.federation;
+	let own = fixture.services.globals.server_name();
+	let refusal = "Won't send federation request to ourselves";
+
+	let refused = federation
+		.execute(own, VersionRequest {})
+		.await
+		.expect_err("federation loopback is off");
+
+	let attempted = federation
+		.execute_allow_self(own, VersionRequest {})
+		.await
+		.expect_err("nothing listens on port 2");
+
+	assert!(refused.to_string().contains(refusal), "{refused}");
+	assert!(!attempted.to_string().contains(refusal), "{attempted}");
+
+	Ok(())
+}
