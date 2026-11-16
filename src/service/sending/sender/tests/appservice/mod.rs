@@ -62,7 +62,7 @@ async fn missing_appservice_registration_retries_on_its_timer_and_preserves_rows
 		.drain_due_wakes(&mut futures, &mut statuses, &mut wakes)
 		.await;
 
-	assert!(wakes.is_empty());
+	assert_eq!(wakes.peek(), None);
 	assert_eq!(futures.len(), 1);
 	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 1 })));
 
@@ -168,7 +168,7 @@ async fn ping_during_flight_retries_immediately_after_failure_and_stale_timer_is
 		.drain_due_wakes(&mut futures, &mut statuses, &mut wakes)
 		.await;
 
-	assert!(wakes.is_empty());
+	assert_eq!(wakes.peek(), None);
 	assert_eq!(futures.len(), 1);
 	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 1 })));
 

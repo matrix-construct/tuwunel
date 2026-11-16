@@ -290,7 +290,7 @@ async fn maintenance_preserves_rows_without_arming_or_sending() -> Result {
 		.await;
 
 	assert!(futures.is_empty());
-	assert!(wakes.is_empty());
+	assert_eq!(wakes.peek(), None);
 	assert!(matches!(statuses.get(&pending), Some(TransactionStatus::Pending)));
 	assert!(!statuses.contains_key(&queued));
 	sending.db.db["servercurrentevent_data"]

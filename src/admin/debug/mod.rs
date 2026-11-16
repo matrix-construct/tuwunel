@@ -1,3 +1,6 @@
+// Fires in clap's Subcommand derive output, which an item-level allow does not reach.
+#![expect(clippy::large_unopt_stack_frames)]
+
 mod backoff_metrics;
 mod change_log_level;
 #[cfg(feature = "jwt_login")]

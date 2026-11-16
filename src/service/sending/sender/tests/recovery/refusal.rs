@@ -144,7 +144,7 @@ async fn reenabled_federation_resumes_refused_destinations() -> Result {
 		.await;
 
 	assert_eq!(futures.len(), 2);
-	assert!(wakes.is_empty());
+	assert_eq!(wakes.peek(), None);
 	assert!(matches!(statuses.get(&retrying), Some(TransactionStatus::Running { tries: 1 })));
 	assert!(matches!(statuses.get(&queued), Some(TransactionStatus::Running { tries: 0 })));
 
@@ -216,7 +216,7 @@ async fn refused_traffic_arms_one_wake_and_preserves_status() -> Result {
 		));
 
 		assert!(futures.is_empty());
-		assert!(wakes.is_empty());
+		assert_eq!(wakes.peek(), None);
 	}
 
 	statuses.remove(&dest);

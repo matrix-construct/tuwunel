@@ -126,7 +126,6 @@ pub(in super::super) fn new(
 		base_path: config.base_path.clone().map(Into::into),
 		config: StorageProvider::s3(Box::new(config.clone())),
 		startup_check: config.startup_check,
-		services: args.services.clone(),
 		provider: Box::new(client),
 		signer: Some(signer),
 	};

@@ -21,7 +21,7 @@ use super::Provider;
 /// before the backend is configured with its cleanup policy.
 #[tracing::instrument(name = "new", level = "info", skip_all, err)]
 pub(in super::super) fn new(
-	args: &crate::Args<'_>,
+	_args: &crate::Args<'_>,
 	name: &str,
 	config: &StorageProviderLocal,
 ) -> Result<Option<(String, Arc<Provider>)>> {
@@ -57,7 +57,6 @@ pub(in super::super) fn new(
 		base_path: None, // LocalFileSystem computes base_path internally
 		config: StorageProvider::local(config.clone()),
 		startup_check: config.startup_check,
-		services: args.services.clone(),
 		provider: Box::new(provider),
 		#[cfg(any(feature = "gcs_storage", feature = "s3_storage"))]
 		signer: None,

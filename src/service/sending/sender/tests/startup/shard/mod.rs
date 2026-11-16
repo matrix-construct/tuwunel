@@ -64,7 +64,7 @@ async fn startup_discovery_arms_each_destination_only_on_its_worker() -> Result 
 
 	assert!(futures.is_empty());
 	assert!(statuses.is_empty());
-	assert!(wakes.is_empty());
+	assert_eq!(wakes.peek(), None);
 
 	Ok(())
 }

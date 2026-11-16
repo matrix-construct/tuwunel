@@ -1,3 +1,6 @@
+// Fires in clap's Subcommand derive output, which an item-level allow does not reach.
+#![expect(clippy::large_unopt_stack_frames)]
+
 mod clear;
 mod compact;
 mod count;

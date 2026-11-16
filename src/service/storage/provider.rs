@@ -88,10 +88,6 @@ pub struct Provider {
 	pub(crate) base_path: Option<Path>,
 
 	startup_check: bool,
-
-	#[expect(unused)]
-	#[debug(skip)]
-	services: Arc<crate::services::OnceServices>,
 }
 
 /// One streamed object chunk with its returned range and complete object size.

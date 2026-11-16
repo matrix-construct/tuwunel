@@ -67,7 +67,7 @@ async fn content_rejection_arms_the_sender_curve() -> Result {
 		.await;
 
 	assert!(futures.is_empty());
-	assert!(wakes.is_empty());
+	assert_eq!(wakes.peek(), None);
 
 	Ok(())
 }
@@ -132,7 +132,7 @@ async fn stale_wakes_replay_once_while_retrying() -> Result {
 
 	assert_eq!(futures.len(), 1);
 	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 3 })));
-	assert!(wakes.is_empty());
+	assert_eq!(wakes.peek(), None);
 
 	Ok(())
 }

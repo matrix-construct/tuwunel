@@ -1,3 +1,6 @@
+// Fires in clap's Subcommand derive output, which an item-level allow does not reach.
+#![expect(clippy::large_unopt_stack_frames)]
+
 mod add_email;
 mod clear_one_time_keys;
 mod create_user;
