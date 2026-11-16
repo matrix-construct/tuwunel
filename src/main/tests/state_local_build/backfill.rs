@@ -1,8 +1,8 @@
-use serde_json::Value;
+use serde_json::{Value, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result, async_noinline, err,
 	ruma::{
-		EventId, OwnedEventId, RoomId, UserId,
+		CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, RoomId, UserId,
 		api::federation::backfill::get_backfill::v1::Request as BackfillRequest,
 		events::room::{
 			history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
@@ -11,7 +11,7 @@ use tuwunel_core::{
 	},
 	utils::result::NotFound,
 };
-use tuwunel_matrix::pdu::PduBuilder;
+use tuwunel_matrix::pdu::{PduBuilder, into_outgoing_federation};
 use tuwunel_service::Services;
 
 use super::{
@@ -36,6 +36,10 @@ const THIRD: &str = "references the plain outlier";
 const REFERRER: &str = "plain outlier referencing the soft-failed message";
 const HIDDEN_SOFT_FAILED: &str = "soft-failed message behind a hidden event";
 const HIDDEN: &str = "hidden event referencing the soft-failed message";
+const WITHHELD_TOKEN: &str = "state-local-build-withheld-access-token";
+const WITHHELD: &str = "soft-failed message offered by backfill";
+const PROMOTED: &str = "plain outlier offered by backfill";
+const FOREIGN_SERVER: &str = "policy.invalid";
 
 // Enough to reach the room's create event from any request below.
 const WHOLE_ROOM: u32 = 50;
@@ -233,6 +237,91 @@ async fn hidden_referencer_needs_the_request<'a>(
 	Ok(())
 }
 
+/// Backfill leaves a soft-failed event the outlier it was stored as, and still
+/// promotes a plain outlier.
+///
+/// The second offer carries a signature no verification asks for, so a copy
+/// that replaced the stored outlier would show it. The last, once the stored
+/// copy is unreadable, fails instead of promoting the event.
+// size firewall
+#[async_noinline]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn soft_failed_stays_out_of_backfill<'a>(
+	services: &'a Services,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
+) -> Result {
+	let banned = register(services, "backfillwithheld", WITHHELD_TOKEN).await?;
+
+	append_membership(services, user_id, room_id, &banned, MembershipState::Invite).await?;
+	append_membership(services, &banned, room_id, &banned, MembershipState::Join).await?;
+
+	let (message, message_json) = sign_message(services, &banned, room_id, WITHHELD).await?;
+
+	append_membership(services, user_id, room_id, &banned, MembershipState::Ban).await?;
+
+	let handled =
+		redeliver(services, room_id, &message, message_json.clone(), "withheld message").await?;
+
+	assert!(!handled, "the banned user's message was not soft failed");
+
+	let withheld: &EventId = message.event_id.as_ref();
+
+	assert_soft_failed(services, withheld).await;
+
+	let prepended = ingest(services, room_id, message_json.clone()).await?;
+
+	assert!(!prepended, "backfill prepended a soft-failed event");
+
+	assert_soft_failed(services, withheld).await;
+
+	let prepended =
+		ingest(services, room_id, with_foreign_signature(message_json.clone())).await?;
+
+	assert!(!prepended, "backfill prepended a copy of a soft-failed event");
+
+	let replaced = services
+		.timeline
+		.get_outlier_pdu_json(withheld)
+		.await?
+		.get("signatures")
+		.and_then(CanonicalJsonValue::as_object)
+		.is_some_and(|signatures| signatures.contains_key(FOREIGN_SERVER));
+
+	assert!(!replaced, "a backfilled copy replaced the stored soft-failed event");
+
+	let (outlier, outlier_json) =
+		sign_outlier_message(services, user_id, room_id, PROMOTED).await?;
+
+	let prepended = ingest(services, room_id, outlier_json).await?;
+
+	assert!(prepended, "backfill withheld a plain outlier");
+
+	services
+		.timeline
+		.non_outlier_pdu_exists(outlier.event_id.as_ref())
+		.await?;
+
+	let outliers = services.db.get("eventid_outlierpdu")?;
+
+	outliers.insert(withheld.as_bytes(), b"{");
+	services.clear_cache().await;
+
+	let ingested = ingest(services, room_id, message_json).await;
+
+	assert!(ingested.is_err(), "backfill read an unreadable soft-failed event as unmarked");
+
+	let promoted = services
+		.timeline
+		.non_outlier_pdu_exists(withheld)
+		.await
+		.is_ok();
+
+	assert!(!promoted, "an unreadable soft-failed event reached the timeline");
+
+	Ok(())
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 async fn restrict_history(
 	services: &Services,
@@ -295,6 +384,32 @@ async fn backfill(
 		.and_then(Value::as_array)
 		.cloned()
 		.ok_or_else(|| err!("backfill response omitted pdus"))
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn ingest(
+	services: &Services,
+	room_id: &RoomId,
+	json: CanonicalJsonObject,
+) -> Result<bool> {
+	let room_version = services.state.get_room_version(room_id).await?;
+	let json = into_outgoing_federation(json, &room_version);
+
+	services
+		.timeline
+		.backfill_pdu(room_id, services.globals.server_name(), to_raw_value(&json)?)
+		.await
+}
+
+fn with_foreign_signature(mut json: CanonicalJsonObject) -> CanonicalJsonObject {
+	let signature = CanonicalJsonValue::String("AAAA".to_owned());
+	let keys = CanonicalJsonValue::Object([("ed25519:policy_server".into(), signature)].into());
+
+	if let Some(CanonicalJsonValue::Object(signatures)) = json.get_mut("signatures") {
+		signatures.insert(FOREIGN_SERVER.into(), keys);
+	}
+
+	json
 }
 
 fn count(pdus: &[Value], body: &str) -> usize { bodies(pdus).filter(|&b| b == body).count() }

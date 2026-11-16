@@ -113,11 +113,20 @@ pub async fn is_event_soft_failed(&self, event_id: &EventId) -> bool {
 /// The event must carry a soft-fail marker, have no accepted timeline row, be
 /// stored as an outlier and belong to `room_id`. Any other event is not found,
 /// so a marker stranded on an accepted event leaves that event to the timeline.
+/// A storage or decoding failure on the way is an error, never not found.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn get_soft_failed_outlier(&self, room_id: &RoomId, event_id: &EventId) -> Result<Pdu> {
+	let marked = self
+		.db
+		.softfailedeventids
+		.get(event_id)
+		.await
+		.present()?
+		.is_some();
+
 	// Almost every event on the federation serving paths carries no marker.
-	if !self.is_event_soft_failed(event_id).await {
+	if !marked {
 		return Err!(Request(NotFound("Event is not soft-failed.")));
 	}
 

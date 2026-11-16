@@ -22,6 +22,7 @@ use tuwunel_core::{
 	utils::{
 		BoolExt, IterStream, ReadyExt,
 		future::{BoolExt as FutureBoolExt, TryExtExt},
+		result::NotFound,
 	},
 	validated, warn,
 };
@@ -382,8 +383,8 @@ async fn backfill_event(
 ///
 /// Fetcher checks are disabled only for retrieval; `backfill_pdu`
 /// performs signature, hash, and authorization validation. An event already
-/// accepted completes successfully without another insertion, while a stored
-/// outlier is still validated and promoted.
+/// accepted, or a soft-failed one, completes successfully without insertion,
+/// while any other stored outlier is still validated and promoted.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn fetch_remote_event(&self, room_id: &RoomId, event_id: &EventId) -> Result {
@@ -403,10 +404,11 @@ pub async fn fetch_remote_event(&self, room_id: &RoomId, event_id: &EventId) -> 
 
 /// Validates and inserts one remotely supplied event as backfilled history.
 ///
-/// An already accepted duplicate returns `false` without insertion. A new event
-/// or stored outlier receives a negative backfill count, moves to accepted
-/// storage, updates its timestamp and ID indexes, and adds searchable message
-/// or topic content.
+/// An already accepted duplicate returns `false` without insertion, as does a
+/// soft-failed event, which stays the outlier it was stored as. Any other new
+/// event or stored outlier receives a negative backfill count, moves to
+/// accepted storage, updates its timestamp and ID indexes, and adds searchable
+/// message or topic content.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self, pdu), level = "debug")]
 pub async fn backfill_pdu(
@@ -429,6 +431,21 @@ pub async fn backfill_pdu(
 		.map(Ok);
 
 	let ((_, event_id, value), mutex_lock) = try_join(parsed, mutex_lock).await?;
+
+	let soft_failed = self
+		.services
+		.pdu_metadata
+		.get_soft_failed_outlier(room_id, &event_id)
+		.await
+		.present()?
+		.is_some();
+
+	// Ahead of ingestion, so the remote copy never replaces the stored outlier; a
+	// failed read errs rather than letting the copy in.
+	if soft_failed {
+		debug!(%event_id, "Soft-failed event stays out of backfilled history");
+		return Ok(false);
+	}
 
 	let existed = self
 		.services

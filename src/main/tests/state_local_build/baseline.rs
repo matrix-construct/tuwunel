@@ -11,7 +11,7 @@ use tuwunel_service::{
 };
 
 use super::{
-	backfill::soft_failed_served_when_referenced,
+	backfill::{soft_failed_served_when_referenced, soft_failed_stays_out_of_backfill},
 	derived::sibling_state_prevs_both_resolve,
 	helpers::{
 		ExpectedPass, ExpectedWalkOutcome, assert_one_settled_walk, assert_prev_walk,
@@ -87,6 +87,15 @@ pub(super) async fn enabled_baseline(
 		.map_err(step(label))?;
 
 	soft_failed_served_when_referenced(services, base, token, user_id, &backfill_room)
+		.await
+		.map_err(step(label))?;
+
+	let label = "soft-failed event offered by backfill";
+	let withheld_room = create_room(services, base, token)
+		.await
+		.map_err(step(label))?;
+
+	soft_failed_stays_out_of_backfill(services, user_id, &withheld_room)
 		.await
 		.map_err(step(label))?;
 
