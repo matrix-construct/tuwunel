@@ -9,6 +9,7 @@
 
 use std::{
 	collections::BTreeMap,
+	iter::once,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -16,7 +17,9 @@ use futures::{Stream, StreamExt};
 use http::StatusCode;
 use ruma::{OwnedServerName, ServerName, api::error::ErrorBody};
 use tuwunel_core::{
-	Error, implement,
+	Error,
+	arrayvec::ArrayVec,
+	implement,
 	utils::{
 		stream::{ReadyExt, TryIgnore},
 		time::now_secs,
@@ -28,6 +31,12 @@ use tuwunel_database::Interfix;
 ///
 /// The duration matches the 24-hour default of `sender_retry_backoff_limit`.
 pub(super) const MAX_BACKOFF: Duration = Duration::from_hours(24);
+
+/// Encoded failure row.
+///
+/// A classification byte, the failure instant, then an optional retry
+/// deadline; each later field is an additive tail older readers ignore.
+type FailureRow = ArrayVec<u8, 17>;
 
 /// Permanence classification supplied alongside a failure.
 ///
@@ -107,6 +116,9 @@ pub(super) struct Backoff {
 
 	/// Initial delay applied to a lone transient failure.
 	pub(super) grace_secs: u64,
+
+	/// Deadline the peer asked us to wait for (seconds since the epoch).
+	pub(super) retry_until: Option<u64>,
 }
 
 /// Fold state accumulated over one server's failure rows.
@@ -126,6 +138,12 @@ pub(super) struct Streak {
 
 	/// Newest bucket included in the streak.
 	pub(super) latest_bucket: u64,
+
+	/// Latest retry deadline carried by any row of the streak.
+	pub(super) retry_until: Option<u64>,
+
+	/// Whether a failure row was folded; deadline rows alone leave it unset.
+	pub(super) failed: bool,
 }
 
 /// Summarizes a peer's current failure streak for administration.
@@ -206,13 +224,28 @@ pub async fn peer_has_failures(&self, server: &ServerName) -> bool {
 /// stores the exact failure instant while remaining compatible with old rows.
 #[implement(super::Service)]
 pub fn record_failure(&self, server: &ServerName, classification: Classification) {
-	// Raw-value additive extension; old one-byte rows stay readable.
-	let mut value = [0_u8; 9];
-	value[0] = u8::from(classification);
-	value[1..].copy_from_slice(&now_secs().to_be_bytes());
+	let value = failure_row(classification, now_secs(), None);
 
 	self.statuses
 		.put_raw((server, self.current_bucket()), value);
+}
+
+/// Records a deadline a peer asked not to be retried before (seconds since the
+/// epoch).
+///
+/// The deadline is a row of its own, keyed by the first bucket that starts after
+/// it: a failure is written to that bucket only once the deadline has passed,
+/// so no failure write drops a deadline still running. It holds back every
+/// request to the peer until it passes. The peer chose it, so it is clamped to
+/// [`MAX_BACKOFF`] from now.
+#[implement(super::Service)]
+pub fn record_retry_after(&self, server: &ServerName, retry_until: u64) {
+	let now = now_secs();
+	let retry_until = retry_until.clamp(now, now.saturating_add(MAX_BACKOFF.as_secs()));
+	let bucket = self.bucket_of(retry_until).saturating_add(1);
+	let value = failure_row(Classification::Transient, now, Some(retry_until));
+
+	self.statuses.put_raw((server, bucket), value);
 }
 
 /// Determines whether a federation request should currently target a peer.
@@ -269,29 +302,41 @@ pub async fn peer_backoffs(&self) -> BTreeMap<OwnedServerName, PeerBackoff> {
 		.collect()
 }
 
-/// Streams one tuple per readable peer-status bucket.
+/// Streams one tuple per readable peer-status failure bucket.
 ///
 /// Items are ordered by `(server, bucket_start)` for the admin snapshot table.
 /// Borrowed server names are cursor-backed and remain valid only until the next
 /// poll. Database and key-decoding errors are skipped; malformed values decode
-/// as transient failures.
+/// as transient failures, and retry deadlines, which name no failure, are left
+/// out.
 #[implement(super::Service)]
 pub fn peer_snapshot(
 	&self,
 ) -> impl Stream<Item = (&ServerName, SystemTime, Classification)> + Send + '_ {
-	self.statuses.stream().ignore_err().map(
-		move |((server, bucket), value): ((&ServerName, u64), &[u8])| {
+	self.statuses
+		.stream()
+		.ignore_err()
+		.ready_filter(|(_, value): &((&ServerName, u64), &[u8])| {
+			retry_until_secs(value).is_none()
+		})
+		.map(move |((server, bucket), value): ((&ServerName, u64), &[u8])| {
 			(server, self.bucket_start(bucket), classify(value))
-		},
-	)
+		})
 }
 
 #[implement(super::Service)]
 #[inline]
 #[must_use]
-fn current_bucket(&self) -> u64 {
-	now_secs()
-		.checked_div(self.window_secs.max(1))
+fn current_bucket(&self) -> u64 { self.bucket_of(now_secs()) }
+
+/// The bucket holding the instant `secs` (seconds since the epoch).
+///
+/// Buckets are `window_secs` wide and numbered from the epoch.
+#[implement(super::Service)]
+#[inline]
+#[must_use]
+fn bucket_of(&self, secs: u64) -> u64 {
+	secs.checked_div(self.window_secs.max(1))
 		.unwrap_or(0)
 }
 
@@ -344,32 +389,36 @@ fn backoff(&self, run: Streak) -> Backoff {
 		now: now_secs(),
 		window_secs: self.window_secs,
 		grace_secs: self.grace.as_secs(),
+		retry_until: run.retry_until,
 	}
 }
 
 /// Projects a failure streak onto the admin-facing summary.
 #[implement(super::Service)]
 fn peer_backoff_from(&self, streak: Streak) -> PeerBackoff {
+	let delay_secs = self
+		.backoff(streak)
+		.earliest_secs()
+		.saturating_sub(streak.anchor_secs);
+
 	PeerBackoff {
 		class: streak.class,
 		anchor_secs: streak.anchor_secs,
 		oldest_secs: streak
 			.oldest_bucket
 			.saturating_mul(self.window_secs),
-		delay_secs: self.backoff(streak).delay_secs(),
+		delay_secs,
 	}
 }
 
 /// Computes a retry verdict from a peer's latest failure state.
 ///
-/// The peer becomes attemptable once the selected delay past the anchor has
-/// elapsed. Overflow while constructing the wall-clock deadline falls back to
-/// the current time.
+/// The peer becomes attemptable once the selected delay past the anchor, and
+/// any deadline the peer asked for, have elapsed. Overflow while constructing
+/// the wall-clock deadline falls back to the current time.
 #[must_use]
 pub(super) fn attempt_verdict(backoff: &Backoff) -> ShouldAttempt {
-	let earliest_secs = backoff
-		.anchor_secs
-		.saturating_add(backoff.delay_secs());
+	let earliest_secs = backoff.earliest_secs();
 
 	if backoff.now >= earliest_secs {
 		return ShouldAttempt::Yes;
@@ -382,33 +431,48 @@ pub(super) fn attempt_verdict(backoff: &Backoff) -> ShouldAttempt {
 	}
 }
 
-impl Backoff {
-	/// Calculates the bounded retry delay for this failure state.
-	///
-	/// Permanent failures use [`MAX_BACKOFF`]. A lone transient failure uses the
-	/// configured grace tier when enabled; larger streaks follow the saturating
-	/// `window * streak^2` curve and cap at the same maximum.
-	#[must_use]
-	pub(super) fn delay_secs(&self) -> u64 {
-		let max_backoff = MAX_BACKOFF.as_secs();
+/// Returns the first instant (seconds since the epoch) another attempt is
+/// allowed.
+///
+/// That is the retry delay past the anchor, or the deadline the peer asked for
+/// when that is later.
+#[implement(Backoff)]
+#[must_use]
+pub(super) fn earliest_secs(&self) -> u64 {
+	self.anchor_secs
+		.saturating_add(self.delay_secs())
+		.max(self.retry_until.unwrap_or_default())
+}
 
-		match self.class {
-			| Classification::Permanent => max_backoff,
-			| Classification::Transient if self.streak <= 1 && self.grace_secs != 0 =>
-				self.grace_secs.min(max_backoff),
-			| Classification::Transient => self
-				.window_secs
-				.saturating_mul(u64::from(self.streak))
-				.saturating_mul(u64::from(self.streak))
-				.min(max_backoff),
-		}
+/// Calculates the bounded retry delay for this failure state.
+///
+/// Permanent failures use [`MAX_BACKOFF`]. A lone transient failure uses the
+/// configured grace tier when enabled; larger streaks follow the saturating
+/// `window * streak^2` curve and cap at the same maximum.
+#[implement(Backoff)]
+#[must_use]
+pub(super) fn delay_secs(&self) -> u64 {
+	let max_backoff = MAX_BACKOFF.as_secs();
+
+	match self.class {
+		| Classification::Permanent => max_backoff,
+		| Classification::Transient if self.streak <= 1 && self.grace_secs != 0 =>
+			self.grace_secs.min(max_backoff),
+		| Classification::Transient => self
+			.window_secs
+			.saturating_mul(u64::from(self.streak))
+			.saturating_mul(u64::from(self.streak))
+			.min(max_backoff),
 	}
 }
 
-/// Folds one failure row into a server's running streak.
+/// Folds one row into a server's running streak.
 ///
-/// The newest row supplies the class and anchor while the first row's bucket is
-/// retained as the oldest edge of the streak.
+/// The newest failure row supplies the class and anchor while the first
+/// failure row's bucket is retained as the oldest edge of the streak. A
+/// deadline row is keyed past its deadline rather than by when it was written,
+/// so it contributes only its deadline; the latest deadline of any row
+/// survives.
 #[must_use]
 pub(super) fn fold_streak(
 	window_secs: u64,
@@ -416,16 +480,65 @@ pub(super) fn fold_streak(
 	bucket: u64,
 	value: &[u8],
 ) -> Streak {
+	let deadline = retry_until_secs(value);
 	let anchor_secs = failure_secs(value).unwrap_or_else(|| bucket.saturating_mul(window_secs));
+	let retry_until = state
+		.and_then(|streak| streak.retry_until)
+		.max(deadline);
 
-	let oldest_bucket = state.map_or(bucket, |streak| streak.oldest_bucket);
+	if deadline.is_some() {
+		return state.map_or_else(
+			|| deadline_streak(window_secs, anchor_secs, retry_until),
+			|streak| Streak { retry_until, ..streak },
+		);
+	}
+
+	let oldest_bucket = state
+		.filter(|streak| streak.failed)
+		.map_or(bucket, |streak| streak.oldest_bucket);
 
 	Streak {
 		class: classify(value),
 		anchor_secs,
 		oldest_bucket,
 		latest_bucket: bucket,
+		retry_until,
+		failed: true,
 	}
+}
+
+/// A streak holding only a retry deadline.
+///
+/// It is anchored and bucketed at the instant the deadline was written, not at
+/// the bucket past the deadline that keys its row.
+fn deadline_streak(window_secs: u64, written_secs: u64, retry_until: Option<u64>) -> Streak {
+	let bucket = written_secs
+		.checked_div(window_secs.max(1))
+		.unwrap_or(0);
+
+	Streak {
+		class: Classification::Transient,
+		anchor_secs: written_secs,
+		oldest_bucket: bucket,
+		latest_bucket: bucket,
+		retry_until,
+		failed: false,
+	}
+}
+
+/// Encodes a failure row.
+///
+/// Binaries predating the retry deadline read only its first nine bytes.
+#[must_use]
+pub(super) fn failure_row(
+	class: Classification,
+	failure_secs: u64,
+	retry_until: Option<u64>,
+) -> FailureRow {
+	once(u8::from(class))
+		.chain(failure_secs.to_be_bytes())
+		.chain(retry_until.into_iter().flat_map(u64::to_be_bytes))
+		.collect()
 }
 
 #[inline]
@@ -449,6 +562,17 @@ pub(super) fn classify(bytes: &[u8]) -> Classification {
 pub(super) fn failure_secs(bytes: &[u8]) -> Option<u64> {
 	bytes
 		.get(1..9)
+		.and_then(|tail| tail.try_into().ok())
+		.map(u64::from_be_bytes)
+}
+
+/// Decodes the retry deadline a peer asked for, in seconds since the epoch.
+///
+/// Rows without the tail, and truncated values, yield `None`.
+#[must_use]
+pub(super) fn retry_until_secs(bytes: &[u8]) -> Option<u64> {
+	bytes
+		.get(9..17)
 		.and_then(|tail| tail.try_into().ok())
 		.map(u64::from_be_bytes)
 }

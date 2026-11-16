@@ -11,6 +11,7 @@ use std::{
 };
 
 use bytes::Bytes;
+use futures::StreamExt;
 use http::StatusCode;
 use reqwest::{Request, Url};
 use ruma::{
@@ -24,11 +25,17 @@ use ruma::{
 	},
 };
 use serde_json::Value;
-use tuwunel_core::{Error, Result, config::Figment, err};
+use tuwunel_core::{
+	Error, Result,
+	config::Figment,
+	err,
+	utils::{stream::ReadyExt, time::now_secs},
+};
 
 use super::peer::{
 	Backoff, Classification, MAX_BACKOFF, ShouldAttempt, attempt_verdict, classify,
-	classify_error, failure_secs, fold_streak, is_content_rejection,
+	classify_error, failure_row, failure_secs, fold_streak, is_content_rejection,
+	retry_until_secs,
 };
 use crate::{
 	resolver::{cache::CachedDest, fed::FedDest},
@@ -585,6 +592,7 @@ fn transient_verdict(anchor_secs: u64, streak: u32, now: u64) -> ShouldAttempt {
 		now,
 		window_secs: 180,
 		grace_secs: 15,
+		retry_until: None,
 	})
 }
 
@@ -636,6 +644,7 @@ fn permanent_ignores_streak_and_caps_at_max() {
 			now,
 			window_secs: 180,
 			grace_secs: 15,
+			retry_until: None,
 		})
 	};
 
@@ -658,6 +667,7 @@ fn disabled_grace_uses_the_curve_from_the_first_failure() {
 		now: 1000,
 		window_secs: 180,
 		grace_secs: 0,
+		retry_until: None,
 	});
 
 	// streak 1 with grace disabled uses window * 1 = 180s, not the grace tier.
@@ -674,6 +684,7 @@ fn delay_secs_selects_the_tier() {
 			now: 0,
 			window_secs: 180,
 			grace_secs,
+			retry_until: None,
 		}
 		.delay_secs()
 	};
@@ -711,4 +722,100 @@ fn fold_streak_tracks_anchor_and_oldest() {
 	assert_eq!(second.oldest_bucket, 10);
 	assert_eq!(second.latest_bucket, 12);
 	assert!(matches!(second.class, Classification::Permanent));
+}
+
+#[test]
+fn a_retry_deadline_outlasts_a_shorter_curve() {
+	let backoff = |retry_until| Backoff {
+		class: Classification::Transient,
+		anchor_secs: 1000,
+		streak: 1,
+		now: 1500,
+		window_secs: 180,
+		grace_secs: 15,
+		retry_until,
+	};
+
+	// The grace alone releases at 1015; the peer asked for 2000.
+	assert_eq!(attempt_verdict(&backoff(Some(2000))), no_before(2000));
+	assert!(matches!(attempt_verdict(&backoff(Some(1005))), ShouldAttempt::Yes));
+	assert_eq!(backoff(Some(1005)).earliest_secs(), 1015);
+}
+
+#[test]
+fn a_retry_deadline_rides_a_row_of_its_own() {
+	let secs: u64 = 1_700_000_000;
+	let deadline = failure_row(Classification::Transient, secs, Some(secs + 600));
+	let failure = failure_row(Classification::Permanent, secs + 5, None);
+
+	// Readers of the nine-byte row take its first nine bytes and ignore the tail.
+	assert_eq!(deadline.len(), 17);
+	assert!(matches!(classify(&deadline), Classification::Transient));
+	assert_eq!(failure_secs(&deadline), Some(secs));
+	assert_eq!(retry_until_secs(&deadline), Some(secs + 600));
+	assert_eq!(failure.len(), 9);
+	assert_eq!(retry_until_secs(&failure), None);
+
+	// Keyed past its deadline, a deadline row adds its deadline and nothing else.
+	let failed = fold_streak(180, None, 10, &failure);
+	let bounded = fold_streak(180, Some(failed), 20, &deadline);
+
+	assert_eq!(bounded.retry_until, Some(secs + 600));
+	assert_eq!((bounded.oldest_bucket, bounded.latest_bucket), (10, 10));
+	assert_eq!(bounded.anchor_secs, secs + 5);
+	assert!(matches!(bounded.class, Classification::Permanent));
+
+	// Folded first, it neither starts the failure streak nor anchors it.
+	let alone = fold_streak(180, None, 5, &deadline);
+	let after = fold_streak(180, Some(alone), 10, &failure);
+
+	assert_eq!((alone.oldest_bucket, alone.anchor_secs), (secs / 180, secs));
+	assert_eq!((after.oldest_bucket, after.latest_bucket), (10, 10));
+	assert_eq!(after.retry_until, Some(secs + 600));
+}
+
+#[tokio::test]
+async fn a_named_retry_deadline_holds_back_the_peer() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let federation = &fixture.services.federation;
+	let limited: OwnedServerName = "limited.example".try_into()?;
+	let greedy: OwnedServerName = "greedy.example".try_into()?;
+	let max = MAX_BACKOFF.as_secs();
+	let now = now_secs();
+
+	federation.record_retry_after(&limited, now + 3_600);
+	federation.record_retry_after(&greedy, u64::MAX);
+
+	let earliest = async |server: &ServerName| {
+		let backoff = federation
+			.peer_backoff(server)
+			.await
+			.expect("a failure row is recorded");
+
+		backoff.anchor_secs + backoff.delay_secs
+	};
+
+	assert!(matches!(federation.should_attempt(&limited).await, ShouldAttempt::No { .. }));
+	assert_eq!(earliest(&limited).await, now + 3_600);
+
+	// A later failure in the current bucket leaves the deadline standing.
+	federation.record_failure(&limited, Classification::Transient);
+
+	let failures = federation
+		.peer_snapshot()
+		.ready_filter(|&(server, ..)| server == limited)
+		.count()
+		.await;
+
+	assert_eq!(earliest(&limited).await, now + 3_600);
+	assert_eq!(failures, 1, "the deadline is not listed as a failure");
+
+	let clamped = earliest(&greedy).await;
+
+	assert!((now + max..=now_secs() + max).contains(&clamped), "{clamped}");
+
+	Ok(())
 }
