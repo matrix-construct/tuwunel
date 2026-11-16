@@ -12,10 +12,9 @@ use ruma::{
 	events::{GlobalAccountDataEventType, RoomAccountDataEventType},
 	serde::Raw,
 };
-use serde::Deserialize;
-use serde_json::{Value as JsonValue, json, value::RawValue as RawJsonValue};
-use tuwunel_core::{Err, Result, err};
-use tuwunel_service::{Services, appservice::RegistrationInfo};
+use serde_json::{json, value::RawValue as RawJsonValue};
+use tuwunel_core::{Err, Result, err, utils::json::is_empty_object};
+use tuwunel_service::{Services, account_data::is_tombstone, appservice::RegistrationInfo};
 
 pub(crate) use self::{
 	delete_global_account_data::delete_global_account_data_route,
@@ -87,24 +86,10 @@ fn validate_event_type(event_type: &str) -> Result {
 /// MSC3391: tombstoned account data carries `content: {}`. Sync delta
 /// surfaces the empty event so clients can apply the deletion; everywhere
 /// else (GET, initial sync) treats it as not-present.
-fn is_empty_content<T>(content: &Raw<T>) -> bool { is_empty_object_json(content.json()) }
+fn is_empty_content<T>(content: &Raw<T>) -> bool { is_empty_object(content.json()) }
 
 /// Equivalent test against a stored account-data event (`{type, content}`)
 /// rather than the bare `content` payload. Used by sync filters.
 pub(crate) fn is_empty_account_data_event<T>(event: &Raw<T>) -> bool {
-	#[derive(Deserialize)]
-	struct ContentOnly<'a> {
-		#[serde(borrow)]
-		content: &'a RawJsonValue,
-	}
-
-	serde_json::from_str::<ContentOnly<'_>>(event.json().get())
-		.is_ok_and(|c| is_empty_object_json(c.content))
-}
-
-fn is_empty_object_json(s: &RawJsonValue) -> bool {
-	serde_json::from_str::<JsonValue>(s.get())
-		.ok()
-		.and_then(|v| v.as_object().map(serde_json::Map::is_empty))
-		.unwrap_or(false)
+	is_tombstone(event.json().get().as_bytes())
 }
