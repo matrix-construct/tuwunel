@@ -13,7 +13,7 @@ use tokio::{sync::Notify, time::sleep};
 use tuwunel_core::{Config, Result, config::Figment, utils::to_canonical_object};
 use tuwunel_database::{Cbor, Deserialized, Json, Map, serialize_key};
 
-use super::{PASSWORD_SENTINEL, Service, device::DeviceLock};
+use super::{BrowserSession, PASSWORD_SENTINEL, Service, device::DeviceLock};
 use crate::{
 	sync::{Connection, into_connection_key},
 	test_utils::{create_devices, fixture, released_after, released_by},
@@ -631,7 +631,7 @@ async fn browser_session_lasts_until_ended() -> Result {
 	let owner = user_id!("@session-owner:localhost");
 	let other = user_id!("@session-other:localhost");
 	let session = users
-		.create_browser_session(owner, None)
+		.mint_browser_session(owner)
 		.expect("sessions are on by default");
 
 	assert_eq!(session.lifetime.as_secs(), 60 * 60 * 24 * 30);
@@ -650,8 +650,12 @@ async fn browser_session_lasts_until_ended() -> Result {
 	users.end_browser_session(&session.token, other);
 	assert_eq!(users.find_browser_session(&session.token).await, Some(owner));
 
-	let replacement = users
-		.create_browser_session(other, Some(&session.token))
+	users
+		.create(other, Some(OLD_PASSWORD), None)
+		.await?;
+
+	let replacement = sign_in(users, other, Some(&session.token))
+		.await?
 		.expect("replacement session");
 
 	let replaced = users.find_browser_session(&session.token).await;
@@ -672,6 +676,19 @@ async fn browser_session_lasts_until_ended() -> Result {
 	Ok(())
 }
 
+/// Signs a user in with the password hash the account holds now.
+async fn sign_in(
+	users: &Service,
+	user_id: &UserId,
+	replaces: Option<&str>,
+) -> Result<Option<BrowserSession>> {
+	let hash = users.password_hash(user_id).await?;
+
+	Ok(users
+		.create_browser_session(user_id, Some(&hash), replaces)
+		.await)
+}
+
 #[tokio::test]
 async fn ending_sessions_spares_a_longer_user_id() -> Result {
 	let Some(fixture) = fixture(Figment::new()).await? else {
@@ -683,7 +700,7 @@ async fn ending_sessions_spares_a_longer_user_id() -> Result {
 	let long = user_id!("@session:localhost.example");
 	let create = |user_id| {
 		users
-			.create_browser_session(user_id, None)
+			.mint_browser_session(user_id)
 			.expect("sessions are on by default")
 	};
 
@@ -714,7 +731,7 @@ async fn browser_session_expires_and_turns_off() -> Result {
 	let users = &fixture.services.users;
 	let owner = user_id!("@session-expiry:localhost");
 	let session = users
-		.create_browser_session(owner, None)
+		.mint_browser_session(owner)
 		.expect("a one second session");
 
 	assert_eq!(users.find_browser_session(&session.token).await, Some(owner));
@@ -729,11 +746,44 @@ async fn browser_session_expires_and_turns_off() -> Result {
 		.config
 		.replace(without_sessions(config))?;
 
-	assert!(
-		users
-			.create_browser_session(owner, None)
-			.is_none()
-	);
+	assert!(users.mint_browser_session(owner).is_none());
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn browser_session_waits_out_a_password_write() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let users = &fixture.services.users;
+	let owner = user_id!("@session-reset:localhost");
+
+	users
+		.create(owner, Some(OLD_PASSWORD), None)
+		.await?;
+
+	let verified = users.password_hash(owner).await?;
+	let password_guard = users.changing_password.lock(owner).await;
+	let signing_in = users.create_browser_session(owner, Some(&verified), None);
+
+	pin_mut!(signing_in);
+	assert!(poll!(signing_in.as_mut()).is_pending());
+
+	users
+		.set_password_locked(owner, Some(NEW_PASSWORD))
+		.await?;
+
+	drop(password_guard);
+
+	assert!(signing_in.await.is_none(), "a session outlived the password it verified");
+
+	let session = sign_in(users, owner, None)
+		.await?
+		.expect("the current password starts a session");
+
+	assert_eq!(users.find_browser_session(&session.token).await, Some(owner));
 
 	Ok(())
 }

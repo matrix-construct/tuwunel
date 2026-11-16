@@ -18,6 +18,7 @@ use tuwunel_core::{
 	err,
 	smallstr::SmallString,
 	utils::{BoolExt, hash::verify_password, html::escape as html_escape},
+	warn,
 };
 use tuwunel_service::{Services, users::Register};
 use url::Url;
@@ -238,17 +239,20 @@ async fn native_submit(
 		body.device_id.as_deref(),
 	)?;
 
-	let user_id = match context {
+	let (user_id, hash) = match context {
 		| Flow::Authorization(req_id) =>
 			authenticate_local(services, req_id, address, body).await?,
-		| _ => verify_credentials(services, &body.username, &body.password, address).await?,
+		| _ => verify_credentials(services, &body.username, &body.password, address)
+			.await
+			.map(|(user_id, hash)| (user_id, Some(hash)))?,
 	};
 
 	let token = mint_login_token(services, &user_id);
 	let redirect = complete_redirect(services, context, &token)?;
 	let session = services
 		.users
-		.create_browser_session(&user_id, replaces);
+		.create_browser_session(&user_id, hash.as_deref(), replaces)
+		.await;
 
 	let response = account_redirect_response(redirect);
 
@@ -291,39 +295,56 @@ async fn render_submit_error(
 ///
 /// A request bound to a provider is refused before any credential is checked.
 /// A login claims the request once the password verifies, and registration
-/// claims it before creating the account.
+/// claims it before creating the account. Returns the account and the hash its
+/// password verified against. A registration reads the stored hash back and
+/// returns it only while it still verifies the password just registered, so a
+/// password write since then starts no session, and it returns no hash when the
+/// stored one cannot be read.
 async fn authenticate_local(
 	services: &Services,
 	req_id: &str,
 	address: LoginAddress,
 	body: &NativeSubmit,
-) -> Result<OwnedUserId> {
+) -> Result<(OwnedUserId, Option<String>)> {
 	let oidc = services.oauth.get_server()?;
 
 	oidc.check_local_auth_request(req_id).await?;
 
 	if body.mode.as_deref() == Some("register") {
-		return do_register(services, req_id, body).await;
+		let user_id = do_register(services, req_id, body).await?;
+		let hash = services
+			.users
+			.password_hash(&user_id)
+			.await
+			.inspect_err(
+				|error| warn!(%user_id, %error, "Unreadable password after registration"),
+			)
+			.ok()
+			.filter(|hash| verify_password(&body.password, hash).is_ok());
+
+		return Ok((user_id, hash));
 	}
 
-	let user_id = verify_credentials(services, &body.username, &body.password, address).await?;
+	let (user_id, hash) =
+		verify_credentials(services, &body.username, &body.password, address).await?;
 
 	oidc.bind_auth_request_to_local(req_id).await?;
 
-	Ok(user_id)
+	Ok((user_id, Some(hash)))
 }
 
 /// Authenticate a local account by password, mirroring the `/login` password
 /// flow (`password_login`).
 ///
 /// Refused while password login is disabled. Only password-origin accounts
-/// pass, and every credential failure returns one uniform error.
+/// pass, and every credential failure returns one uniform error. Returns the
+/// account and the hash its password verified against.
 async fn verify_credentials(
 	services: &Services,
 	username: &str,
 	password: &str,
 	address: LoginAddress,
-) -> Result<OwnedUserId> {
+) -> Result<(OwnedUserId, String)> {
 	if !services.config.authentication.login.with_password {
 		return Err!(Request(Forbidden("Password login is disabled on this server.")));
 	}
@@ -387,7 +408,7 @@ async fn verify_credentials(
 
 	require_account_usable(services, &user_id).await?;
 
-	Ok(user_id)
+	Ok((user_id, hash))
 }
 
 async fn do_register(

@@ -20,7 +20,7 @@ use futures::{
 };
 use reqwest::{
 	Client, Response, StatusCode, Url,
-	header::{HeaderName, HeaderValue},
+	header::{HeaderName, HeaderValue, SET_COOKIE},
 	redirect::Policy,
 };
 use serde_json::{Value, from_value, json};
@@ -773,6 +773,11 @@ async fn check_local_resubmission(services: &Services, client: &Client, base: &s
 		"a resubmitted local form still completes"
 	);
 
+	assert!(
+		resubmitted.headers().contains_key(SET_COOKIE),
+		"a local sign-in starts a browser session"
+	);
+
 	let late_selection = select_provider(client, base, &req_id, "first-idp").await?;
 
 	assert!(late_selection.status().is_client_error());
@@ -818,6 +823,11 @@ async fn check_registration_claim(services: &Services, client: &Client, base: &s
 		submit_registration(client, base, &req_id, username, REGISTRATION_TOKEN).await?;
 
 	assert_eq!(registered.status(), StatusCode::SEE_OTHER);
+	assert!(
+		registered.headers().contains_key(SET_COOKIE),
+		"a native registration starts a browser session"
+	);
+
 	assert!(services.users.exists(&user).await);
 
 	let claimed = peek_request(services, &req_id).await?;

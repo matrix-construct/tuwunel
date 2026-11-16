@@ -7,12 +7,13 @@
 
 use std::time::Duration;
 
+use futures::TryFutureExt;
 use ruma::UserId;
 use tuwunel_core::{
 	Result, debug, implement,
 	utils::{
-		hash::sha256::hash as sha256, millis_since_unix_epoch, random_string, result::NotFound,
-		stream::TryReadyExt, time::now,
+		BoolExt, hash::sha256::hash as sha256, millis_since_unix_epoch, random_string,
+		result::NotFound, stream::TryReadyExt, time::now,
 	},
 	warn,
 };
@@ -40,19 +41,48 @@ pub struct BrowserSession {
 
 /// Starts a browser session for a user who just signed in with a password.
 ///
-/// The session named by `replaces` ends first, whoever it belongs to, so each
-/// sign-in mints a fresh session id and never adopts one the browser already
-/// carried. Returns `None` while browser sessions are turned off.
+/// `verified` is the password hash the sign-in checked, `None` when it could
+/// not be read. The session is minted only while that hash is still the
+/// account's, read under the password lock, so a new password either lands
+/// first and refuses the session or lands after and ends it. Disabling a
+/// password ends no session, but a deactivated account's sessions are refused
+/// at use. The session named by `replaces` ends first, whoever it belongs to,
+/// so each sign-in mints a fresh session id and never adopts one the browser
+/// already carried. Returns `None` while browser sessions are turned off,
+/// without a verified hash, or once the stored hash differs or cannot be read.
 #[implement(super::Service)]
-pub fn create_browser_session(
+#[tracing::instrument(level = "debug", skip(self, verified, replaces))]
+pub async fn create_browser_session(
 	&self,
 	user_id: &UserId,
+	verified: Option<&str>,
 	replaces: Option<&str>,
 ) -> Option<BrowserSession> {
 	if let Some((owner, secret)) = replaces.and_then(parse_token) {
 		self.remove_browser_session(owner, secret);
 	}
 
+	let verified = verified?;
+	let _password_guard = self.changing_password.lock(user_id).await;
+
+	self.db
+		.userid_password
+		.get(user_id)
+		.map_ok(|current| &*current == verified.as_bytes())
+		.await
+		.inspect_err(
+			|error| warn!(%user_id, %error, "Unreadable password, starting no browser session"),
+		)
+		.ok()?
+		.and_then(|| self.mint_browser_session(user_id))
+}
+
+/// Stores a new browser session for a user and returns its cookie.
+///
+/// It checks no password, so a sign-in goes through `create_browser_session`.
+/// Returns `None` while browser sessions are turned off.
+#[implement(super::Service)]
+pub(super) fn mint_browser_session(&self, user_id: &UserId) -> Option<BrowserSession> {
 	let lifetime = self.browser_session_ttl()?;
 	let secret = random_string(SECRET_LENGTH);
 	let digest = sha256(&secret);
