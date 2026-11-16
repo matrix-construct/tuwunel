@@ -258,19 +258,26 @@ async fn thread_views(
 		.reply(&room, "views-ignored", &root)
 		.await?;
 
-	assert_summary(&reader.event(&room, &root).await?, &shown, 1, "/event");
+	let event = reader.event(&room, &root).await?;
+
+	assert_summary(&event, &shown, 1, "/event");
+	assert_latest_room(&event, Some(&*room), "/event");
 
 	let messages = reader
 		.get(&format!("rooms/{room}/messages?dir=b&limit=10"))
 		.await?;
 
-	assert_summary(find(&messages["chunk"], &root)?, &shown, 1, "/messages");
+	let listed = find(&messages["chunk"], &root)?;
+
+	assert_summary(listed, &shown, 1, "/messages");
+	assert_latest_room(listed, Some(&*room), "/messages");
 
 	let context = reader
 		.get(&format!("rooms/{room}/context/{root}?limit=2"))
 		.await?;
 
 	assert_summary(&context["event"], &shown, 1, "/context");
+	assert_latest_room(&context["event"], Some(&*room), "/context");
 
 	let filter = json!({ "room": { "timeline": { "limit": 3 } } });
 	let sync = reader.sync_filtered(reader_id, &filter).await?;
@@ -278,11 +285,17 @@ async fn thread_views(
 	let timeline = &joined_room(&sync, &room)?["timeline"];
 
 	assert_eq!(timeline["limited"], true, "the sync timeline was not limited");
-	assert_summary(find(&timeline["events"], &root)?, &shown, 1, "/sync");
+
+	let synced = find(&timeline["events"], &root)?;
+
+	assert_summary(synced, &shown, 1, "/sync");
+	assert_latest_room(synced, None, "/sync");
 
 	let threads = reader.threads(&room, 10, None).await?;
+	let listed = find(&threads["chunk"], &root)?;
 
-	assert_summary(find(&threads["chunk"], &root)?, &shown, 1, "/threads");
+	assert_summary(listed, &shown, 1, "/threads");
+	assert_latest_room(listed, Some(&*room), "/threads");
 
 	let replies = reader
 		.relations(&room, &root, "/m.thread")
@@ -563,6 +576,17 @@ fn assert_summary(event: &Value, latest: &EventId, count: u64, path: &str) {
 
 	assert_eq!(summary["latest_event"]["event_id"], latest.as_str(), "{path}: latest_event");
 	assert_eq!(summary["count"], count, "{path}: count");
+}
+
+/// Asserts the room the bundled latest event names, if any.
+///
+/// The latest event names its room where the event bundling it does: in the
+/// room formats, and never in sync (MSC3440).
+#[track_caller]
+fn assert_latest_room(event: &Value, room: Option<&RoomId>, path: &str) {
+	let room_id = event.pointer("/unsigned/m.relations/m.thread/latest_event/room_id");
+
+	assert_eq!(room_id, room.map(|room| json!(room)).as_ref(), "{path}: latest room");
 }
 
 fn thread_summary(event: &Value) -> Option<&Value> {

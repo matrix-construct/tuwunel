@@ -1,8 +1,15 @@
 use ruma::{
-	CanonicalJsonObject, RoomVersionId, event_id, events::AnySyncMessageLikeEvent, serde::Raw,
+	CanonicalJsonObject, RoomVersionId, event_id,
+	events::{
+		AnyMessageLikeEvent, AnySyncMessageLikeEvent, AnySyncTimelineEvent, AnyTimelineEvent,
+	},
+	serde::Raw,
 	user_id,
 };
-use serde_json::{json, value::to_raw_value};
+use serde_json::{
+	json,
+	value::{RawValue as RawJsonValue, to_raw_value},
+};
 
 use super::{Content, Count, DELAY_ID, Pdu, Unsigned, into_outgoing_federation};
 use crate::Event;
@@ -43,6 +50,66 @@ fn sync_message_like_without_unsigned_borrows_pdu() {
 		.expect("formatted event should be valid JSON");
 
 	assert_eq!(formatted["type"], "com.example.custom", "custom event type was lost");
+}
+
+#[test]
+fn room_formats_name_the_thread_latest_room() {
+	let threaded = |latest: serde_json::Value| {
+		message_pdu_with(&json!({
+			"age": 4,
+			"m.relations": {
+				"m.replace": { "event_id": "$edit:example.com" },
+				"m.thread": { "count": 1, "latest_event": latest },
+			},
+		}))
+	};
+
+	let pdu = threaded(json!({ "event_id": "$latest:example.com" }));
+	let timeline: Raw<AnyTimelineEvent> = pdu.to_format();
+	let message_like: Raw<AnyMessageLikeEvent> = pdu.to_format();
+	let room_formats = [("timeline", timeline.json()), ("message-like", message_like.json())];
+
+	for (format, event) in room_formats {
+		let unsigned = formatted_unsigned(event);
+		let relations = &unsigned["m.relations"];
+		let latest = &relations["m.thread"]["latest_event"];
+
+		assert_eq!(latest["room_id"], "!room:example.com", "{format}: the latest's room");
+		assert_eq!(relations["m.replace"]["event_id"], "$edit:example.com", "{format}: the edit");
+		assert_eq!(unsigned["age"], 4, "{format}: age");
+	}
+
+	let sync: Raw<AnySyncTimelineEvent> = pdu.to_format();
+	let sync = formatted_unsigned(sync.json());
+	let latest = &sync["m.relations"]["m.thread"]["latest_event"];
+
+	assert_eq!(latest, &json!({ "event_id": "$latest:example.com" }), "sync named the room");
+
+	let named = threaded(json!({ "event_id": "$latest:example.com", "room_id": "!other:a.b" }));
+	let named: Raw<AnyTimelineEvent> = named.to_format();
+	let named = formatted_unsigned(named.json());
+
+	assert_eq!(named["m.relations"]["m.thread"]["latest_event"]["room_id"], "!other:a.b");
+
+	let bare: Raw<AnyTimelineEvent> = message_pdu_with(&json!({ "age": 4 })).to_format();
+
+	assert_eq!(formatted_unsigned(bare.json()), json!({ "age": 4 }));
+}
+
+fn message_pdu_with(unsigned: &serde_json::Value) -> Pdu {
+	let unsigned =
+		Unsigned::from_json_string(unsigned.to_string()).expect("valid raw unsigned object");
+
+	Pdu {
+		unsigned: Some(unsigned),
+		..message_pdu()
+	}
+}
+
+fn formatted_unsigned(event: &RawJsonValue) -> serde_json::Value {
+	serde_json::from_str(event.get())
+		.map(|mut event: serde_json::Value| event["unsigned"].take())
+		.expect("formatted event should be valid JSON")
 }
 
 #[test]
