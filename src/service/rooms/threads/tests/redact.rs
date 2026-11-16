@@ -12,10 +12,13 @@ use std::{
 
 use futures::{StreamExt, TryStreamExt};
 use ruma::{
-	EventId, OwnedEventId, RoomId, UserId, api::client::threads::get_threads::v1::IncludeThreads,
-	event_id, events::StateEventType, room_id, user_id,
+	EventId, OwnedEventId, RoomId, UserId,
+	api::client::threads::get_threads::v1::IncludeThreads,
+	event_id,
+	events::{StateEventType, relation::RelationType},
+	room_id, user_id,
 };
-use serde_json::{Value, json, to_string, to_value};
+use serde_json::{Value, json, to_value};
 use tuwunel_core::{
 	Result,
 	config::Figment,
@@ -25,7 +28,7 @@ use tuwunel_core::{
 use tuwunel_database::Json;
 use tuwunel_matrix::{
 	Event,
-	pdu::{PduCount, PduEvent, PduId, RawPduId},
+	pdu::{DELAY_ID, PduCount, PduEvent, PduId, RawPduId},
 };
 
 use crate::{
@@ -454,12 +457,7 @@ async fn redacting_the_latest_reply_shows_the_newest_remaining_one() -> Result {
 
 	room.redact(&third).await?;
 
-	let served = services.timeline.get_pdu(&root).await?;
-	let served = services
-		.pdu_metadata
-		.bundle_aggregations(sender(), served);
-
-	let served = to_value(served.await)?;
+	let served = room.served(&root, sender()).await?;
 
 	assert!(!served.to_string().contains("secret"));
 	assert_eq!(
@@ -476,6 +474,137 @@ async fn redacting_the_latest_reply_shows_the_newest_remaining_one() -> Result {
 		room.stored(&root).await?.1["unsigned"]
 			.get("m.relations")
 			.is_none()
+	);
+
+	Ok(())
+}
+
+#[implement(Room, params = "<'_>")]
+async fn served(&self, event_id: &EventId, user: &UserId) -> Result<Value> {
+	let Self(services, ..) = self;
+	let pdu = services.timeline.get_pdu(event_id).await?;
+	let served = services
+		.pdu_metadata
+		.bundle_aggregations(user, pdu)
+		.await;
+
+	Ok(to_value(served)?)
+}
+
+#[tokio::test]
+async fn own_latest_reply_is_served_unfolded() -> Result {
+	let config = Figment::new().merge(("rooms.relations.bundle_edits", true));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room = Room::new(services).await?;
+	let [root, latest, edited_root, edited, replacement] =
+		["root", "latest", "edited-root", "edited", "replacement"].map(id);
+
+	room.append(1, &root, text()).await?;
+	room.append(2, &latest, thread(&root)).await?;
+	room.append(3, &edited_root, text()).await?;
+	room.append(4, &edited, thread(&edited_root))
+		.await?;
+
+	room.append(5, &replacement, edit(&edited))
+		.await?;
+
+	let replacement_pdu = services.timeline.get_pdu(&replacement).await?;
+	let kind = RelationType::Replacement;
+
+	services
+		.pdu_metadata
+		.add_typed_relation(room.1, PduCount::Normal(5), &edited, &replacement_pdu, kind)
+		.await;
+
+	// The sender's private fields, and a summary of its own an older release left.
+	let unsigned = json!({
+		"transaction_id": "own-txn",
+		DELAY_ID: "own-delay",
+		"m.relations": { "m.thread": { "count": 1 } },
+	});
+
+	room.set_unsigned(&latest, &unsigned).await?;
+	room.set_unsigned(&edited, &unsigned).await?;
+
+	let own = room.served(&root, sender()).await?;
+	let own = &own["unsigned"]["m.relations"]["m.thread"]["latest_event"]["unsigned"];
+
+	assert_eq!(own["transaction_id"], "own-txn");
+	assert_eq!(own[DELAY_ID], "own-delay");
+	assert!(own.get("m.relations").is_none(), "the latest event kept a summary of its own");
+
+	let own = room.served(&edited_root, sender()).await?;
+	let own = &own["unsigned"]["m.relations"]["m.thread"]["latest_event"]["unsigned"];
+
+	assert_eq!(own["transaction_id"], "own-txn", "the edit fold dropped the private fields");
+	assert_eq!(own["m.relations"]["m.replace"]["event_id"], json!(replacement));
+	assert!(
+		own["m.relations"].get("m.thread").is_none(),
+		"the edit fold kept a stored summary"
+	);
+
+	let other = room
+		.served(&root, user_id!("@bob:localhost"))
+		.await?;
+
+	assert!(
+		other["unsigned"]["m.relations"]["m.thread"]["latest_event"]
+			.get("unsigned")
+			.is_none(),
+		"another member was served the sender's private fields",
+	);
+
+	Ok(())
+}
+
+#[implement(Room, params = "<'_>")]
+async fn set_unsigned(&self, event_id: &EventId, unsigned: &Value) -> Result {
+	let (pdu_id, mut pdu) = self.stored(event_id).await?;
+
+	pdu["unsigned"] = unsigned.clone();
+	self.0.db["pduid_pdu"].raw_put(pdu_id, Json(&pdu));
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn own_latest_reload_failure_drops_the_summary() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room = Room::new(services).await?;
+	let [root, latest] = ["root", "latest"].map(id);
+
+	room.append(1, &root, text()).await?;
+	room.append(2, &latest, thread(&root)).await?;
+
+	// The view still loads the reply by its row and swaps it in, while the
+	// sender's reload, which reads it by event ID, now fails.
+	services.db["eventid_pduid"].remove(latest.as_bytes());
+
+	let own = room.served(&root, sender()).await?;
+
+	assert!(
+		own["unsigned"].get("m.relations").is_none(),
+		"the sender was served the latest reply without their private fields",
+	);
+
+	let other = room
+		.served(&root, user_id!("@bob:localhost"))
+		.await?;
+
+	let thread = &other["unsigned"]["m.relations"]["m.thread"];
+
+	assert_eq!(
+		thread["latest_event"]["event_id"],
+		json!(latest),
+		"another member lost the summary"
 	);
 
 	Ok(())
@@ -522,23 +651,16 @@ async fn replacement_error_omits_the_redacted_latest_and_decrements_count() -> R
 			.is_some()
 	);
 
-	let served = services.timeline.get_pdu(&root).await?;
-	let served = services
-		.pdu_metadata
-		.bundle_aggregations(sender(), served)
-		.await;
+	let served = room.served(&root, sender()).await?;
 
 	assert!(
-		to_string(&served)?
+		served
+			.to_string()
 			.contains("redacted thread preview secret")
 			.is_false()
 	);
 
-	assert!(
-		to_value(served)?["unsigned"]
-			.get("m.relations")
-			.is_none()
-	);
+	assert!(served["unsigned"].get("m.relations").is_none());
 
 	assert_eq!(room.latest(&root).await?, Value::Null);
 	assert_eq!(room.count(&root).await?, json!(2));
@@ -583,18 +705,9 @@ async fn replacement_search_counts_missing_relation_rows() -> Result {
 		before
 	);
 
-	let served = fixture.services.timeline.get_pdu(&root).await?;
-	let served = fixture
-		.services
-		.pdu_metadata
-		.bundle_aggregations(sender(), served)
-		.await;
+	let served = room.served(&root, sender()).await?;
 
-	assert!(
-		to_value(served)?["unsigned"]
-			.get("m.relations")
-			.is_none()
-	);
+	assert!(served["unsigned"].get("m.relations").is_none());
 
 	room.append(6, &later, thread(&root)).await?;
 

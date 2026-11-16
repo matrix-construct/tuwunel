@@ -309,7 +309,55 @@ async fn thread_views(
 
 	assert!(thread_summary(&unshown).is_none(), "a summary was served without its latest");
 
+	own_latest_view(reader, ignored, visible, &room, &root).await?;
 	search_budget(reader, ignored, visible, &room).await
+}
+
+/// A requester's own latest reply carries its transaction ID, which nobody else
+/// is served.
+///
+/// That holds for the stored latest reply and for one the requester's view
+/// swaps in past an ignored reply.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn own_latest_view(
+	reader: &Client<'_>,
+	ignored: &Client<'_>,
+	visible: &Client<'_>,
+	room: &RoomId,
+	root: &EventId,
+) -> Result {
+	let own = ignored.event(room, root).await?;
+
+	assert_eq!(latest_transaction_id(&own), Some("views-ignored"), "the sender's own latest");
+
+	let other = visible.event(room, root).await?;
+
+	assert_eq!(latest_transaction_id(&other), None, "another member's view of it");
+
+	let swapped_root = visible
+		.send_text(room, "views-own-root", "own latest root")
+		.await?;
+
+	let mine = reader
+		.reply(room, "views-own", &swapped_root)
+		.await?;
+
+	ignored
+		.reply(room, "views-own-ignored", &swapped_root)
+		.await?;
+
+	let swapped = reader.event(room, &swapped_root).await?;
+
+	assert_summary(&swapped, &mine, 1, "swapped /event");
+	assert_eq!(latest_transaction_id(&swapped), Some("views-own"), "the swapped-in own latest");
+
+	Ok(())
+}
+
+fn latest_transaction_id(event: &Value) -> Option<&str> {
+	event
+		.pointer("/unsigned/m.relations/m.thread/latest_event/unsigned/transaction_id")
+		.and_then(Value::as_str)
 }
 
 /// The summary walk reads at most the search limit's relation rows.

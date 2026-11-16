@@ -1,6 +1,7 @@
 use futures::{Stream, StreamExt, TryFutureExt, pin_mut};
 use ruma::{UserId, events::ignored_user_list::IgnoredUserListEventContent};
 use tuwunel_core::{
+	Result,
 	arrayvec::ArrayVec,
 	async_noinline, implement,
 	result::LogErr,
@@ -129,6 +130,12 @@ async fn bundle_thread_for(&self, sender_user: &UserId, pdu: &mut Pdu) {
 		return;
 	}
 
+	let own_latest = self.own_thread_latest(sender_user, pdu).await;
+
+	if apply_own_thread_latest(pdu, own_latest).is_none() {
+		return;
+	}
+
 	let participated = self
 		.services
 		.threads
@@ -216,9 +223,10 @@ async fn thread_view(&self, sender_user: &UserId, pdu: &Pdu) -> Option<(usize, O
 /// Applies a requester's view to the served thread summary.
 ///
 /// An unchanged view serves the stored summary as is. Otherwise the swapped-in
-/// reply becomes the latest event and the count loses the hidden replies. The
-/// summary is dropped, never served with a count alone, for no view, a missing
-/// or used-up count, or a failed rewrite; `None` then tells the caller to stop.
+/// reply, without the aggregations stored on it, becomes the latest event and
+/// the count loses the hidden replies. The summary is dropped, never served
+/// with a count alone, for no view, a missing or used-up count, or a failed
+/// rewrite; `None` then tells the caller to stop.
 fn apply_thread_view(pdu: &mut Pdu, view: Option<(usize, Option<Pdu>)>) -> Option<()> {
 	let Some((hidden, latest)) = view else {
 		drop_thread_bundle(pdu);
@@ -230,11 +238,7 @@ fn apply_thread_view(pdu: &mut Pdu, view: Option<(usize, Option<Pdu>)>) -> Optio
 	}
 
 	if let Some(latest) = latest {
-		let replaced = pdu
-			.set_thread_latest_event(&latest.into_format())
-			.log_err();
-
-		thread_result_or_drop(pdu, replaced)?;
+		replace_thread_latest(pdu, latest.without_aggregations())?;
 	}
 
 	let count = pdu.thread_count().log_err();
@@ -250,6 +254,57 @@ fn apply_thread_view(pdu: &mut Pdu, view: Option<(usize, Option<Pdu>)>) -> Optio
 	let counted = pdu.set_thread_count(count).log_err();
 
 	thread_result_or_drop(pdu, counted)
+}
+
+/// The requester's own latest reply, reloaded with its private fields.
+///
+/// The stored latest event carries none of its sender's private fields (the
+/// transaction ID, MSC4140's delay ID), nor does a reply the requester's view
+/// swaps in. A requester who sent the latest reply is served it unfolded: those
+/// fields kept, the aggregations stored on it dropped. `None` for anyone else
+/// keeps the copy in place. An unreadable summary or a reply that fails to load
+/// is an error, since its sender may not be served the copy without its delay
+/// ID (MSC4140).
+#[implement(Service)]
+// Unspanned: span frames on this path overflow the debug-build worker stack.
+async fn own_thread_latest(&self, sender_user: &UserId, pdu: &Pdu) -> Result<Option<Pdu>> {
+	let Some((event_id, _)) = pdu
+		.thread_latest_event()
+		.log_err()?
+		.filter(|(_, sender)| sender.eq(sender_user))
+	else {
+		return Ok(None);
+	};
+
+	self.services
+		.timeline
+		.get_pdu(&event_id)
+		.map_ok(|latest| latest.served_unfolded_to(Some(sender_user)))
+		.map_ok(Some)
+		.await
+		.log_err()
+}
+
+/// Applies the requester's own latest reply to the served thread summary.
+///
+/// No reply of theirs serves the summary as is. An error or a failed rewrite
+/// drops it, never serving the sender a copy without their private fields, and
+/// `None` then tells the caller to stop.
+fn apply_own_thread_latest(pdu: &mut Pdu, latest: Result<Option<Pdu>>) -> Option<()> {
+	thread_result_or_drop(pdu, latest)?
+		.map_or(Some(()), |latest| replace_thread_latest(pdu, latest))
+}
+
+/// Serves `latest` as the thread summary's latest event.
+///
+/// A failed rewrite drops the summary, never serving the copy it replaced, and
+/// `None` then tells the caller to stop.
+fn replace_thread_latest(pdu: &mut Pdu, latest: Pdu) -> Option<()> {
+	let replaced = pdu
+		.set_thread_latest_event(&latest.into_format())
+		.log_err();
+
+	thread_result_or_drop(pdu, replaced)
 }
 
 /// Whether one requester may be shown `pdu` inside an aggregation.
@@ -364,13 +419,7 @@ async fn erase_thread_latest(&self, sender_user: &UserId, pdu: &mut Pdu) {
 		return;
 	};
 
-	if pdu
-		.set_thread_latest_event(&pruned.into_format())
-		.log_err()
-		.is_err()
-	{
-		drop_thread_bundle(pdu);
-	}
+	replace_thread_latest(pdu, pruned);
 }
 
 fn thread_result_or_drop<T, E>(pdu: &mut Pdu, result: Result<T, E>) -> Option<T> {
@@ -398,6 +447,7 @@ async fn bundle_thread_latest_edit(&self, sender_user: &UserId, pdu: &mut Pdu) {
 		.services
 		.timeline
 		.get_pdu(&event_id)
+		.map_ok(|latest| latest.served_unfolded_to(Some(sender_user)))
 		.await
 		.log_err();
 
@@ -428,7 +478,6 @@ async fn bundle_thread_latest_edit(&self, sender_user: &UserId, pdu: &mut Pdu) {
 	}
 
 	replacement_event.remove_private_unless_sender(Some(sender_user));
-	latest_event.remove_private_unless_sender(Some(sender_user));
 
 	let replacement = latest_event
 		.set_replacement_bundle(&replacement_event.into_format())
@@ -438,11 +487,7 @@ async fn bundle_thread_latest_edit(&self, sender_user: &UserId, pdu: &mut Pdu) {
 		return;
 	}
 
-	let latest = pdu
-		.set_thread_latest_event(&latest_event.into_format())
-		.log_err();
-
-	thread_result_or_drop(pdu, latest);
+	replace_thread_latest(pdu, latest_event);
 }
 
 /// MSC3925: the newest `m.replace` edit of `parent` as a full event, or `None`
@@ -536,46 +581,25 @@ pub async fn redacted_root(
 
 #[cfg(test)]
 mod tests {
-	use serde_json::json;
+	use serde_json::{Value, from_str, from_value, json};
 
 	use super::*;
 
 	#[test]
 	fn thread_latest_load_error_drops_bundle() {
-		let mut pdu: Pdu = serde_json::from_value(json!({
-			"type": "m.room.member",
-			"content": { "membership": "join" },
-			"event_id": "$member:example.com",
-			"room_id": "!room:example.com",
-			"sender": "@alice:example.com",
-			"state_key": "@alice:example.com",
-			"prev_events": ["$prev:example.com"],
-			"auth_events": ["$auth:example.com"],
-			"origin_server_ts": 1_838_188_000,
-			"depth": 12,
-			"hashes": { "sha256": "thishashcoversallfieldsincasethisisredacted" },
-			"unsigned": {
-				"age": 4612,
-				"m.relations": {
-					"m.replace": { "event_id": "$edit:example.com" },
-					"m.thread": { "count": 3 },
-				},
+		let mut pdu = member_event(&json!({
+			"age": 4612,
+			"m.relations": {
+				"m.replace": { "event_id": "$edit:example.com" },
+				"m.thread": { "count": 3 },
 			},
-		}))
-		.expect("test fixture should deserialize as a valid PDU");
+		}));
 
 		let latest: Option<()> = thread_result_or_drop(&mut pdu, Err("missing latest event"));
 
 		assert!(latest.is_none(), "load failure returned a latest event");
 
-		let unsigned: serde_json::Value = serde_json::from_str(
-			pdu.unsigned
-				.as_ref()
-				.expect("sibling unsigned data should remain")
-				.json()
-				.get(),
-		)
-		.expect("remaining unsigned data should be valid JSON");
+		let unsigned = unsigned_of(&pdu);
 
 		assert!(
 			unsigned["m.relations"].get("m.thread").is_none(),
@@ -588,5 +612,54 @@ mod tests {
 			"failed load removed a sibling relation",
 		);
 		assert_eq!(unsigned["age"], 4612, "failed load removed outer unsigned data");
+	}
+
+	#[test]
+	fn swapped_latest_carries_no_stored_aggregations() {
+		let hidden = json!({ "event_id": "$hidden:example.com" });
+		let mut root = member_event(&json!({
+			"m.relations": { "m.thread": { "count": 2, "latest_event": hidden } },
+		}));
+
+		// A reply rooting a thread of its own, as an older release allowed.
+		let latest = member_event(&json!({ "m.relations": { "m.thread": { "count": 1 } } }));
+
+		assert!(apply_thread_view(&mut root, Some((1, Some(latest)))).is_some());
+
+		let thread = &unsigned_of(&root)["m.relations"]["m.thread"];
+
+		assert_eq!(thread["count"], 1);
+		assert_eq!(thread["latest_event"]["event_id"], "$member:example.com");
+		assert!(
+			thread["latest_event"].get("unsigned").is_none(),
+			"the swapped-in reply kept its stored aggregations",
+		);
+	}
+
+	fn member_event(unsigned: &Value) -> Pdu {
+		from_value(json!({
+			"type": "m.room.member",
+			"content": { "membership": "join" },
+			"event_id": "$member:example.com",
+			"room_id": "!room:example.com",
+			"sender": "@alice:example.com",
+			"state_key": "@alice:example.com",
+			"prev_events": ["$prev:example.com"],
+			"auth_events": ["$auth:example.com"],
+			"origin_server_ts": 1_838_188_000,
+			"depth": 12,
+			"hashes": { "sha256": "thishashcoversallfieldsincasethisisredacted" },
+			"unsigned": unsigned,
+		}))
+		.expect("test fixture should deserialize as a valid PDU")
+	}
+
+	fn unsigned_of(pdu: &Pdu) -> Value {
+		let unsigned = pdu
+			.unsigned
+			.as_ref()
+			.expect("unsigned data should remain");
+
+		from_str(unsigned.json().get()).expect("unsigned data should be valid JSON")
 	}
 }
