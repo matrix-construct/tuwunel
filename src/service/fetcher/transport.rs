@@ -21,10 +21,7 @@ use ruma::{
 		},
 	},
 };
-use tuwunel_core::{
-	Result, err,
-	utils::{BoolExt, math::ruma_from_usize_saturating},
-};
+use tuwunel_core::{Err, Result, err, utils::math::ruma_from_usize_saturating};
 
 use super::{Op, Opts};
 use crate::services::OnceServices;
@@ -156,13 +153,11 @@ fn require_ts(opts: &Opts) -> Result<MilliSecondsSinceUnixEpoch> {
 }
 
 fn require_latest_events(opts: &Opts) -> Result {
-	opts.latest_events
-		.is_empty()
-		.is_false()
-		.then_some(())
-		.ok_or_else(|| {
-			err!(Request(InvalidParam("latest_events is required for op {:?}", opts.op)))
-		})
+	if opts.latest_events.is_empty() {
+		return Err!(Request(InvalidParam("latest_events is required for op {:?}", opts.op)));
+	}
+
+	Ok(())
 }
 
 /// Event count requested per batch op, defaulting to the federation default of

@@ -408,13 +408,11 @@ async fn stripped_state_row(
 	last_state: StrippedRoomState,
 ) -> Result<ValBuf> {
 	let last_state = last_state.filter(is_not_empty!());
-	let stored = last_state
-		.is_none()
-		.then_async(|| states.get(userroom_id))
-		.await
-		.transpose()
-		.optional()?
-		.flatten();
+	let stored = if last_state.is_none() {
+		states.get(userroom_id).await.optional()?
+	} else {
+		None
+	};
 
 	let state = stored
 		.as_deref()

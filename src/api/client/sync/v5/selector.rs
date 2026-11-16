@@ -11,7 +11,6 @@ use ruma::{
 use tuwunel_core::{
 	Result, apply, debug_error, is_true, trace,
 	utils::{
-		BoolExt,
 		math::usize_from_ruma,
 		option::OptionExt,
 		stream::{BroadbandExt, IterStream},
@@ -127,7 +126,7 @@ async fn matcher(
 				.then(|| id.clone())
 		})
 		.collect::<ListIds>()
-		.map(|lists| (lists.is_empty().is_false(), lists))
+		.map(|lists| (!lists.is_empty(), lists))
 		.await;
 
 	let selected =

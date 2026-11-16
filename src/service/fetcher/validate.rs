@@ -23,18 +23,19 @@ use super::{Op, Opts};
 pub(super) async fn validate(&self, opts: &Opts, bytes: &[u8]) -> Result {
 	if opts.check_conforms {
 		match opts.op {
-			| Op::Backfill => serde_json::from_slice(bytes)
-				.map(|pdus: Vec<IgnoredAny>| !pdus.is_empty())
-				.map_err(|e| err!(BadServerResponse("malformed federation response: {e}")))
-				.and_then(|populated| {
-					populated
-						.then_some(())
-						.ok_or_else(|| err!(BadServerResponse("empty backfill response")))
-				}),
-			| _ => serde_json::from_slice(bytes)
-				.map(|_: IgnoredAny| ())
-				.map_err(|e| err!(BadServerResponse("malformed federation response: {e}"))),
-		}?;
+			| Op::Backfill => {
+				let pdus: Vec<IgnoredAny> = serde_json::from_slice(bytes)
+					.map_err(|e| err!(BadServerResponse("malformed federation response: {e}")))?;
+
+				if pdus.is_empty() {
+					return Err!(BadServerResponse("empty backfill response"));
+				}
+			},
+			| _ => {
+				serde_json::from_slice::<IgnoredAny>(bytes)
+					.map_err(|e| err!(BadServerResponse("malformed federation response: {e}")))?;
+			},
+		}
 	}
 
 	let deep = opts.check_event_id || opts.check_hashes || opts.check_signature;

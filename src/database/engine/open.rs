@@ -7,7 +7,8 @@ use std::{
 
 use rocksdb::{ColumnFamilyDescriptor, Options, WriteOptions};
 use tuwunel_core::{
-	Result, debug, debug_warn, err, error, implement, info, itertools::Itertools, trace, warn,
+	Err, Result, debug, debug_warn, err, error, implement, info, itertools::Itertools, trace,
+	warn,
 };
 
 use super::{
@@ -107,16 +108,18 @@ where
 		})
 		.collect::<Vec<_>>();
 
-	failed.is_empty().then_some(()).ok_or_else(|| {
-		err!(Database(
+	if !failed.is_empty() {
+		return Err!(Database(
 			"Failed to delete {} dropped database columns: {}",
 			failed.len(),
 			failed
 				.iter()
 				.map(|name: &N| name.as_ref())
 				.format(", ")
-		))
-	})
+		));
+	}
+
+	Ok(())
 }
 
 #[implement(Engine)]

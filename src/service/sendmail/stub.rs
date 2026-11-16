@@ -8,7 +8,7 @@ mod tests;
 
 use std::sync::Arc;
 
-use tuwunel_core::{Err, Error, Result, err, implement, utils::BoolExt};
+use tuwunel_core::{Err, Error, Result, err, implement};
 
 use crate::{Args, service::make_name};
 
@@ -93,9 +93,13 @@ impl AsRef<str> for Address {
 }
 
 fn check(address: &str) -> Result {
-	address
+	let valid = address
 		.rsplit_once('@')
-		.is_some_and(|(local, domain)| !local.is_empty() && !domain.is_empty())
-		.into_option()
-		.ok_or_else(|| err!(Request(InvalidParam("Email address is malformed"))))
+		.is_some_and(|(local, domain)| !local.is_empty() && !domain.is_empty());
+
+	if !valid {
+		return Err!(Request(InvalidParam("Email address is malformed")));
+	}
+
+	Ok(())
 }

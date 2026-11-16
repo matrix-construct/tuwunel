@@ -1,5 +1,5 @@
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::ready};
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{
 	DeviceId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId, TransactionId, UserId,
 	events::{
@@ -25,7 +25,7 @@ use tuwunel_api_client::room_is_notice;
 use tuwunel_core::{
 	Err, Result, err,
 	utils::{
-		BoolExt, FutureBoolExt,
+		FutureBoolExt,
 		future::ReadyBoolExt,
 		str_from_bytes,
 		stream::{IterStream, ReadyExt},
@@ -74,14 +74,14 @@ pub(crate) async fn admin_send_server_notice_txn_route(
 	let sender_device = body.sender_device;
 	let request = body.body;
 
-	check_existing_txnid(&services, &sender_user, sender_device.as_deref(), &request.txn_id)
-		.await
-		.map(|response| ready(response).right_future())
-		.unwrap_or_else(|| {
-			send_notice_txn(&services, &sender_user, sender_device.as_deref(), request)
-				.left_future()
-		})
-		.await
+	if let Some(response) =
+		check_existing_txnid(&services, &sender_user, sender_device.as_deref(), &request.txn_id)
+			.await
+	{
+		return response;
+	}
+
+	send_notice_txn(&services, &sender_user, sender_device.as_deref(), request).await
 }
 
 /// Sends a new transaction and records its event ID for subsequent retries.
@@ -293,33 +293,31 @@ async fn check_existing_txnid(
 	sender_device: Option<&DeviceId>,
 	txn_id: &TransactionId,
 ) -> Option<Result<Response>> {
-	services
+	let response = services
 		.transaction_ids
 		.existing_txnid(sender_user, sender_device, txn_id)
-		.map_ok(|response| notice_response(&response))
-		.map(Result::ok)
 		.await
+		.ok()?;
+
+	Some(notice_response(&response))
 }
 
 /// Decodes a cached event ID while distinguishing incompatible transaction data.
 ///
 /// Empty values identify to-device transactions; malformed IDs are database errors.
 fn notice_response(response: &[u8]) -> Result<Response> {
-	response
-		.is_empty()
-		.is_false()
-		.ok_or_else(|| {
-			err!(Request(InvalidParam(
-				"Tried to use txn_id already used for an incompatible endpoint."
-			)))
-		})
-		.and_then(|()| {
-			str_from_bytes(response)
-				.ok()
-				.and_then(|event_id| event_id.try_into().ok())
-				.map(Response::new)
-				.ok_or_else(|| err!(Database("Invalid event_id in txn_id data: {response:?}.")))
-		})
+	if response.is_empty() {
+		return Err!(Request(InvalidParam(
+			"Tried to use txn_id already used for an incompatible endpoint."
+		)));
+	}
+
+	let event_id = str_from_bytes(response)
+		.ok()
+		.and_then(|event_id| event_id.try_into().ok())
+		.ok_or_else(|| err!(Database("Invalid event_id in txn_id data: {response:?}.")))?;
+
+	Ok(Response::new(event_id))
 }
 
 #[cfg(test)]

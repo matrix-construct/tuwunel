@@ -158,17 +158,15 @@ pub fn is_forbidden_remote_server_name(&self, server_name: &ServerName) -> bool 
 		return false;
 	}
 
-	let deny_list_active = self
+	let deny_list_active = !self
 		.federation
 		.forbidden_remote_server_names
-		.is_empty()
-		.is_false();
+		.is_empty();
 
-	let allow_list_active = self
+	let allow_list_active = !self
 		.federation
 		.allowed_remote_server_names_experimental
-		.is_empty()
-		.is_false();
+		.is_empty();
 
 	if deny_list_active
 		&& self

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures::TryStreamExt;
 use ruma::{MilliSecondsSinceUnixEpoch, thirdparty::Medium};
-use tuwunel_core::{Err, Result, debug_warn, err, info, warn};
+use tuwunel_core::{Err, Result, debug_warn, info, warn};
 use tuwunel_database::Map;
 
 use crate::{
@@ -57,10 +57,11 @@ pub(super) async fn adopt_email_bindings(
 
 	// Leaving the marker unstamped is what makes a read failure recoverable: the
 	// pass is idempotent, so the next boot retries it whole.
-	unreadable
-		.eq(&0)
-		.then_some(())
-		.ok_or_else(|| err!(Database("{unreadable} email bindings could not be read")))
+	if unreadable != 0 {
+		return Err!(Database("{unreadable} email bindings could not be read"));
+	}
+
+	Ok(())
 }
 
 /// Binds one foreign row, reporting whether it produced a binding.

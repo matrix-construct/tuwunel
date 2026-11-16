@@ -28,9 +28,8 @@ pub(super) async fn parse_pdu(&self) -> Result {
 
 	let value = serde_json::to_value(value)?;
 
-	match serde_json::from_value::<PduEvent>(value) {
-		| Err(e) => return Err!("EventId: {event_id:?}\nCould not parse event: {e}"),
-		| Ok(pdu) => write!(self, "EventId: {event_id:?}\n{pdu:#?}"),
-	}
-	.await
+	let pdu = serde_json::from_value::<PduEvent>(value)
+		.map_err(|e| err!("EventId: {event_id:?}\nCould not parse event: {e}"))?;
+
+	write!(self, "EventId: {event_id:?}\n{pdu:#?}").await
 }

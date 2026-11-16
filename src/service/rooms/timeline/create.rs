@@ -60,25 +60,25 @@ pub async fn create_hash_and_sign_event(
 		.await?;
 
 	// If there was no create event yet, assume we are creating a room
-	let (room_version, version_rules) = self
+	let room_version = match self
 		.services
 		.state
 		.get_room_version(room_id)
 		.await
-		.or_else(|_| {
-			if event_type == TimelineEventType::RoomCreate {
-				let content: RoomCreateEventContent = serde_json::from_str(content.json().get())?;
-				Ok(content.room_version)
-			} else {
-				Err(Error::InconsistentRoomState(
-					"non-create event for room of unknown version",
-					room_id.to_owned(),
-				))
-			}
-		})
-		.and_then(|room_version| {
-			Ok((room_version.clone(), room_version::rules(&room_version)?))
-		})?;
+	{
+		| Ok(room_version) => room_version,
+		| Err(_) if event_type == TimelineEventType::RoomCreate => {
+			let content: RoomCreateEventContent = serde_json::from_str(content.json().get())?;
+			content.room_version
+		},
+		| Err(_) =>
+			return Err(Error::InconsistentRoomState(
+				"non-create event for room of unknown version",
+				room_id.to_owned(),
+			)),
+	};
+
+	let version_rules = room_version::rules(&room_version)?;
 
 	let auth_events = self
 		.services

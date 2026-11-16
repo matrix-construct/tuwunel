@@ -1,7 +1,7 @@
 use jwt::{TokenData, Validation, dangerous::insecure_decode, decode};
 use ruma::{OwnedUserId, UserId};
 use serde::Deserialize;
-use tuwunel_core::{Err, Result, at, config::JwtConfig, debug, err, jwt, utils::BoolExt, warn};
+use tuwunel_core::{Err, Result, at, config::JwtConfig, debug, err, jwt, warn};
 use tuwunel_service::Services;
 
 #[derive(Debug, Deserialize)]
@@ -49,8 +49,8 @@ fn validate(config: &JwtConfig, token: &str) -> Result<Claim> {
 }
 
 fn init_validator(config: &JwtConfig) -> Result<Validation> {
-	let has_audience = config.audience.is_empty().is_false();
-	let has_issuer = config.issuer.is_empty().is_false();
+	let has_audience = !config.audience.is_empty();
+	let has_issuer = !config.issuer.is_empty();
 	let required = [
 		Some("sub"),
 		config.require_exp.then_some("exp"),

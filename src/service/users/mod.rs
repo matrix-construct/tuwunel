@@ -234,8 +234,7 @@ impl Service {
 				.services
 				.state_cache
 				.once_joined(user_id, &admin_room)
-				.await
-			&& !self.exists(user_id).await
+				.await && !self.exists(user_id).await
 		{
 			warn!(%user_id, "Refusing a name previously joined to the admin room");
 			return Err!(Request(UserInUse("User ID is not available.")));
@@ -349,16 +348,20 @@ impl Service {
 	/// created without a password, as an appservice's users often are, reads
 	/// as deactivated, since both store an empty password.
 	pub async fn deactivated_check(&self, user_id: &UserId) -> Result {
-		self.db
+		let deactivated = self
+			.db
 			.userid_password
 			.get(user_id)
 			.map_ok(|password| password.is_empty())
 			.await
 			.optional()?
-			.unwrap_or_default()
-			.is_false()
-			.into_option()
-			.ok_or_else(|| err!(Request(UserDeactivated("This user has been deactivated."))))
+			.unwrap_or_default();
+
+		if deactivated {
+			return Err!(Request(UserDeactivated("This user has been deactivated.")));
+		}
+
+		Ok(())
 	}
 
 	/// MSC3823: account is suspended (read-mostly mode, sessions retained).
@@ -376,10 +379,11 @@ impl Service {
 	/// the client retains its session and polls for the unlock. The login and
 	/// refresh routes and the request middleware share this gate.
 	pub async fn locked_check(&self, user_id: &UserId) -> Result {
-		self.is_locked(user_id)
-			.await
-			.is_false()
-			.ok_or_else(|| err!(Request(UserLocked("This account has been locked."))))
+		if self.is_locked(user_id).await {
+			return Err!(Request(UserLocked("This account has been locked.")));
+		}
+
+		Ok(())
 	}
 
 	/// MSC3939: account is locked (401 + soft_logout, sessions retained).

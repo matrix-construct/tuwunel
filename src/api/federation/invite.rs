@@ -209,14 +209,13 @@ async fn parse_and_validate_event(
 		return Err!(Request(InvalidParam("User does not belong to this homeserver.")));
 	}
 
-	let content: RoomMemberEventContent = signed_event
+	let content = signed_event
 		.get("content")
 		.cloned()
-		.map(Into::into)
-		.map(serde_json::from_value)
-		.transpose()
-		.map_err(|e| err!(Request(InvalidParam("Invalid content object in event: {e}"))))?
 		.ok_or_else(|| err!(Request(BadJson("Missing content in event."))))?;
+
+	let content: RoomMemberEventContent = serde_json::from_value(content.into())
+		.map_err(|e| err!(Request(InvalidParam("Invalid content object in event: {e}"))))?;
 
 	if content.membership != MembershipState::Invite {
 		return Err!(Request(InvalidParam("Event membership must be invite.")));

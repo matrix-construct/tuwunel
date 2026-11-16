@@ -122,15 +122,13 @@ pub(crate) async fn authorize_route(
 			| _ => "login",
 		};
 
-		let native_url = Url::parse(&format!("{base}/_tuwunel/oidc/native"))
-			.map_err(|_| err!(error!("Failed to build native auth URL")))
-			.map(|mut url| {
-				url.query_pairs_mut()
-					.append_pair("oidc_req_id", &req_id)
-					.append_pair("view", view);
+		let mut native_url = Url::parse(&format!("{base}/_tuwunel/oidc/native"))
+			.map_err(|_| err!(error!("Failed to build native auth URL")))?;
 
-				url
-			})?;
+		native_url
+			.query_pairs_mut()
+			.append_pair("oidc_req_id", &req_id)
+			.append_pair("view", view);
 
 		return Ok(Redirect::temporary(native_url.as_str()));
 	};

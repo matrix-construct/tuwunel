@@ -34,10 +34,7 @@ use ruma::{
 	},
 	room::RoomType,
 };
-use tuwunel_core::{
-	Result, err, implement,
-	utils::{BoolExt, OptionExt},
-};
+use tuwunel_core::{Err, Result, implement, utils::OptionExt};
 use tuwunel_matrix::{
 	Event, Pdu, room::state::resolution::events::RoomCreateEvent, room_version,
 };
@@ -97,15 +94,15 @@ impl Service {
 	///
 	/// Missing, invalid, and empty `m.room.name` content is reported as an error.
 	pub async fn get_name(&self, room_id: &RoomId) -> Result<String> {
-		self.room_state_get_content(room_id, &StateEventType::RoomName, "")
-			.await
-			.and_then(|c: RoomNameEventContent| {
-				c.name
-					.is_empty()
-					.is_false()
-					.then_some(c.name)
-					.ok_or_else(|| err!(Request(NotFound("Empty name found in event content."))))
-			})
+		let content: RoomNameEventContent = self
+			.room_state_get_content(room_id, &StateEventType::RoomName, "")
+			.await?;
+
+		if content.name.is_empty() {
+			return Err!(Request(NotFound("Empty name found in event content.")));
+		}
+
+		Ok(content.name)
 	}
 
 	/// Returns the room's current avatar content.
@@ -168,12 +165,15 @@ impl Service {
 	/// Alternate aliases are not considered. Missing state, invalid content, or
 	/// an absent primary alias is returned as an error.
 	pub async fn get_canonical_alias(&self, room_id: &RoomId) -> Result<OwnedRoomAliasId> {
-		self.room_state_get_content(room_id, &StateEventType::RoomCanonicalAlias, "")
-			.await
-			.and_then(|c: RoomCanonicalAliasEventContent| {
-				c.alias
-					.ok_or_else(|| err!(Request(NotFound("No alias found in event content."))))
-			})
+		let content: RoomCanonicalAliasEventContent = self
+			.room_state_get_content(room_id, &StateEventType::RoomCanonicalAlias, "")
+			.await?;
+
+		let Some(alias) = content.alias else {
+			return Err!(Request(NotFound("No alias found in event content.")));
+		};
+
+		Ok(alias)
 	}
 
 	/// Returns the room's current plain-text topic.
@@ -181,12 +181,15 @@ impl Service {
 	/// Rich-topic plain text takes precedence over the legacy field. Missing,
 	/// invalid, or empty topic content is returned as an error.
 	pub async fn get_room_topic(&self, room_id: &RoomId) -> Result<String> {
-		self.room_state_get_content(room_id, &StateEventType::RoomTopic, "")
-			.await
-			.and_then(|content: RoomTopicEventContent| {
-				plain_text_topic(content)
-					.ok_or_else(|| err!(Request(NotFound("Empty topic found in event content."))))
-			})
+		let content: RoomTopicEventContent = self
+			.room_state_get_content(room_id, &StateEventType::RoomTopic, "")
+			.await?;
+
+		let Some(topic) = plain_text_topic(content) else {
+			return Err!(Request(NotFound("Empty topic found in event content.")));
+		};
+
+		Ok(topic)
 	}
 
 	/// Returns the room's current join rule.
@@ -204,13 +207,15 @@ impl Service {
 	/// A missing create event, invalid content, or absent room type is returned as
 	/// an error; ordinary rooms therefore do not yield a synthetic type.
 	pub async fn get_room_type(&self, room_id: &RoomId) -> Result<RoomType> {
-		self.room_state_get_content(room_id, &StateEventType::RoomCreate, "")
-			.await
-			.and_then(|content: RoomCreateEventContent| {
-				content
-					.room_type
-					.ok_or_else(|| err!(Request(NotFound("No type found in event content"))))
-			})
+		let content: RoomCreateEventContent = self
+			.room_state_get_content(room_id, &StateEventType::RoomCreate, "")
+			.await?;
+
+		let Some(room_type) = content.room_type else {
+			return Err!(Request(NotFound("No type found in event content")));
+		};
+
+		Ok(room_type)
 	}
 
 	/// Returns the room's configured encryption algorithm.
@@ -296,5 +301,5 @@ pub(crate) fn plain_text_topic(content: RoomTopicEventContent) -> Option<String>
 		.map(ToOwned::to_owned)
 		.unwrap_or(content.topic);
 
-	topic.is_empty().is_false().then_some(topic)
+	(!topic.is_empty()).then_some(topic)
 }

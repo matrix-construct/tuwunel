@@ -90,16 +90,17 @@ pub(crate) async fn get_profile_field_route(
 	let legacy =
 		matches!(body.field, ProfileFieldName::AvatarUrl | ProfileFieldName::DisplayName);
 
-	let value = services
+	let value = match services
 		.profile
 		.profile_key(&body.user_id, &body.field)
 		.await
-		.map(Some)
-		.or_else(|error| {
-			(legacy && error.is_not_found())
-				.then_some(None)
-				.ok_or(error)
-		})?
+	{
+		| Ok(value) => Some(value),
+		| Err(error) if legacy && error.is_not_found() => None,
+		| Err(error) => return Err(error),
+	};
+
+	let value = value
 		.map(|value| ProfileFieldValue::new(body.field.as_str(), value))
 		.transpose()
 		.map_err(|_| {

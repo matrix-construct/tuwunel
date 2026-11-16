@@ -77,20 +77,16 @@ pub(crate) async fn create_room_route(
 		});
 
 	// Determine room version
-	let (room_version, version_rules) = body
-		.room_version
-		.as_ref()
-		.map_or(Ok(&services.server.config.rooms.default_version), |version| {
-			services
-				.config
-				.supported_room_version(version)
-				.then_ok_or_else(version, || {
-					err!(Request(UnsupportedRoomVersion(
-						"This server does not support room version {version:?}"
-					)))
-				})
-		})
-		.and_then(|version| Ok((version, room_version::rules(version)?)))?;
+	let room_version = match body.room_version.as_ref() {
+		| Some(version) if services.config.supported_room_version(version) => version,
+		| Some(version) =>
+			return Err!(Request(UnsupportedRoomVersion(
+				"This server does not support room version {version:?}"
+			))),
+		| None => &services.server.config.rooms.default_version,
+	};
+
+	let version_rules = room_version::rules(room_version)?;
 
 	let sender_user = body.sender_user();
 

@@ -376,9 +376,11 @@ fn swap(left: &CStr, right: &CStr) -> IoResult<()> {
 		)
 	};
 
-	(result == 0)
-		.then_some(())
-		.ok_or_else(IoError::last_os_error)
+	if result != 0 {
+		return Err(IoError::last_os_error());
+	}
+
+	Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -387,9 +389,11 @@ fn swap(left: &CStr, right: &CStr) -> IoResult<()> {
 	// kernel copies them and reports every path condition through errno.
 	let result = unsafe { renamex_np(left.as_ptr(), right.as_ptr(), RENAME_SWAP) };
 
-	(result == 0)
-		.then_some(())
-		.ok_or_else(IoError::last_os_error)
+	if result != 0 {
+		return Err(IoError::last_os_error());
+	}
+
+	Ok(())
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -494,10 +498,11 @@ fn set_output_owner(file: &File, origin: &Metadata, path: &Path) -> Result {
 	// SAFETY: The descriptor is live and the numeric IDs were supplied by the OS.
 	let result = unsafe { fchown(file.as_raw_fd(), uid, gid) };
 
-	(result == 0)
-		.then_some(())
-		.ok_or_else(IoError::last_os_error)
-		.map_err(|error| owner_error(&error, &staged, origin, path))
+	if result != 0 {
+		return Err(owner_error(&IoError::last_os_error(), &staged, origin, path));
+	}
+
+	Ok(())
 }
 
 #[cfg(unix)]
@@ -560,10 +565,11 @@ fn copy_security_attributes(source: &File, output: &File, path: &Path) -> Result
 		)
 	};
 
-	(result == 0)
-		.then_some(())
-		.ok_or_else(IoError::last_os_error)
-		.map_err(|error| fs_error(&error, "preserve security attributes", path))
+	if result != 0 {
+		return Err(fs_error(&IoError::last_os_error(), "preserve security attributes", path));
+	}
+
+	Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]

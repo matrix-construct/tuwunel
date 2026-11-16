@@ -1,9 +1,5 @@
 use ruma::{CanonicalJsonObject, CanonicalJsonValue, Mxc, OwnedEventId};
-use tuwunel_core::{
-	Err, Result, debug, err, info,
-	utils::{BoolExt, to_canonical_object},
-	warn,
-};
+use tuwunel_core::{Err, Result, debug, err, info, utils::to_canonical_object, warn};
 use tuwunel_matrix::Event;
 
 use crate::admin_command;
@@ -20,20 +16,18 @@ pub(super) async fn delete_by_event(&self, event_id: OwnedEventId) -> Result {
 			| false => error,
 		})?;
 
-	let event_json = event
-		.is_redacted()
-		.then_async(async || {
-			self.services
-				.retention
-				.get_original_pdu_json(&event_id)
-				.await
-				.map_err(|error| match error.is_not_found() {
-					| true => err!("Redacted event original unavailable."),
-					| false => error,
-				})
-		})
-		.await
-		.unwrap_or_else(|| to_canonical_object(event).map_err(Into::into))?;
+	let event_json = if event.is_redacted() {
+		self.services
+			.retention
+			.get_original_pdu_json(&event_id)
+			.await
+			.map_err(|error| match error.is_not_found() {
+				| true => err!("Redacted event original unavailable."),
+				| false => error,
+			})?
+	} else {
+		to_canonical_object(event)?
+	};
 
 	let content = event_json
 		.get("content")

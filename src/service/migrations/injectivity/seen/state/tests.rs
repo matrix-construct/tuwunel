@@ -5,7 +5,7 @@ use std::{
 };
 
 use serde_json::{Value, json};
-use tuwunel_core::{Error, Result, config::Figment, err, smallvec::SmallVec, utils::BoolExt};
+use tuwunel_core::{Error, Result, config::Figment, err, smallvec::SmallVec};
 use tuwunel_database::Database;
 use tuwunel_matrix::room::state::resolution::AuthCheckOutcome;
 
@@ -783,7 +783,7 @@ async fn assert_original(db: &Database, id: u64, original: &[u8]) -> Result {
 }
 
 fn diff(parent: u64, added: &[(u64, u64)], removed: &[(u64, u64)]) -> Vec<u8> {
-	let separator = removed.is_empty().is_false().then_some(0);
+	let separator = (!removed.is_empty()).then_some(0);
 
 	once(parent)
 		.chain(entries(added))

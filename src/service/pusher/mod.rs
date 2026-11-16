@@ -286,14 +286,17 @@ async fn check_email_pusher(&self, sender: &UserId, address: &str) -> Result {
 	}
 
 	self.services.sendmail.check_address(address)?;
-	self.services
+
+	if !self
+		.services
 		.threepid
 		.address_bound_to(sender, address)
 		.await?
-		.into_option()
-		.ok_or_else(|| {
-			err!(Request(ThreepidNotFound("Email address is not bound to your account.")))
-		})
+	{
+		return Err!(Request(ThreepidNotFound("Email address is not bound to your account.")));
+	}
+
+	Ok(())
 }
 
 /// Deletes one of the user's pushers, with its email cursor and throttles.

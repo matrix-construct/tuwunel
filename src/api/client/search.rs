@@ -74,7 +74,6 @@ pub(crate) async fn search_events_route(
 	})
 }
 
-#[expect(clippy::map_unwrap_or)]
 async fn category_room_events(
 	services: &Services,
 	sender_user: &UserId,
@@ -89,20 +88,17 @@ async fn category_room_events(
 
 	let before: Option<PduCount> = next_batch.map(str::parse).transpose()?;
 
-	let rooms = filter
-		.rooms
-		.clone()
-		.map(IntoIterator::into_iter)
-		.map(IterStream::stream)
-		.map(Left)
-		.unwrap_or_else(|| {
+	let rooms = match filter.rooms.clone() {
+		| Some(rooms) => Left(rooms.into_iter().stream()),
+		| None => {
 			let joined = services
 				.state_cache
 				.rooms_joined(sender_user)
 				.map(ToOwned::to_owned);
 
 			Right(joined)
-		});
+		},
+	};
 
 	let results: Vec<_> = rooms
 		.filter_map(async |room_id| {

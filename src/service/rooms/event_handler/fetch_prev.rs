@@ -11,7 +11,7 @@ use ruma::{
 use serde_json::value::RawValue as RawJsonValue;
 use tokio::time::{Instant, timeout_at};
 use tuwunel_core::{
-	Result, err, implement,
+	Err, Result, err, implement,
 	utils::{
 		BoolExt,
 		stream::{IterStream, automatic_width},
@@ -352,14 +352,13 @@ async fn land_missing_event(
 	let value: CanonicalJsonObject = serde_json::from_str(pdu.get())
 		.map_err(|e| err!(BadServerResponse("missing-events pdu is not canonical json: {e}")))?;
 
-	value
+	if value
 		.get("room_id")
 		.and_then(CanonicalJsonValue::as_str)
-		.is_some_and(|id| id == room_id.as_str())
-		.then_some(())
-		.ok_or_else(|| {
-			err!(Request(InvalidParam("missing-events pdu is for a different room")))
-		})?;
+		!= Some(room_id.as_str())
+	{
+		return Err!(Request(InvalidParam("missing-events pdu is for a different room")));
+	}
 
 	let event_id = gen_event_id(&value, room_version)?;
 

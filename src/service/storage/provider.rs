@@ -40,7 +40,7 @@ use std::{
 
 use bytes::Bytes;
 use derive_more::Debug;
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
 #[cfg(any(feature = "gcs_storage", feature = "s3_storage"))]
 use http::Method;
 #[cfg(any(feature = "gcs_storage", feature = "s3_storage"))]
@@ -523,14 +523,14 @@ pub async fn rename(&self, src: &str, dst: &str, overwrite: CopyMode) -> Result 
 	let dst = self.to_abs_path(dst)?;
 
 	match overwrite {
-		| CopyMode::Overwrite => self.provider.rename(&src, &dst).left_future(),
-		| CopyMode::Create => self
-			.provider
-			.rename_if_not_exists(&src, &dst)
-			.right_future(),
+		| CopyMode::Overwrite => self.provider.rename(&src, &dst).await?,
+		| CopyMode::Create =>
+			self.provider
+				.rename_if_not_exists(&src, &dst)
+				.await?,
 	}
-	.map_err(Error::from)
-	.await
+
+	Ok(())
 }
 
 /// Copies an object within this provider.
@@ -554,14 +554,14 @@ pub async fn copy(&self, src: &str, dst: &str, overwrite: CopyMode) -> Result {
 	let dst = self.to_abs_path(dst)?;
 
 	match overwrite {
-		| CopyMode::Overwrite => self.provider.copy(&src, &dst).left_future(),
-		| CopyMode::Create => self
-			.provider
-			.copy_if_not_exists(&src, &dst)
-			.right_future(),
+		| CopyMode::Overwrite => self.provider.copy(&src, &dst).await?,
+		| CopyMode::Create =>
+			self.provider
+				.copy_if_not_exists(&src, &dst)
+				.await?,
 	}
-	.map_err(Error::from)
-	.await
+
+	Ok(())
 }
 
 /// Streams object metadata beneath an optional logical prefix.

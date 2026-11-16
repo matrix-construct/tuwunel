@@ -92,21 +92,20 @@ pub(super) async fn gather_room_metadata(
 
 	let current_shortstatehash = include_state.then_async(|| {
 		// An empty timeline needs state after the last event, not before it.
-		timeline_pdus
-			.is_empty()
-			.then(|| {
-				services
-					.timeline
-					.next_shortstatehash(room_id, last_timeline_count)
-					.left_future()
-			})
-			.unwrap_or_else(|| {
-				services
-					.timeline
-					.get_shortstatehash(room_id, last_timeline_count)
-					.inspect_err(inspect_debug_log)
-					.right_future()
-			})
+		let current = if timeline_pdus.is_empty() {
+			services
+				.timeline
+				.next_shortstatehash(room_id, last_timeline_count)
+				.left_future()
+		} else {
+			services
+				.timeline
+				.get_shortstatehash(room_id, last_timeline_count)
+				.inspect_err(inspect_debug_log)
+				.right_future()
+		};
+
+		current
 			.or_else(|_| services.state.get_room_shortstatehash(room_id))
 			.map_err(|_| missing_room_state(room_id))
 	});

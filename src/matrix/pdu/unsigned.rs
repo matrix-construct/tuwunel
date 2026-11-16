@@ -309,14 +309,15 @@ pub fn set_thread_participated(&mut self, participated: bool) -> Result {
 #[implement(Pdu)]
 #[inline]
 pub fn thread_latest_event(&self) -> Result<Option<(OwnedEventId, OwnedUserId)>> {
-	self.unsigned
-		.as_ref()
-		.map(Unsigned::json)
-		.map(thread_latest)
-		.transpose()?
-		.flatten()
-		.map(thread_identity)
-		.transpose()
+	let Some(raw) = self.unsigned.as_ref().map(Unsigned::json) else {
+		return Ok(None);
+	};
+
+	let Some(latest) = thread_latest(raw)? else {
+		return Ok(None);
+	};
+
+	thread_identity(latest).map(Some)
 }
 
 /// Whether `unsigned.m.relations` contains an `m.thread` bundle.
@@ -373,17 +374,15 @@ pub fn set_thread_latest_event(&mut self, latest: &Raw<AnySyncMessageLikeEvent>)
 /// A missing or invalid sender returns an error so callers can fail closed.
 #[implement(Pdu)]
 pub fn remove_thread_latest_transaction_id_unless_sender(&mut self, user_id: &UserId) -> Result {
-	if let Some(unsigned) = self
-		.unsigned
-		.as_ref()
-		.map(Unsigned::json)
-		.map(|raw| thread_without_transaction_id(raw, user_id))
-		.transpose()?
-		.flatten()
-	{
-		self.unsigned = Some(unsigned);
-	}
+	let Some(raw) = self.unsigned.as_ref().map(Unsigned::json) else {
+		return Ok(());
+	};
 
+	let Some(unsigned) = thread_without_transaction_id(raw, user_id)? else {
+		return Ok(());
+	};
+
+	self.unsigned = Some(unsigned);
 	Ok(())
 }
 
@@ -405,10 +404,11 @@ fn thread_without_transaction_id(
 }
 
 fn thread_transaction_sender(raw: &RawJsonValue) -> Result<Option<&RawJsonValue>> {
-	thread_latest(raw)?
-		.map(transaction_sender)
-		.transpose()
-		.map(Option::flatten)
+	let Some(latest) = thread_latest(raw)? else {
+		return Ok(None);
+	};
+
+	transaction_sender(latest)
 }
 
 fn transaction_sender(latest_event: &RawJsonValue) -> Result<Option<&RawJsonValue>> {
@@ -427,17 +427,19 @@ fn transaction_sender(latest_event: &RawJsonValue) -> Result<Option<&RawJsonValu
 }
 
 fn thread_latest(raw: &RawJsonValue) -> Result<Option<&RawJsonValue>> {
-	thread_bundle(raw)?
-		.map(|thread| raw_field(thread, "latest_event", "thread bundle"))
-		.transpose()
-		.map(Option::flatten)
+	let Some(thread) = thread_bundle(raw)? else {
+		return Ok(None);
+	};
+
+	raw_field(thread, "latest_event", "thread bundle")
 }
 
 fn thread_bundle(raw: &RawJsonValue) -> Result<Option<&RawJsonValue>> {
-	raw_field(raw, "m.relations", "unsigned")?
-		.map(|relations| raw_field(relations, "m.thread", "bundled relations"))
-		.transpose()
-		.map(Option::flatten)
+	let Some(relations) = raw_field(raw, "m.relations", "unsigned")? else {
+		return Ok(None);
+	};
+
+	raw_field(relations, "m.thread", "bundled relations")
 }
 
 fn thread_identity(raw: &RawJsonValue) -> Result<(OwnedEventId, OwnedUserId)> {

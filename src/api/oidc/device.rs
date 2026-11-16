@@ -174,13 +174,12 @@ fn device_native_redirect(services: &Services, user_code: &str) -> Result<Respon
 	let issuer = services.oauth.get_server()?.issuer_url()?;
 	let base = issuer.trim_end_matches('/');
 
-	let native_url = Url::parse(&format!("{base}/_tuwunel/oidc/native"))
-		.map(|mut url| {
-			url.query_pairs_mut()
-				.append_pair("user_code", user_code);
-			url
-		})
+	let mut native_url = Url::parse(&format!("{base}/_tuwunel/oidc/native"))
 		.map_err(|_| err!(Request(InvalidParam("Failed to build native login URL"))))?;
+
+	native_url
+		.query_pairs_mut()
+		.append_pair("user_code", user_code);
 
 	Ok(device_redirect_response(Redirect::temporary(native_url.as_str())))
 }

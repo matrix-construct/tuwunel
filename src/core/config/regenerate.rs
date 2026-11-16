@@ -409,7 +409,7 @@ fn render_section(
 		.map(|(_, environment_values)| resolve_instances(spec, environment_values))
 		.unwrap_or_default();
 
-	let rendered = instances.is_empty().is_false()
+	let rendered = !instances.is_empty()
 		|| environment_instances
 			.iter()
 			.any(|candidate| is_unrendered(&instances, candidate));

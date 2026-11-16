@@ -62,7 +62,9 @@ pub(crate) fn decode(column: usize, key: &[u8], value: &[u8]) -> Option<Decoded>
 			let (token, end) = segment(key, 8)?;
 			let start = end.saturating_add(1);
 
-			token.is_empty().is_false().into_option()?;
+			if token.is_empty() {
+				return None;
+			}
 			raw(key.get(start..)?)?;
 			value.is_empty().into_option()?;
 			[Some((Key, 0)), Some((Key, start))]
@@ -104,8 +106,7 @@ pub(crate) fn decode(column: usize, key: &[u8], value: &[u8]) -> Option<Decoded>
 			normal(room, count)?;
 			return Some(Decoded { rooms: [room, 0], spots: [None; 2] });
 		},
-		| 8 | 9 if value.is_empty().is_false() =>
-			return Some(Decoded { rooms: [0; 2], spots: [None; 2] }),
+		| 8 | 9 if !value.is_empty() => return Some(Decoded { rooms: [0; 2], spots: [None; 2] }),
 		| 8 | 9 => {
 			let end = destination(key)?;
 

@@ -1166,12 +1166,14 @@ fn check_status(value: &Value) -> Result {
 /// kind-derived table promotes that errcode to 413, so this is one of the few
 /// call sites naming its own status.
 fn check_length(len: usize, max: usize, field: &str, unit: &str) -> Result {
-	len.le(&max).then_some(()).ok_or_else(|| {
-		err!(RequestStatus(
+	if len > max {
+		return Err!(RequestStatus(
 			BAD_REQUEST,
 			TooLarge("{field} cannot be longer than {max} {unit}.")
-		))
-	})
+		));
+	}
+
+	Ok(())
 }
 
 /// Bound a display name or avatar URL by its length budget.
@@ -1179,9 +1181,11 @@ fn check_length(len: usize, max: usize, field: &str, unit: &str) -> Result {
 /// These limits answer `M_BAD_JSON` at 400, while `check_length` keeps
 /// `M_TOO_LARGE` for the status text and emoji.
 fn check_field_length(len: usize, max: usize, field: &str, unit: &str) -> Result {
-	len.le(&max)
-		.then_some(())
-		.ok_or_else(|| err!(Request(BadJson("{field} cannot be longer than {max} {unit}."))))
+	if len > max {
+		return Err!(Request(BadJson("{field} cannot be longer than {max} {unit}.")));
+	}
+
+	Ok(())
 }
 
 /// Validate an MSC4426 call indicator.

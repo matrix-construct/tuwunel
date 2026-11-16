@@ -122,13 +122,12 @@ pub async fn join<'a>(
 	// Resolved state can lag a federated re-invite; trust the invite index.
 	if self
 		.banned_from_resident_room(sender_user, room_id)
+		.await && self
+		.services
+		.state_cache
+		.is_invited(sender_user, room_id)
 		.await
-		&& self
-			.services
-			.state_cache
-			.is_invited(sender_user, room_id)
-			.await
-			.is_false()
+		.is_false()
 	{
 		debug_warn!(%sender_user, %room_id, "Banned user attempted to join.");
 		return Err!(Request(Forbidden("You are banned from the room.")));
@@ -1085,16 +1084,19 @@ fn bound_string<'a>(
 	key: &str,
 	bound: bool,
 ) -> Result<Option<&'a str>> {
-	extra
+	let Some(value) = extra
 		.get(key)
 		.copied()
 		.filter(|value| bound && !matches!(value, CanonicalJsonValue::Null))
-		.map(|value| {
-			value
-				.as_str()
-				.ok_or_else(|| err!(Request(BadJson("{key} must be a string."))))
-		})
-		.transpose()
+	else {
+		return Ok(None);
+	};
+
+	let value = value
+		.as_str()
+		.ok_or_else(|| err!(Request(BadJson("{key} must be a string."))))?;
+
+	Ok(Some(value))
 }
 
 #[implement(Service)]

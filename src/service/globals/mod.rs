@@ -15,7 +15,7 @@ use std::{ops::Range, sync::Arc};
 pub use data::Data;
 use ruma::{OwnedUserId, RoomAliasId, ServerName, UserId};
 use tuwunel_core::{
-	Result, Server, err, implement,
+	Err, Result, Server, err, implement,
 	utils::{Secret, resolve_secret},
 };
 
@@ -56,16 +56,14 @@ impl crate::Service for Service {
 /// Full user IDs are rejected so the configuration cannot select an identity
 /// belonging to another server. Invalid input names the configuration setting.
 fn server_user(localpart: &str, server_name: &ServerName) -> Result<OwnedUserId> {
-	UserId::parse_with_server_name(localpart, server_name)
-		.map_err(|e| err!("Invalid admin.server_user_localpart configuration: {e}"))
-		.and_then(|user| {
-			user.localpart()
-				.eq(localpart)
-				.then_some(user)
-				.ok_or_else(|| {
-					err!("admin.server_user_localpart must be a localpart, not a full user ID")
-				})
-		})
+	let user = UserId::parse_with_server_name(localpart, server_name)
+		.map_err(|e| err!("Invalid admin.server_user_localpart configuration: {e}"))?;
+
+	if user.localpart() != localpart {
+		return Err!("admin.server_user_localpart must be a localpart, not a full user ID");
+	}
+
+	Ok(user)
 }
 
 impl Service {

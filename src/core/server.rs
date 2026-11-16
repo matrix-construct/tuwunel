@@ -203,10 +203,11 @@ impl Server {
 	pub fn check_running(&self) -> Result {
 		use std::{io, io::ErrorKind::Interrupted};
 
-		self.is_running()
-			.then_some(())
-			.ok_or_else(|| io::Error::new(Interrupted, "Server shutting down"))
-			.map_err(Into::into)
+		if !self.is_running() {
+			return Err(io::Error::new(Interrupted, "Server shutting down").into());
+		}
+
+		Ok(())
 	}
 
 	#[inline]

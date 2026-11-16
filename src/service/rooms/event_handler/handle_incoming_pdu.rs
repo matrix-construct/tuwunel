@@ -257,7 +257,7 @@ pub async fn handle_incoming_pdu<'a>(
 	let walk = pass.and_then(|pass| pass.fetched(fetch.as_ref(), stopping));
 	let fetch = fetch?;
 
-	let walking = fetch.sorted.is_empty().is_false();
+	let walking = !fetch.sorted.is_empty();
 	let attempt = walking.then(|| self.record_attempt(Context::Incoming, event_id));
 	let PrevFetch { sorted, pdus, .. } = fetch;
 

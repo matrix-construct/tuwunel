@@ -18,7 +18,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, err, implement,
-	utils::{BoolExt, FutureBoolExt, OptionExt, future::TryExtExt, result::NotFound},
+	utils::{FutureBoolExt, OptionExt, future::TryExtExt, result::NotFound},
 };
 use tuwunel_matrix::{Event, PduCount, StateKey, pdu::PduBuilder};
 
@@ -209,8 +209,7 @@ async fn user_shared_history(
 #[tracing::instrument(skip_all, level = "trace")]
 pub async fn user_can_see_state_events(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	self.user_can_see_current_state(user_id, room_id)
-		.await
-		|| self.is_departed_member(user_id, room_id).await
+		.await || self.is_departed_member(user_id, room_id).await
 }
 
 /// Reports whether a user may read the room's current state.
@@ -387,26 +386,21 @@ pub async fn departure_shortstatehash(
 	room_id: &RoomId,
 	departure: PduCount,
 ) -> Result<ShortStateHash> {
-	let after_event = self
-		.services
-		.db
-		.is_read_only()
-		.is_false()
-		.then_async(|| {
-			self.services
-				.timeline
-				.get_pdu_at(room_id, departure)
-				.and_then(async |pdu| {
-					self.services
-						.state
-						.shortstatehash_after_event(&pdu)
-						.await
-				})
-		})
-		.await
-		.transpose()
-		.optional()?
-		.flatten();
+	let after_event = if self.services.db.is_read_only() {
+		None
+	} else {
+		self.services
+			.timeline
+			.get_pdu_at(room_id, departure)
+			.and_then(async |pdu| {
+				self.services
+					.state
+					.shortstatehash_after_event(&pdu)
+					.await
+			})
+			.await
+			.optional()?
+	};
 
 	let Some(shortstatehash) = after_event else {
 		return self
@@ -447,8 +441,7 @@ pub async fn user_can_peek(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	self.services
 		.state_cache
 		.is_joined(user_id, room_id)
-		.await
-		|| self.is_world_readable(room_id).await
+		.await || self.is_world_readable(room_id).await
 }
 
 /// Reports whether the room's history was world-readable at an event.

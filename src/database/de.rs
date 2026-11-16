@@ -10,7 +10,7 @@ use serde::{
 	de::{DeserializeSeed, Visitor},
 };
 use tuwunel_core::{
-	Error, Result, arrayvec::ArrayVec, checked, debug::DebugInspect, err, unhandled,
+	Err, Error, Result, arrayvec::ArrayVec, checked, debug::DebugInspect, unhandled,
 	utils::string,
 };
 
@@ -88,11 +88,14 @@ impl<'de> Deserializer<'de> {
 		let unparsed = &self.buf[pos..];
 		let remain = self.remaining()?;
 		let trailing_sep = remain == 1 && unparsed[0] == Self::SEP;
-		(remain == 0 || trailing_sep)
-			.then_some(())
-			.ok_or(err!(SerdeDe(
+
+		if remain != 0 && !trailing_sep {
+			return Err!(SerdeDe(
 				"{remain} trailing of {len} bytes not deserialized.\n{parsed:?}\n{unparsed:?}",
-			)))
+			));
+		}
+
+		Ok(())
 	}
 
 	/// Called at the start of arrays and tuples

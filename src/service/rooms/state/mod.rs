@@ -54,7 +54,7 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	trace,
 	utils::{
-		BoolExt, IterStream, MutexMap, MutexMapGuard, ReadyExt, TryFutureExtExt, TryReadyExt,
+		IterStream, MutexMap, MutexMapGuard, ReadyExt, TryFutureExtExt, TryReadyExt,
 		calculate_hash,
 		hash::sha256::Digest,
 		mutex_map::Guard,
@@ -259,14 +259,14 @@ async fn force_member_effects(&self, room_id: &RoomId, pdu: &PduEvent) -> Result
 		return Ok(());
 	};
 
-	let last_state = membership_event
-		.membership
-		.eq(&MembershipState::Invite)
-		.and_is(self.services.globals.user_is_local(&user_id))
-		.then_async(|| self.replayed_invite_state(room_id, &user_id, pdu))
-		.map(Option::transpose)
-		.map_ok(Option::flatten)
-		.await?;
+	let is_local = self.services.globals.user_is_local(&user_id);
+
+	let last_state = if membership_event.membership == MembershipState::Invite && is_local {
+		self.replayed_invite_state(room_id, &user_id, pdu)
+			.await?
+	} else {
+		None
+	};
 
 	let invite_event = membership_event
 		.membership
@@ -305,14 +305,17 @@ async fn replayed_invite_state(
 	user_id: &UserId,
 	pdu: &PduEvent,
 ) -> Result<StrippedRoomState> {
-	self.services
+	if self
+		.services
 		.state_cache
 		.has_invite_state(user_id, room_id)
 		.await?
-		.is_false()
-		.then_async(|| self.summary_stripped(pdu))
-		.map(Ok)
-		.await
+	{
+		return Ok(None);
+	}
+
+	let summary = self.summary_stripped(pdu).await;
+	Ok(Some(summary))
 }
 
 /// Associates an event with a complete compressed state snapshot.

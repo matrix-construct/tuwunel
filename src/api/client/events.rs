@@ -1,7 +1,7 @@
 use std::iter::once;
 
 use axum::extract::State;
-use futures::{Stream, StreamExt, future::ok, pin_mut};
+use futures::{Stream, StreamExt, pin_mut};
 use ruma::{
 	UserId,
 	api::client::peeking::listen_to_new_events::v3::{Request, Response},
@@ -10,8 +10,7 @@ use tokio::time::timeout_at;
 use tuwunel_core::{
 	Err, Result, err,
 	utils::{
-		BoolExt, OptionExt,
-		future::OptionFutureExt,
+		BoolExt,
 		stream::{IterStream, ReadyExt, WidebandExt},
 	},
 };
@@ -59,22 +58,16 @@ pub(crate) async fn events_route(
 	}
 
 	// The endpoint listens for new events, so a stream without a token starts now.
-	let from = body
-		.body
-		.from
-		.as_deref()
-		.map(str::parse)
-		.transpose()
-		.map_err(|_| err!(Request(InvalidParam("Invalid `from` token."))))?
-		.map_async(ok)
-		.unwrap_or_else_async(async || {
-			services
-				.globals
-				.wait_pending()
-				.await
-				.map(PduCount::Normal)
-		})
-		.await?;
+	let from: PduCount = match body.body.from.as_deref() {
+		| Some(from) => from
+			.parse()
+			.map_err(|_| err!(Request(InvalidParam("Invalid `from` token."))))?,
+		| None => services
+			.globals
+			.wait_pending()
+			.await
+			.map(PduCount::Normal)?,
+	};
 
 	let listen = Listen {
 		services: &services,

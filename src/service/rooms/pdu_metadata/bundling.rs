@@ -138,15 +138,17 @@ async fn bundle_thread_for(&self, sender_user: &UserId, pdu: &mut Pdu) {
 
 	self.erase_thread_latest(sender_user, pdu).await;
 
-	let _: Option<()> = self
+	if self
 		.services
 		.server
 		.config
 		.rooms
 		.relations
 		.bundle_edits
-		.then_async(|| self.bundle_thread_latest_edit(sender_user, pdu))
-		.await;
+	{
+		self.bundle_thread_latest_edit(sender_user, pdu)
+			.await;
+	}
 }
 
 /// MSC4025: the stored thread bundle carries a full `latest_event` of any
@@ -438,20 +440,18 @@ pub async fn ignored_thread_view(
 #[implement(Service)]
 #[tracing::instrument(skip_all, level = "trace")]
 async fn redacted_root(&self, ignored: &BTreeSet<OwnedUserId>, root: &Pdu) -> Option<Box<Pdu>> {
-	ignored
-		.contains(root.sender())
-		.then_async(async || {
-			self.services
-				.state
-				.get_room_version_rules(root.room_id())
-				.await
-				.log_err()
-				.ok()
-				.and_then(|rules| root.redacted(&rules.redaction).log_err().ok())
-				.map(Box::new)
-		})
+	if !ignored.contains(root.sender()) {
+		return None;
+	}
+
+	self.services
+		.state
+		.get_room_version_rules(root.room_id())
 		.await
-		.flatten()
+		.log_err()
+		.ok()
+		.and_then(|rules| root.redacted(&rules.redaction).log_err().ok())
+		.map(Box::new)
 }
 
 #[cfg(test)]
