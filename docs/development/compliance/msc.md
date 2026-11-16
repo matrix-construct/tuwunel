@@ -21,9 +21,9 @@
     returns X" and "this field is added to Y" both count.
 - **Spec**: the Matrix spec version that first published the MSC,
   in the [Spec compliance gaps](#spec-compliance-gaps) section
-  only. `next` is queued for the release after `1.19`. Blank
-  means no changelog from `1.1` on cites the MSC, so it was either
-  adopted into the pre-`1.1` spec or has not landed in a release.
+  only. `1.0` is the spec before `1.1`, when each API carried its
+  own version. `next` is merged but in no release yet; the newest
+  release is `1.19`.
 
 ## Counts
 
@@ -284,36 +284,36 @@ for spec compliance.
 | MSC2409 | 🟨 ● | 70/70 | 1.13 | Proposal to send typing, presence and receipts to appservices | typing+receipt EDUs sent to AS; presence not forwarded |
 | MSC3925 | 🟨 ● | 70/70 | 1.7 | m.replace aggregation with full event | Full m.replace fold; off by default (bundle_edit_relations); backfill unindexed |
 | MSC3970 | 🟨 ◐ | 70/80 | 1.7 | Scope transaction IDs to devices | txn key is user, device, txn with no path; redact untracked; echo user scoped |
-| MSC4143 | 🟨 ◐ | 70/90 |  | MatrixRTC | Discovery, upgrade slot copy, delayed leave; no sticky member or transport auth |
+| MSC4143 | 🟨 ◐ | 70/90 | next | MatrixRTC | Discovery, upgrade slot copy, delayed leave; no sticky member or transport auth |
 | MSC4284 | 🟨 ● | 70/90 | 1.18 | Policy Servers | outbound /sign, inbound verify, fetch-on-missing, reversible soft-fail |
-| MSC4543 | 🟨 ◐ | 70/90 |  | Sliding Sync Extensions: End-to-end encryption | No-pos and count rules met; left misses departures, bans; claim race; flag held |
-| MSC4548 | 🟨 ◐ | 70/90 |  | Sliding Sync Extensions: Account data | Client caching excluded; first-enable and independent room-scope gaps |
-| MSC2290 | 🟨 ● | 65/55 |  | Separate Endpoints for Binding Threepids | add endpoint (UIA+dupe) + HS email validation; IS-bind half out of scope |
-| MSC1915 | 🟨 ● | 60/55 |  | MSC 1915 - Add unbind 3PID APIs | delete + deactivate return id_server_unbind_result; IS unbind out of HS scope |
-| MSC2324 | 🟨 ◐ | 60/100 |  | Facilitating early releases of software dependent on spec | two MUST misses: unprefixed unstable SSO callback; stable v1/auth_issuer |
+| MSC4543 | 🟨 ◐ | 70/90 | next | Sliding Sync Extensions: End-to-end encryption | No-pos and count rules met; left misses departures, bans; claim race; flag held |
+| MSC4548 | 🟨 ◐ | 70/90 | next | Sliding Sync Extensions: Account data | Client caching excluded; first-enable and independent room-scope gaps |
+| MSC2290 | 🟨 ● | 65/55 | 1.0 | Separate Endpoints for Binding Threepids | add endpoint (UIA+dupe) + HS email validation; IS-bind half out of scope |
+| MSC1915 | 🟨 ● | 60/55 | 1.0 | MSC 1915 - Add unbind 3PID APIs | delete + deactivate return id_server_unbind_result; IS unbind out of HS scope |
+| MSC2324 | 🟨 ◐ | 60/100 | 1.0 | Facilitating early releases of software dependent on spec | two MUST misses: unprefixed unstable SSO callback; stable v1/auth_issuer |
 | MSC2675 | 🟨 ◐ | 60/75 | 1.3 | Serverside aggregations of message relationships | thread+edit+reference bundled (edit/ref gated); reactions unbundled |
 | MSC3267 | 🟨 ◐ | 60/80 | 1.5 | reference relationships | m.reference bundle added; gated default-off; no ignore/visibility filter |
-| MSC4508 | 🟨 ◐ | 60/80 |  | Sliding Sync Extensions: Common format and Typing | Typing exists; joined-only filtering and scope reentry remain incomplete. |
-| MSC1957 | 🟨 ● | 50/50 |  | Integration manager discovery | account-data passthrough only; no m.integrations key in well-known client |
-| MSC2140 | 🟨 ● | 50/60 |  | Terms of Service API for Identity Servers and Integration Managers | no 3pid/unbind or IS relay; accepted_terms and register cleanup present |
+| MSC4508 | 🟨 ◐ | 60/80 | next | Sliding Sync Extensions: Common format and Typing | Typing exists; joined-only filtering and scope reentry remain incomplete. |
+| MSC1957 | 🟨 ● | 50/50 | next | Integration manager discovery | account-data passthrough only; no m.integrations key in well-known client |
+| MSC2140 | 🟨 ● | 50/60 | 1.0 | Terms of Service API for Identity Servers and Integration Managers | no 3pid/unbind or IS relay; accepted_terms and register cleanup present |
 | MSC2676 | 🟨 ● | 50/60 | 1.4 | Message editing | edits accepted/relayed; no m.replace bundle or new_content apply |
-| MSC4319 | 🟨 ● | 50/50 |  | Room member events for invite and knock rooms in the `/sync` response | state/mod.rs:464 puts inviter member in stripped state; no `state` key |
-| MSC4551 | 🟨 ◐ | 40/70 |  | Sliding Sync Extensions: Receipts | Receipt delivery exists; initial/rescope gaps. Client application excluded. |
-| MSC4195 | 🟨 ◐ | 10/10 |  | MatrixRTC Transport using LiveKit Backend | Transport advertisement only; token and leave APIs absent; client media excluded |
-| MSC2229 | 🟨 ● | 0/20 |  | Allowing 3PID Owners to Rebind | [→ MSC2290] owner exemption at 3pid/add only; requestToken still rejects the ... |
-| MSC1759 | 🟥 ◐ | 10/20 |  | MSC 1759 - Rooms V2 | v2 algorithm in use for v3+; v2 itself not in supported_room_versions |
-| MSC1767 | 🟥 ◐ | 0/0 |  | Extensible events in Matrix | no extensible-events handling; relies on generic event relay |
-| MSC2076 | 🟥 ◐ | 0/10 |  | Enforce key-validity periods when validating event signatures | minimum_valid_until_ts passed for fetches; per-event ts check absent |
-| MSC2134 | 🟥 ● | 0/0 |  | Identity Hash Lookups | no IS lookup client; no hash_details, pepper or v1 fallback code |
-| MSC2244 | 🟥 ● | 0/0 |  | Mass redactions | Single-target redactions only; no array redacts handling |
-| MSC2313 | 🟥 ● | 0/0 |  | Moderation policies as rooms (ban lists) | no server-side policy-list consumption; bot/client subscribers excluded |
+| MSC4319 | 🟨 ● | 50/50 | next | Room member events for invite and knock rooms in the `/sync` response | state/mod.rs:464 puts inviter member in stripped state; no `state` key |
+| MSC4551 | 🟨 ◐ | 40/70 | next | Sliding Sync Extensions: Receipts | Receipt delivery exists; initial/rescope gaps. Client application excluded. |
+| MSC4195 | 🟨 ◐ | 10/10 | next | MatrixRTC Transport using LiveKit Backend | Transport advertisement only; token and leave APIs absent; client media excluded |
+| MSC2229 | 🟨 ● | 0/20 | 1.0 | Allowing 3PID Owners to Rebind | [→ MSC2290] owner exemption at 3pid/add only; requestToken still rejects the ... |
+| MSC1759 | 🟥 ◐ | 10/20 | 1.0 | MSC 1759 - Rooms V2 | v2 algorithm in use for v3+; v2 itself not in supported_room_versions |
+| MSC1767 | 🟥 ◐ | 0/0 | next | Extensible events in Matrix | no extensible-events handling; relies on generic event relay |
+| MSC2076 | 🟥 ◐ | 0/10 | 1.0 | Enforce key-validity periods when validating event signatures | minimum_valid_until_ts passed for fetches; per-event ts check absent |
+| MSC2134 | 🟥 ● | 0/0 | 1.0 | Identity Hash Lookups | no IS lookup client; no hash_details, pepper or v1 fallback code |
+| MSC2244 | 🟥 ● | 0/0 | next | Mass redactions | Single-target redactions only; no array redacts handling |
+| MSC2313 | 🟥 ● | 0/0 | 1.0 | Moderation policies as rooms (ban lists) | no server-side policy-list consumption; bot/client subscribers excluded |
 | MSC2604 | 🟥 ● | 0/0 | 1.1 | Parameters for Login Fallback | login fallback page is homeserver served, so not n/a; Tuwunel ships no page |
 | MSC3288 | 🟥 ● | 0/0 | 1.2 | Add room type to `/_matrix/identity/v2/store-invite` API | sole clause is addressed to homeservers, so not n/a; no 3PID invite at all |
 | MSC3550 | 🟥 ◐ | 0/0 | 1.2 | Add HTTP 403 to possible profile lookup responses | CS /profile returns 403 M_FORBIDDEN when outbound profile lookup disabled |
-| MSC4127 | 🟥 ● | 0/0 |  | Removal of query string auth | src/api/router/auth.rs:78 still falls back to request.query.access_token |
+| MSC4127 | 🟥 ● | 0/0 | next | Removal of query string auth | src/api/router/auth.rs:78 still falls back to request.query.access_token |
 | MSC4183 | 🟥 ● | 0/0 | 1.18 | Additional Error Codes for submitToken endpoints | mixed MSC; the submit_url half is homeserver scope and we emit no submit_url |
 | MSC4335 | 🟥 ● | 0/0 | 1.18 | M_USER_LIMIT_EXCEEDED error code | M_USER_LIMIT_EXCEEDED error code not used |
-| MSC4354 | 🟥 ● | 0/0 |  | Sticky Events | No sticky delivery or expiry paths; client ephemeral maps excluded |
+| MSC4354 | 🟥 ● | 0/0 | next | Sticky Events | No sticky delivery or expiry paths; client ephemeral maps excluded |
 
 ## Open
 
@@ -386,7 +386,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4470 | 🟥 ● | 0/0 | Routing reports to non-local destinations | `/report` does not accept `must_send_to`; no fan-out. |
 | MSC4469 | 🟥 ● | 0/0 | Reporting to remote servers (EDU approach) | `m.report` EDU not defined or routed. |
 | MSC4467 | 🟥 ● | 0/0 | Improved Room Upgrade API | v3 upgrade only; no v4 endpoint, capability, or migration_schema. |
-| MSC4466 | 🟨 ◐ | 50/70 | Altering profile change propagation | Single-field propagation and key copying work; whole-profile extension lacks |
+| MSC4466 | 🟨 ◐ | 50/70 | Altering profile change propagation | Single-field propagation works; whole-profile extension and key copying lack |
 | MSC4464 | 🟥 ● | 0/0 | verifiable links in profile | No /verify_profile_connection endpoint or verification backend |
 | MSC4462 | 🟥 ◐ | 10/10 | Links in Profile | Incidental MSC4133 passthrough; no m.connections parsing. |
 | MSC4461 | ✅ ◐ | 100/100 | Storing per-message profiles for users | Pure account data passthrough; generic CS account-data covers it |
