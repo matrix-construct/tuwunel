@@ -15,6 +15,7 @@ use ruma::{
 				create_content::v3::Request as UploadRequest,
 				create_content_async::v3::Request as AsyncUploadRequest,
 			},
+			membership::is_joined::unstable::Request as IsJoinedRequest,
 		},
 		error::{DeserializationError, FromHttpRequestError},
 	},
@@ -364,16 +365,16 @@ fn parse_error(route: TypeId, error: &FromHttpRequestError) -> Error {
 
 /// Identifies the routes whose MSC names the errcodes for unparsable input.
 ///
-/// This is MSC4512's `fed_proxy`.
+/// These are MSC4502's `is_joined` and MSC4512's `fed_proxy`.
 fn names_param_errors(route: TypeId) -> bool {
-	route == TypeId::of::<FedProxyRequest>()
+	route == TypeId::of::<IsJoinedRequest>() || route == TypeId::of::<FedProxyRequest>()
 }
 
 /// Reports whether a body failed to parse on an absent required field.
 ///
 /// serde_json does not expose the case structurally, so this reads the message
-/// serde's `de::Error::missing_field` writes. Only bodies are checked: the
-/// route takes no query, and a matched route has its path.
+/// serde's `de::Error::missing_field` writes. Only bodies are checked: neither
+/// route has a required query parameter, and a matched route has its path.
 fn is_missing_field(error: &FromHttpRequestError) -> bool {
 	matches!(
 		error,

@@ -362,7 +362,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4505 | 🟥 ● | 0/0 | Push Rules for Live Location Sharing | no beacon push rules; ruma's default ruleset defines none |
 | MSC4504 | 🟨 ◐ | 50/100 | Using a global version number for the entire specification (v2) | Drops spec removals in Y%6 releases it advertises (v1.6, v1.18); not yet live |
 | MSC4503 | 🟥 ● | 0/0 | External Protocol Handles | m.external_handle unrecognized; generic MSC4133 passthrough only |
-| MSC4502 | ✅ ● | 80/90 | Targeted and unrestricted room member queries | AS registration scope only, no OAuth scopes; bad params give M_BAD_JSON |
+| MSC4502 | ✅ ● | 90/90 | Targeted and unrestricted room member queries | AS registration scope only; no OAuth scopes, so admins cannot hold it |
 | MSC4501 | ✅ ◐ | 100/100 | Social Media on Matrix | Profile-field passthrough works; social event and client conventions excluded |
 | MSC4500 | 🟥 ● | 0/0 | State accumulator endpoint and transaction digests | no LtHash accumulator, state_hashes payload or reconciliation endpoint |
 | MSC4499 | 🟨 ◐ | 40/50 | Strict server signing key caching and key ID uniqueness | keys cached and persisted, but extend() overwrites so last seen wins |

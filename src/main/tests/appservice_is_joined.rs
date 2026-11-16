@@ -46,7 +46,8 @@ const STABLE_SCOPE: &str = "urn:matrix:client:rooms:is_joined";
 /// A query for a local or remote user or server answers from the room's
 /// records, and a query for an unknown subject or room answers `false`. A
 /// masquerading appservice keeps its scope, while a user token or an unscoped
-/// appservice is refused. Once this server leaves, a query for a remote member
+/// appservice is refused, and an unparsable room, user or server is an invalid
+/// parameter. Once this server leaves, a query for a remote member
 /// still recorded as joined answers `false`. An unknown scope is ignored at
 /// load and refused at registration, and the `.*` namespace these
 /// registrations claim admits federated to-device only for existing accounts.
@@ -114,16 +115,20 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert!(!joined(&scoped, &unknown_room, &own).await?, "an unknown room is joined");
 	assert!(joined(&inline, &room_id, &own).await?, "the inline scope was not granted");
 
-	for (client, query, expected) in [
-		(&scoped, both.as_str(), (400, "M_MISSING_PARAM")),
-		(&scoped, "", (400, "M_MISSING_PARAM")),
-		(&scoped, "mxid=not-a-user-id", (400, "M_BAD_JSON")),
-		(&owner, own.as_str(), (403, "M_FORBIDDEN")),
-		(&unscoped, own.as_str(), (403, "M_FORBIDDEN")),
-	] {
-		let (status, errcode) = refusal(client, &room_id, query).await?;
+	let known = room_id.as_str();
 
-		assert_eq!((status, errcode.as_str()), expected, "{query}");
+	for (client, room, query, expected) in [
+		(&scoped, known, both.as_str(), (400, "M_MISSING_PARAM")),
+		(&scoped, known, "", (400, "M_MISSING_PARAM")),
+		(&scoped, known, "mxid=not-a-user-id", (400, "M_INVALID_PARAM")),
+		(&scoped, known, "server_name=not%20a%20server", (400, "M_INVALID_PARAM")),
+		(&scoped, "not-a-room", own.as_str(), (400, "M_INVALID_PARAM")),
+		(&owner, known, own.as_str(), (403, "M_FORBIDDEN")),
+		(&unscoped, known, own.as_str(), (403, "M_FORBIDDEN")),
+	] {
+		let (status, errcode) = refusal(client, room, query).await?;
+
+		assert_eq!((status, errcode.as_str()), expected, "{room} {query}");
 	}
 
 	owner
@@ -262,7 +267,7 @@ async fn register_appservice(
 }
 
 async fn joined(client: &Client<'_>, room_id: &RoomId, query: &str) -> Result<bool> {
-	let response = get_is_joined(client, room_id, query).await?;
+	let response = get_is_joined(client, room_id.as_str(), query).await?;
 
 	accepted(response)
 		.await?
@@ -271,7 +276,7 @@ async fn joined(client: &Client<'_>, room_id: &RoomId, query: &str) -> Result<bo
 		.ok_or_else(|| err!("response omitted joined"))
 }
 
-async fn refusal(client: &Client<'_>, room_id: &RoomId, query: &str) -> Result<(u16, String)> {
+async fn refusal(client: &Client<'_>, room_id: &str, query: &str) -> Result<(u16, String)> {
 	let response = get_is_joined(client, room_id, query).await?;
 	let status = response.status().as_u16();
 	let body: Value = response.json().await?;
@@ -279,7 +284,7 @@ async fn refusal(client: &Client<'_>, room_id: &RoomId, query: &str) -> Result<(
 	Ok((status, field(&body, "errcode")?.to_owned()))
 }
 
-async fn get_is_joined(client: &Client<'_>, room_id: &RoomId, query: &str) -> Result<Response> {
+async fn get_is_joined(client: &Client<'_>, room_id: &str, query: &str) -> Result<Response> {
 	let rest = format!("rooms/{room_id}/is_joined?{query}");
 	let url = client.client_url("unstable/io.element.msc4502/", &rest);
 
