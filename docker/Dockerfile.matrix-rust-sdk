@@ -8,7 +8,7 @@ ARG RUSTUP_HOME
 ARG CARGO_HOME
 ARG MRSDK_TARGET_DIR="/usr/src/matrix-rust-sdk/target"
 ARG mrsdk_target_share
-ARG mrsdk_ref="1c44fb66214667c6d00acaf72ab592493653708b"
+ARG mrsdk_ref="139b466c3121d4957c3414b35f96e778b922808a"
 # This stage compiles the tests; the rust-sdk-integration stage below runs them.
 # The two carry separate scheduling knobs so the compile lands on --batch while
 # the test run inherits the realtime policy passed to that stage.

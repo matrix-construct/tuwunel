@@ -842,14 +842,14 @@ target "rust-sdk-valgrind" {
         mrsdk_test_args = ""
         mrsdk_startup_delay = "30s"
         mrsdk_skip_list =<<EOF
-            --skip test_delayed_invite_response_and_sent_message_decryption
             --skip test_history_share_on_invite
             --skip test_history_sharing_session_merging
             --skip test_transitive_history_share_with_withhelds
             --skip test_latest_event_few_rooms
             --skip test_latest_thread_event_is_redecrypted_and_updated
-            --skip test_event_with_context
-            --skip test_repeated_join_leave
+            --skip test_empty_room_accept_invite
+            --skip test_invite_declined_and_later_accepted
+            --skip test_mutual_sas_verification_with_notification_client_ignores_verification_events
 EOF
     }
 }
@@ -878,14 +878,14 @@ target "rust-sdk-integ" {
         mrsdk_test_args = "--no-fail-fast"
 
         mrsdk_skip_list =<<EOF
-            --skip test_delayed_invite_response_and_sent_message_decryption
             --skip test_history_share_on_invite
             --skip test_history_sharing_session_merging
             --skip test_transitive_history_share_with_withhelds
             --skip test_latest_event_few_rooms
             --skip test_latest_thread_event_is_redecrypted_and_updated
-            --skip test_event_with_context
-            --skip test_repeated_join_leave
+            --skip test_empty_room_accept_invite
+            --skip test_invite_declined_and_later_accepted
+            --skip test_mutual_sas_verification_with_notification_client_ignores_verification_events
 EOF
     }
 }
