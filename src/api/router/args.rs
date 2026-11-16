@@ -9,10 +9,14 @@ use ruma::{
 	OwnedUserId, ServerName, UserId,
 	api::{
 		IncomingRequest,
-		client::media::{
-			create_content::v3::Request as UploadRequest,
-			create_content_async::v3::Request as AsyncUploadRequest,
+		client::{
+			appservice::fed_proxy::unstable::Request as FedProxyRequest,
+			media::{
+				create_content::v3::Request as UploadRequest,
+				create_content_async::v3::Request as AsyncUploadRequest,
+			},
 		},
+		error::{DeserializationError, FromHttpRequestError},
 	},
 };
 use serde_json::{Value as JsonValue, from_slice};
@@ -153,7 +157,7 @@ where
 			require_admin(services, sender).await?;
 		}
 
-		make_args(services, request, json_body?, auth)
+		make_args(services, request, json_body?, auth, route)
 	}
 }
 
@@ -263,6 +267,7 @@ fn make_args<T, const ADMIN: bool>(
 	request: Request,
 	json_body: Option<CanonicalJsonValue>,
 	auth: Auth,
+	route: TypeId,
 ) -> Result<Args<T, ADMIN>>
 where
 	T: IncomingRequest,
@@ -280,7 +285,7 @@ where
 	let rate_limit_ip = rate_limit_ip(&request.parts).map_err(|(_, message)| message);
 	let http_request = HttpRequest::from_parts(request.parts, body);
 	let body = T::try_from_http_request(http_request, &request.path)
-		.map_err(|e| err!(Request(BadJson(debug_warn!("{e}")))))?;
+		.map_err(|e| parse_error(route, &e))?;
 
 	Ok(Args {
 		body,
@@ -341,6 +346,40 @@ pub(super) fn serialize_body(json_body: &CanonicalJsonValue) -> Bytes {
 	serde_json::to_writer(&mut buf, json_body).expect("value serialization can't fail");
 
 	buf.into_inner().freeze()
+}
+
+/// Maps a request that failed to parse to its error.
+///
+/// Malformed input answers `M_BAD_JSON`. On the routes whose MSC names
+/// parameter errors, an absent required field answers `M_MISSING_PARAM`
+/// instead, and any other unparsable value, path and query parameters
+/// included, answers `M_INVALID_PARAM`.
+fn parse_error(route: TypeId, error: &FromHttpRequestError) -> Error {
+	match error {
+		| _ if !names_param_errors(route) => err!(Request(BadJson(debug_warn!("{error}")))),
+		| error if is_missing_field(error) => err!(Request(MissingParam(debug_warn!("{error}")))),
+		| _ => err!(Request(InvalidParam(debug_warn!("{error}")))),
+	}
+}
+
+/// Identifies the routes whose MSC names the errcodes for unparsable input.
+///
+/// This is MSC4512's `fed_proxy`.
+fn names_param_errors(route: TypeId) -> bool {
+	route == TypeId::of::<FedProxyRequest>()
+}
+
+/// Reports whether a body failed to parse on an absent required field.
+///
+/// serde_json does not expose the case structurally, so this reads the message
+/// serde's `de::Error::missing_field` writes. Only bodies are checked: the
+/// route takes no query, and a matched route has its path.
+fn is_missing_field(error: &FromHttpRequestError) -> bool {
+	matches!(
+		error,
+		FromHttpRequestError::Deserialization(DeserializationError::Json(error))
+			if error.is_data() && error.to_string().starts_with("missing field")
+	)
 }
 
 #[cfg(test)]

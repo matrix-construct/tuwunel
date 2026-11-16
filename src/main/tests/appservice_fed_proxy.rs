@@ -61,8 +61,9 @@ struct Seen {
 /// A request under the appservice's claimed prefix reaches a TLS peer signed
 /// over the path and the bytes the peer received, and the peer's status and
 /// JSON object body come back whatever the status. A path outside the claim,
-/// a destination this server does not federate with, a malformed method and a
-/// caller that is not an appservice are each refused with the MSC's code.
+/// a destination this server does not federate with, a missing or malformed
+/// parameter and a caller that is not an appservice are each refused with the
+/// MSC's code.
 #[test]
 fn fed_proxy_relays_signed_requests() -> Result {
 	let options = [
@@ -217,26 +218,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	assert_eq!((status, errcode.as_str()), path_not_allowed, "an appservice without a claim");
 
-	for (method, body) in [
-		("GET", Some(json!({}))),
-		("DELETE", Some(json!({}))),
-		("PATCH", None),
-		("POST", Some(json!([]))),
-		("POST", Some(json!("body"))),
-		("PUT", Some(json!(1))),
-		("POST", Some(json!(true))),
-		("POST", Some(json!({ "fraction": 0.5 }))),
-	] {
-		let request = match &body {
-			| Some(body) =>
-				json!({ "destination": peer, "method": method, "path": GET_TOKEN, "body": body }),
-			| None => json!({ "destination": peer, "method": method, "path": GET_TOKEN }),
-		};
-
-		let (status, errcode) = refusal(&appservice, &request).await?;
-
-		assert_eq!((status, errcode.as_str()), (400, "M_INVALID_PARAM"), "{method} {body:?}");
-	}
+	malformed_requests(&appservice, &peer).await?;
 
 	let user = Client { services, base, token: USER_TOKEN };
 	let ping = user.client_url("v1/", "appservice/lk/ping");
@@ -259,6 +241,58 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert_eq!(refused(anonymous).await?, (401, "M_MISSING_TOKEN".into()));
 
 	assert!(seen.try_recv().is_err(), "a refused request reached the peer");
+
+	Ok(())
+}
+
+/// Missing or malformed parameters are refused with the MSC's 400 codes.
+///
+/// Invalid ones include a method outside the four the MSC allows, a body where
+/// the method takes none, one that is not an object or carries a non-integer
+/// number, an unparsable destination and a non-string query value. An absent
+/// required field is a missing parameter.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn malformed_requests(appservice: &Client<'_>, peer: &ServerName) -> Result {
+	for (method, body) in [
+		("GET", Some(json!({}))),
+		("DELETE", Some(json!({}))),
+		("PATCH", None),
+		("POST", Some(json!([]))),
+		("POST", Some(json!("body"))),
+		("PUT", Some(json!(1))),
+		("POST", Some(json!(true))),
+		("POST", Some(json!({ "fraction": 0.5 }))),
+	] {
+		let request = match &body {
+			| Some(body) =>
+				json!({ "destination": peer, "method": method, "path": GET_TOKEN, "body": body }),
+			| None => json!({ "destination": peer, "method": method, "path": GET_TOKEN }),
+		};
+
+		let (status, errcode) = refusal(appservice, &request).await?;
+
+		assert_eq!((status, errcode.as_str()), (400, "M_INVALID_PARAM"), "{method} {body:?}");
+	}
+
+	let bad_destination =
+		json!({ "destination": "not a server", "method": "GET", "path": GET_TOKEN });
+
+	let bad_query =
+		json!({ "destination": peer, "method": "GET", "path": GET_TOKEN, "query": { "a": 1 } });
+
+	let bad_method = json!({ "destination": peer, "method": 1, "path": GET_TOKEN });
+
+	for (request, expected) in [
+		(json!({}), "M_MISSING_PARAM"),
+		(json!({ "destination": peer, "method": "GET" }), "M_MISSING_PARAM"),
+		(bad_destination, "M_INVALID_PARAM"),
+		(bad_query, "M_INVALID_PARAM"),
+		(bad_method, "M_INVALID_PARAM"),
+	] {
+		let (status, errcode) = refusal(appservice, &request).await?;
+
+		assert_eq!((status, errcode.as_str()), (400, expected), "{request}");
+	}
 
 	Ok(())
 }

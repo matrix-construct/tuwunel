@@ -354,7 +354,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4517 | 🟥 ● | 0/0 | Federated thirdparty lookups | no server= parameter and no federation thirdparty routes; local lookups only |
 | MSC4514 | 🟥 ● | 0/0 | EDU size limit | no 65536 byte EDU cap; only the 24 MiB global request body limit applies |
 | MSC4513 | ✅ ◐ | 90/90 | Standard HTTP status codes for all endpoints, current and future | central kind to status map emits 413, 429, 502, 504 with Matrix error bodies |
-| MSC4512 | ✅ ● | 80/90 | Delegating parts of the Client-Server and Server-Server API to application se... | Unstable keys and paths, rtc/livekit only; bad fields answer M_BAD_JSON |
+| MSC4512 | ✅ ● | 90/90 | Delegating parts of the Client-Server and Server-Server API to application se... | Unstable keys and paths, rtc/livekit prefix only, TRACE refused |
 | MSC4511 | 🟥 ● | 0/0 | Topological query API with sparse fieldsets and Merkleized metadata | no topological query endpoint, sparse fieldsets or Merkleized metadata |
 | MSC4509 | 🟥 ● | 0/0 | Auto join on accepted knock | no auto-join on accepted knock; prev_sender emission is pre-existing |
 | MSC4507 | 🟥 ● | 0/0 | Return additional room state from `/_matrix/federation/v1/hierarchy/{roomId}` | federation /hierarchy has no additional_state param or m.public_state |
