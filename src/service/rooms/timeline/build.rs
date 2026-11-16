@@ -349,8 +349,8 @@ async fn append_signed_pdu(
 /// Has the room's policy server, if any, sign an event before it is federated.
 ///
 /// Per [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284)
-/// a refusal is an error, while a transport failure lets the event go out
-/// unsigned.
+/// a refusal is an error. So is a policy server that gives no verdict, unless
+/// `fail_open` is set or the event is a leave, a kick or a ban.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "debug")]
 async fn with_policy_signature(

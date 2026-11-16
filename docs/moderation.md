@@ -154,68 +154,123 @@ existing entries.
 
 ## Per-room policy delegation (MSC4284)
 
-MSC4284 lets a room's moderators delegate event signing to a third-party
-*policy server* whose ed25519 signature must be present on every non-policy
-event in the room. The signature folds into `event.signatures` and federates
-transitively. Tuwunel implements outbound `/sign` on local sends, inbound
-verification on federated receives, fetch-on-missing for inbound events
-without a signature, and refusal/backoff caching to avoid hammering a server
-that is rate-limiting or has refused.
+If a room uses a *policy server*, its moderators delegate event signing to
+that server under MSC4284. Its ed25519 signature must be present on every
+non-policy event in the room. Tuwunel adds the signature to
+`event.signatures` and passes it to other servers through federation, the
+exchange of room events between servers. For local sends, Tuwunel asks the
+policy server to sign through `/sign`. For incoming events, it verifies the
+signature and requests a new one if it is missing or invalid.
 
-Two configuration knobs:
+Only rooms with a valid `m.room.policy` state event use this policy. Rooms
+without that state event are unaffected.
 
-- `enable_policy_servers`: master switch (default `false`). When `false`,
-  Tuwunel ignores policy state entirely. When `true`, the gate engages only
-  in rooms that carry a valid `m.room.policy` state event.
-- `policy_server_request_timeout`: seconds (default `5`) for both outbound
-  `/sign` and inbound signature-fetch requests.
+### Policy server settings
 
-Operator-relevant implications when enabling:
+Set these options in your Tuwunel configuration file under
+`[global.rooms.policy_server]`.
 
-- **Per-room opt-in.** The global flag only allows the gate to engage; the
-  room's own `m.room.policy` state event is what activates it. Rooms without
-  the state event are unaffected.
-- **Latency cost.** Every outbound send in a policy-room round-trips to the
-  policy server before federating. The default 5-second cap prevents a
-  single misbehaving policy server from stalling sends indefinitely.
-- **Fail-open on transport failure.** Network errors and timeouts are logged
-  and the event is sent or accepted unsigned, on the assumption that the
-  next homeserver in the room will pick up the gap.
-- **Fail-closed on explicit refusal.** A policy server returning
-  `400 M_FORBIDDEN` (or, on the unstable variant, `200 OK` with no signature
-  for the configured `via`) causes outbound sends to fail with `M_FORBIDDEN`,
-  and inbound events to soft-fail.
-- **Inbound soft-fails withhold the event, and are reversible.** A soft-failed
-  event is kept out of the room timeline and is never relayed to clients, but
-  it stays stored and can still be fetched directly over federation.
-  Contributors include invalid redact permission, an explicit policy-server
-  refusal, and failure to pass authorization against current room state
-  (server-server receipt check 6). The standing verdict is not permanent. It
-  is re-checked whenever federation supplies the event again, on a schedule
-  that widens from five minutes to a day, and is released when the event later
-  passes. An explicit refusal is itself cached for 24 hours, so re-checks inside
-  that window answer from the cache and the policy server is only asked again
-  once it lapses. `!admin rooms clear-soft-failed-events <room>` drops the
-  stored verdicts for one room to force the question immediately.
-- **Soft-failed events do not move the room forward.** They are not added to
-  the room's forward extremities and do not directly drive current state, so a
-  refused membership or power-level change cannot take effect locally. Their
-  committed state remains available when descendant events participate in
-  state resolution.
-- **Privacy in encrypted rooms.** The PDU is forwarded to the policy server
-  for signing. Ciphertext is opaque, but metadata (sender, timestamp, room,
-  event type) is not. Encrypted-room policy delegation is the room's call;
-  Tuwunel does not block it.
-- **Refusal and rate-limit caching.** Per-event refusals and
-  `M_LIMIT_EXCEEDED` backoffs are persisted, so repeated arrivals of the same
-  event do not re-hit a refusing or throttled server.
+- `enable`: takes part in the room's policy (default `true`; legacy key
+  `enable_policy_servers`).
+- `advisory_room_versions`: applies policy servers in room versions where
+  the signature is advisory rather than an authorization rule (default
+  `true`). This includes version `12` and every earlier version, covering
+  every room version Tuwunel currently supports.
+- `fail_open`: lets events through when the policy server gives no verdict
+  (default `false`, the behavior the specification requires).
+- `request_timeout`: time limit in seconds (default `30`; legacy key
+  `policy_server_request_timeout`) for both outbound `/sign` requests and
+  inbound signature-fetch requests.
 
-For room version compatibility, MSC4416 (the room-version-13 successor that
+MSC4416 (the room-version-13 successor that
 makes a missing or invalid policy signature an auth-rule rejection rather
-than a soft fail) is not yet active in Tuwunel and depends on upstream
-typing work. Until v13 ships, "leave it off" is safe; once v13 rooms become
-common, leaving it off in such a room means accepting events that the rest
-of the federation will reject.
+than a soft fail) is not yet implemented in Tuwunel and depends on upstream
+typing work.
+
+> [!WARNING]
+> Turning off `enable` is not recommended. Other servers in the room keep
+> enforcing the policy, so local users see events the rest of the room hides.
+> Events sent from your server are withheld elsewhere when the policy server
+> would have refused them.
+
+Local sends wait for the policy server before being sent to other servers.
+Other local sends to the same room wait behind that request.
+`request_timeout` limits this wait. A small `request_timeout` together with
+`fail_open = true` sends after a short wait when the policy server is slow
+or down.
+
+### Refusals and unavailable policy servers
+
+By default, an outgoing event the policy server does not sign is not sent.
+An incoming event left without a valid signature soft-fails, which keeps it
+out of the room timeline and away from clients.
+
+An explicit refusal stops outgoing sends and soft-fails incoming events,
+even with `fail_open = true`. A refusal is `400 M_FORBIDDEN` or, on the
+unstable variant, `200 OK` with no signature for the configured `via`.
+Outgoing sends fail with the policy server's own error.
+
+When the policy server gives no verdict, `fail_open = true` lets the event
+through. Even with the default `fail_open = false`, a local user's leave,
+a kick or a ban is sent when there is no verdict, so an outage cannot trap
+users in a room. This includes rejecting an invite or withdrawing a knock.
+An explicit refusal still stops these events.
+
+For a local send blocked because there is no verdict, the client receives
+one of these errors:
+
+| Cause | Client response |
+| --- | --- |
+| The policy server times out, cannot be reached, is backed off, or returns a signature that fails verification | `503 M_UNKNOWN` |
+| The policy server returns an error | Its error is passed through, except that `401` becomes `403` and an error about the user's own session, account or homeserver (`M_UNKNOWN_TOKEN`, `M_MISSING_TOKEN`, `M_USER_DEACTIVATED`, `M_USER_LOCKED`, `M_USER_SUSPENDED`, `M_CONSENT_NOT_GIVEN` or `M_RESOURCE_LIMIT_EXCEEDED`) becomes `403 M_FORBIDDEN` keeping only the policy server's message |
+| Your server's configuration forbids the request because federation is disabled or the policy server's name is forbidden | `403 M_FORBIDDEN`. Tuwunel also logs a warning |
+
+Tuwunel verifies returned signatures against the key in the room's
+`m.room.policy` state. A signature that fails verification is never added
+to the event and counts as no verdict. If an incoming event's policy
+signature fails verification and no valid replacement is obtained, Tuwunel
+stores the event without that signature.
+
+Tuwunel pauses requests to a policy server that times out, has a transport
+failure, returns a server error or rate-limits requests. This *backoff*
+lasts as long as any retry time the policy server specifies, up to 24
+hours. During backoff, Tuwunel decides whether events pass without asking the
+policy server. Ordinary federation traffic to that server shares the same
+backoff.
+
+If `via` names your own server, Tuwunel contacts it over federation like
+any other server. Tuwunel serves no `/sign` itself. This setup works only
+when a reverse proxy routes `/_matrix/policy/v1/sign` for that name to a
+policy server. Otherwise, events in that room get no verdict.
+
+### Soft-failed events and recovery
+
+A soft-failed event is kept out of the room timeline and is never relayed
+to clients, but it stays stored and can still be fetched directly over
+federation. Contributors include invalid redact permission, a policy
+server that refused the event or gave no verdict, and failure to pass
+authorization against current room state (server-server receipt check 6).
+The standing verdict is not permanent. It is re-checked whenever
+federation supplies the event again, on a schedule that widens from five
+minutes to a day, and is released when the event later passes.
+
+An explicit refusal is persisted in the cache for 24 hours, so re-checks
+inside that window answer from the cache and the policy server is only
+asked again once it lapses.
+`!admin rooms clear-soft-failed-events <room>` drops the stored verdicts
+for one room to force the question immediately.
+
+Soft-failed events are not added to the room's forward extremities and do
+not directly drive current state, so a refused membership or power-level
+change cannot take effect locally. Their committed state remains
+available when descendant events participate in state resolution.
+
+### Privacy in encrypted rooms
+
+The room event (PDU) is forwarded to the policy server for signing. The
+policy server cannot read the encrypted content, but it can read metadata
+(sender, timestamp, room, event type). The room decides whether to use
+policy delegation in an encrypted room. Tuwunel does not block it.
 
 ## URL previews and outbound network policy
 
