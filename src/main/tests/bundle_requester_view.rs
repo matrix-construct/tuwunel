@@ -1,5 +1,6 @@
 #![cfg(test)]
 
+use reqwest::{Method, Response, StatusCode};
 use serde_json::{Value, json};
 use tuwunel_core::{
 	Result, err, implement,
@@ -80,6 +81,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	relations_view(&reader, &ignored, &visible).await?;
 	thread_views(&reader, &reader_id, &ignored, &visible).await?;
 	former_member_view(&reader, &leaver, &leaver_id, &visible).await?;
+	thread_roots(&visible).await?;
 	rejoiner_view(&rejoiner, &visible).await
 }
 
@@ -398,6 +400,105 @@ async fn former_member_view(
 
 	assert!(thread_summary(&later).is_none(), "a former member was shown a later reply");
 	assert_summary(&reader.event(&room, &kept).await?, &after, 2, "member /event");
+
+	Ok(())
+}
+
+/// MSC3440: a thread may not root on an event that is itself a relation's child.
+///
+/// A send naming an edit or a caption fallback as its root is refused, while a
+/// plain reply roots a thread, and a state event takes a reply but no summary.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn thread_roots(visible: &Client<'_>) -> Result {
+	let room = visible
+		.create_room(&json!({ "preset": "public_chat" }))
+		.await?;
+
+	let send = |txn_id| format!("rooms/{room}/send/m.room.message/{txn_id}");
+	let message = visible
+		.send_text(&room, "roots-message", "roots message")
+		.await?;
+
+	let edit = visible
+		.replace(&room, "roots-edit", &message)
+		.await?;
+
+	let caption = json!({
+		"msgtype": "m.text",
+		"body": "caption",
+		"m.relates_to": {
+			"rel_type": "m.caption_fallback",
+			"event_id": message,
+			"m.in_reply_to": { "event_id": message },
+		},
+	});
+
+	let caption = visible
+		.put_event(&send("roots-caption"), &caption)
+		.await?;
+
+	let plain = json!({
+		"msgtype": "m.text",
+		"body": "plain reply",
+		"m.relates_to": { "m.in_reply_to": { "event_id": message } },
+	});
+
+	let plain = visible
+		.put_event(&send("roots-plain"), &plain)
+		.await?;
+
+	let topic = visible
+		.put_event(&format!("rooms/{room}/state/m.room.topic"), &json!({ "topic": "roots" }))
+		.await?;
+
+	for (root, txn_id) in [(&edit, "roots-on-edit"), (&caption, "roots-on-caption")] {
+		let response = visible.try_thread(&room, txn_id, root).await?;
+
+		refused(response, StatusCode::BAD_REQUEST, "M_UNKNOWN").await?;
+	}
+
+	let reply = visible
+		.reply(&room, "roots-on-plain", &plain)
+		.await?;
+
+	assert_summary(&visible.event(&room, &plain).await?, &reply, 1, "plain reply root");
+
+	visible
+		.reply(&room, "roots-on-topic", &topic)
+		.await?;
+
+	let topic = visible.event(&room, &topic).await?;
+
+	assert!(thread_summary(&topic).is_none(), "a state event was given a thread summary");
+
+	Ok(())
+}
+
+/// Start a thread on `root` as this user and keep the raw reply.
+///
+/// The status is the caller's to judge, so a refused root can be asserted.
+#[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn try_thread(&self, room_id: &RoomId, txn_id: &str, root: &EventId) -> Result<Response> {
+	let content = json!({
+		"msgtype": "m.text",
+		"body": "nested thread",
+		"m.relates_to": { "rel_type": "m.thread", "event_id": root },
+	});
+
+	let path = format!("rooms/{room_id}/send/m.room.message/{txn_id}");
+
+	self.request(Method::PUT, &self.url(&path), &content)
+		.await
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn refused(response: Response, status: StatusCode, errcode: &str) -> Result {
+	let actual = response.status();
+	let body: Value = response.json().await?;
+
+	assert_eq!(actual, status, "{body}");
+	assert_eq!(body["errcode"], errcode, "{body}");
 
 	Ok(())
 }

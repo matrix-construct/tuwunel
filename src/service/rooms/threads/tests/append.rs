@@ -1,6 +1,6 @@
 use std::{pin::pin, sync::Arc, task::Waker};
 
-use ruma::{EventId, RoomId, UserId, event_id, room_id, user_id};
+use ruma::{EventId, OwnedEventId, RoomId, UserId, event_id, room_id, user_id};
 use serde_json::{Value, json};
 use tuwunel_core::{Result, config::Figment, utils::result::NotFound};
 use tuwunel_database::Json;
@@ -130,6 +130,87 @@ async fn participants_are_recorded_once() -> Result {
 	Ok(())
 }
 
+#[tokio::test]
+async fn refused_roots_record_no_thread() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room_id = room_id!("!thread:localhost");
+	let target = event_id!("$target:localhost");
+	let edit = json!({ "rel_type": "m.replace", "event_id": target });
+	let reaction = json!({ "rel_type": "m.annotation", "event_id": target, "key": "x" });
+	let keyless = json!({ "rel_type": "m.annotation", "event_id": target });
+	let caption = json!({
+		"rel_type": "m.caption_fallback",
+		"event_id": target,
+		"m.in_reply_to": { "event_id": target },
+	});
+
+	let refused = [
+		("edit", "m.room.message", relating(&edit)),
+		("reaction", "m.reaction", relating(&reaction)),
+		("caption", "m.room.message", relating(&caption)),
+		("keyless", "m.reaction", relating(&keyless)),
+		("string", "m.room.message", relating(&json!(target))),
+		("array", "m.room.message", relating(&json!([null]))),
+	];
+
+	let _guard = services.state.mutex.lock(room_id).await;
+	let topic = json!({ "topic": "topic" });
+	let topic = root(room_id, "topic", "m.room.topic", Some(""), &topic);
+	let roots = refused
+		.into_iter()
+		.map(|(name, kind, content)| (name, root(room_id, name, kind, None, &content)))
+		.chain([("topic", topic)]);
+
+	for ((name, root), count) in roots.zip((1..).step_by(2)) {
+		let (before, root_id, reply_id) = reply_to(services, count, &root).await?;
+
+		assert_eq!(stored(services, &root_id).await?, before, "{name} root was rewritten");
+		assert!(
+			services.db["threadid_userids"]
+				.get(&root_id)
+				.await
+				.is_not_found(),
+			"{name} root recorded participants",
+		);
+
+		assert!(
+			services.db["threadrootid_latestcount"]
+				.get(&root_id)
+				.await
+				.is_not_found(),
+			"{name} root recorded a validity pointer",
+		);
+
+		assert!(
+			services.db["threadactivityid_rootid"]
+				.get(&reply_id)
+				.await
+				.is_not_found(),
+			"{name} root was listed",
+		);
+	}
+
+	let reply = relating(&json!({ "m.in_reply_to": { "event_id": target } }));
+	let reply = root(room_id, "reply", "m.room.message", None, &reply);
+	let (_, root_id, _) = reply_to(services, 21, &reply).await?;
+	let thread = &stored(services, &root_id).await?["unsigned"]["m.relations"]["m.thread"];
+
+	assert_eq!(thread["count"], 1, "a plain reply was refused as a root");
+
+	let participants = services
+		.threads
+		.get_participants(&root_id)
+		.await?;
+
+	assert_eq!(participants, [user_id!("@root:localhost"), user_id!("@reply:localhost")]);
+
+	Ok(())
+}
+
 fn pdu(room_id: &RoomId, event_id: &EventId, sender: &UserId) -> PduEvent {
 	serde_json::from_value(json!({
 		"type": "m.room.message",
@@ -145,6 +226,57 @@ fn pdu(room_id: &RoomId, event_id: &EventId, sender: &UserId) -> PduEvent {
 		"unsigned": { "age": 42 },
 	}))
 	.expect("test PDU")
+}
+
+fn relating(relates_to: &Value) -> Value {
+	json!({ "msgtype": "m.text", "body": "root", "m.relates_to": relates_to })
+}
+
+fn root(
+	room_id: &RoomId,
+	name: &str,
+	kind: &str,
+	state_key: Option<&str>,
+	content: &Value,
+) -> PduEvent {
+	serde_json::from_value(json!({
+		"type": kind,
+		"state_key": state_key,
+		"event_id": format!("${name}:localhost"),
+		"room_id": room_id,
+		"sender": user_id!("@root:localhost"),
+		"origin_server_ts": 1,
+		"depth": 1,
+		"hashes": { "sha256": "hash" },
+		"prev_events": [],
+		"auth_events": [],
+		"content": content,
+	}))
+	.expect("test root PDU")
+}
+
+/// Store `root` at `count` and add a reply to its thread one position later.
+///
+/// Returns the root's row as stored before the reply, then the root's and the
+/// reply's IDs.
+async fn reply_to(
+	services: &Services,
+	count: u64,
+	root: &PduEvent,
+) -> Result<(Value, RawPduId, RawPduId)> {
+	let (root_id, reply_id) = (pdu_id(count), pdu_id(count.saturating_add(1)));
+	let reply_event_id: OwnedEventId = format!("{}-reply", root.event_id).try_into()?;
+	let reply = pdu(&root.room_id, &reply_event_id, user_id!("@reply:localhost"));
+
+	store(services, &root_id, root);
+	let before = stored(services, &root_id).await?;
+
+	services
+		.threads
+		.add_to_thread(&root.event_id, reply_id, &reply)
+		.await?;
+
+	Ok((before, root_id, reply_id))
 }
 
 fn store(services: &Services, pdu_id: &RawPduId, pdu: &PduEvent) {

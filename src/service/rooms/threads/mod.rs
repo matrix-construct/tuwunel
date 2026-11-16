@@ -222,6 +222,13 @@ impl Service {
 		self.get_thread_id(&pdu).await
 	}
 
+	/// Records a reply in the thread rooted at `root_event_id`.
+	///
+	/// The root's stored `m.thread` summary counts the reply as its latest, the
+	/// reply's sender joins the participants, and a timeline reply lists the
+	/// thread at its position. A root in another room, a state event or a
+	/// relation's child roots no thread, so nothing is recorded, while the reply
+	/// itself is still accepted (MSC3440).
 	pub async fn add_to_thread<E>(
 		&self,
 		root_event_id: &EventId,
@@ -247,7 +254,7 @@ impl Service {
 			.await
 			.map_err(|e| err!(Request(InvalidParam("Thread root not found: {e:?}"))))?;
 
-		if root_pdu.room_id() != event.room_id() {
+		if root_pdu.room_id() != event.room_id() || !may_root_thread(&root_pdu) {
 			return Ok(());
 		}
 
@@ -924,6 +931,14 @@ fn unreadable_only(error: Error) -> Result {
 		.is_transient_io()
 		.then_some(error)
 		.map_or(Ok(()), Err)
+}
+
+/// Whether an event may root a thread (MSC3440).
+///
+/// A state event receives no bundled aggregations, and an event that is itself
+/// the child of a relation may not start a thread.
+pub(crate) fn may_root_thread(root: &impl Event) -> bool {
+	root.state_key().is_none() && !root.is_relation_child()
 }
 
 fn is_thread_reply(pdu: &impl Event) -> bool {

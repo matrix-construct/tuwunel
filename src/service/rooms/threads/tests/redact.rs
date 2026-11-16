@@ -418,8 +418,9 @@ async fn redacted_self_rooted_reply_keeps_no_summary() -> Result {
 	let room = Room::new(&fixture.services).await?;
 	let looped = id("looped");
 
+	// A thread reply is a relation's child, so it roots no thread, not even its own.
 	room.append(1, &looped, thread(&looped)).await?;
-	assert_eq!(room.count(&looped).await?, 1);
+	assert_eq!(room.count(&looped).await?, Value::Null);
 
 	room.redact(&looped).await?;
 

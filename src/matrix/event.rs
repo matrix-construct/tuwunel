@@ -36,7 +36,10 @@ pub use self::{
 	state_key::{StateKey, TypeStateKey},
 	type_ext::TypeExt,
 };
-use self::{format::to_sync_message_like_without_unsigned, msgtype::content_msgtype};
+use self::{
+	format::to_sync_message_like_without_unsigned, msgtype::content_msgtype,
+	relation::has_rel_type,
+};
 use super::pdu::Pdu;
 
 #[derive(Deserialize)]
@@ -193,6 +196,19 @@ pub trait Event: Clone + Debug + Send + Sync {
 		Self: Sized,
 	{
 		content_msgtype(self)
+	}
+
+	/// Reports whether this event is itself the child of a relation.
+	///
+	/// Its content's `m.relates_to` names a non-null `rel_type`, which a thread
+	/// may not root on (MSC3440); a plain reply is no child. Content whose
+	/// relation cannot be read counts as one.
+	#[inline]
+	fn is_relation_child(&self) -> bool
+	where
+		Self: Sized,
+	{
+		has_rel_type(self)
 	}
 
 	/// Resolves the event ID targeted by a redaction event.

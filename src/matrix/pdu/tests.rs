@@ -4,7 +4,7 @@ use ruma::{
 };
 use serde_json::{json, value::to_raw_value};
 
-use super::{Count, DELAY_ID, Pdu, Unsigned, into_outgoing_federation};
+use super::{Content, Count, DELAY_ID, Pdu, Unsigned, into_outgoing_federation};
 use crate::Event;
 
 fn message_pdu() -> Pdu {
@@ -43,6 +43,38 @@ fn sync_message_like_without_unsigned_borrows_pdu() {
 		.expect("formatted event should be valid JSON");
 
 	assert_eq!(formatted["type"], "com.example.custom", "custom event type was lost");
+}
+
+#[test]
+fn relation_child_reads_any_rel_type_and_fails_closed() {
+	let with_content = |content: &str| Pdu {
+		content: Content::from_json_string(content.to_owned()).expect("valid raw content"),
+		..message_pdu()
+	};
+
+	let children = [
+		r#"{"m.relates_to": {"rel_type": "m.caption_fallback", "m.in_reply_to": {}}}"#,
+		r#"{"m.relates_to": {"rel_type": "m.annotation", "event_id": "$target:example.com"}}"#,
+		r#"{"m.relates_to": "$target:example.com"}"#,
+		r#"{"m.relates_to": [null]}"#,
+		r#"{"m.relates_to": {"rel_type": "m.thread", "rel_type": "m.thread"}}"#,
+		r#"{"m.relates_to": {}, "m.relates_to": {}}"#,
+	];
+
+	let roots = [
+		r#"{"body": "plain"}"#,
+		r#"{"m.relates_to": null}"#,
+		r#"{"m.relates_to": {"rel_type": null}}"#,
+		r#"{"m.relates_to": {"m.in_reply_to": {"event_id": "$target:example.com"}}}"#,
+	];
+
+	for content in children {
+		assert!(with_content(content).is_relation_child(), "not a relation child: {content}");
+	}
+
+	for content in roots {
+		assert!(!with_content(content).is_relation_child(), "a relation child: {content}");
+	}
 }
 
 #[test]

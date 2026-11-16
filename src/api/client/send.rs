@@ -247,8 +247,8 @@ async fn check_duplicate_reaction(
 	Err!(Request(DuplicateAnnotation("Duplicate reactions are not allowed.")))
 }
 
-// MSC3440/Matrix 1.4: a thread may only target an event which itself carries
-// no rel_type; the spec assigns this rejection 400 M_UNKNOWN.
+// MSC3440/Matrix 1.4: a thread may not target an event whose `m.relates_to`
+// names a rel_type or cannot be read; the spec assigns this 400 M_UNKNOWN.
 async fn check_nested_thread(
 	services: &Services,
 	body: &Raw<AnyMessageLikeEventContent>,
@@ -263,11 +263,7 @@ async fn check_nested_thread(
 		return Ok(());
 	};
 
-	let nested = root
-		.get_content()
-		.is_ok_and(|content: ExtractRelatesTo| content.relates_to.rel_type().is_some());
-
-	if !nested {
+	if !root.is_relation_child() {
 		return Ok(());
 	}
 
