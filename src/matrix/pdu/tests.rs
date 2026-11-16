@@ -1,7 +1,10 @@
-use ruma::{RoomVersionId, event_id, events::AnySyncMessageLikeEvent, serde::Raw, user_id};
+use ruma::{
+	CanonicalJsonObject, RoomVersionId, event_id, events::AnySyncMessageLikeEvent, serde::Raw,
+	user_id,
+};
 use serde_json::{json, value::to_raw_value};
 
-use super::{Count, DELAY_ID, Pdu, Unsigned};
+use super::{Count, DELAY_ID, Pdu, Unsigned, into_outgoing_federation};
 use crate::Event;
 
 fn message_pdu() -> Pdu {
@@ -890,4 +893,64 @@ fn private_removal_drops_unparsable_unsigned() {
 
 		assert_eq!(served.keys().collect::<Vec<_>>(), ["age"], "served part of: {unsigned}");
 	}
+}
+
+#[test]
+fn outgoing_federation_omits_unsigned() {
+	let unsigned = json!({
+		"transaction_id": "secret",
+		"prev_content": { "msgtype": "m.text", "body": "earlier" },
+		"m.relations": {
+			"m.thread": {
+				"count": 1,
+				"latest_event": {
+					"content": { "msgtype": "m.text", "body": "reply" },
+					"unsigned": { "transaction_id": "nested" },
+				},
+			},
+		},
+	});
+
+	let pdu = outgoing(&unsigned, &RoomVersionId::V11);
+
+	assert!(!pdu.contains_key("unsigned"), "outgoing event kept unsigned data");
+	assert!(pdu.contains_key("room_id"), "outgoing event lost its room ID");
+	assert!(pdu.contains_key("hashes"), "outgoing event lost its hashes");
+}
+
+fn outgoing(unsigned: &serde_json::Value, room_version: &RoomVersionId) -> CanonicalJsonObject {
+	let pdu = serde_json::from_value(json!({
+		"type": "m.room.message",
+		"content": { "msgtype": "m.text", "body": "root" },
+		"event_id": "$root:example.com",
+		"room_id": "!room:example.com",
+		"sender": "@alice:example.com",
+		"prev_events": ["$prev:example.com"],
+		"auth_events": ["$auth:example.com"],
+		"origin_server_ts": 1_838_188_000,
+		"depth": 12,
+		"hashes": { "sha256": "thishashcoversallfieldsincasethisisredacted" },
+		"unsigned": unsigned,
+	}))
+	.expect("valid pdu object");
+
+	into_outgoing_federation(pdu, room_version)
+}
+
+#[test]
+fn outgoing_federation_omits_non_object_unsigned() {
+	for unsigned in [json!("transaction_id"), json!(["transaction_id", "secret"])] {
+		let pdu = outgoing(&unsigned, &RoomVersionId::V11);
+
+		assert!(!pdu.contains_key("unsigned"), "outgoing event kept unsigned: {unsigned}");
+	}
+}
+
+#[test]
+fn outgoing_federation_without_rules_omits_unsigned() {
+	let room_version = RoomVersionId::try_from("org.example.unknown").expect("custom version");
+	let pdu = outgoing(&json!({ "transaction_id": "secret" }), &room_version);
+
+	assert!(!pdu.contains_key("unsigned"), "unknown room version kept unsigned data");
+	assert!(!pdu.contains_key("event_id"), "unknown room version kept the event ID");
 }

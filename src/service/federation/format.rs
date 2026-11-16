@@ -32,8 +32,9 @@ pub async fn get_pdu_into(
 /// Formats an event object for an outgoing federation response.
 ///
 /// The supplied room version takes precedence; otherwise the room ID is used to
-/// look it up. When no version can be resolved, only `event_id` is removed.
-/// The returned raw JSON satisfies ruma's response type and is not a full PDU.
+/// look it up. When no version can be resolved, `event_id` and `unsigned` are
+/// removed and nothing else is rewritten. The returned raw JSON satisfies
+/// ruma's response type and is not a full PDU.
 #[implement(super::Service)]
 pub async fn format_pdu_into(
 	&self,
@@ -66,6 +67,7 @@ pub async fn format_pdu_into(
 		pdu_json = pdu::into_outgoing_federation(pdu_json, room_version);
 	} else {
 		pdu_json.remove("event_id");
+		pdu_json.remove("unsigned");
 	}
 
 	to_raw_value(&pdu_json).expect("CanonicalJson is valid serde_json::Value")

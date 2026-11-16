@@ -6,25 +6,21 @@ use ruma::{
 };
 use tuwunel_core::{extract_variant, is_equal_to};
 
-use super::unsigned::PRIVATE;
 use crate::room_version;
 
 /// Converts a stored PDU object to its federation wire representation.
 ///
-/// Unsigned fields private to the sender are removed, and room-version rules
-/// select the fields and event-reference shape sent to peers. When rules are
-/// unavailable, the event ID is removed without rewriting event references.
+/// Unsigned data is never sent: the signatures do not cover it, no peer reads
+/// the fields stored there, and they hold server aggregates such as a thread's
+/// newest reply. Room-version rules select the fields and event-reference shape
+/// sent to peers. When rules are unavailable, the event ID is removed without
+/// rewriting event references.
 #[must_use]
 pub fn into_outgoing_federation(
 	mut pdu_json: CanonicalJsonObject,
 	room_version: &RoomVersionId,
 ) -> CanonicalJsonObject {
-	if let Some(unsigned) = pdu_json
-		.get_mut("unsigned")
-		.and_then(|val| val.as_object_mut())
-	{
-		unsigned.retain(|key, _| !PRIVATE.contains(&key.as_str()));
-	}
+	pdu_json.remove("unsigned");
 
 	let Ok(room_rules) = room_version::rules(room_version) else {
 		pdu_json.remove("event_id");

@@ -29,7 +29,8 @@ pub const DELAY_ID: &str = "org.matrix.msc4140.delay_id";
 /// Unsigned keys served to the event's own sender and to nobody else.
 ///
 /// Every serving path strips these unless the requester sent the event, and
-/// federation strips them always. A redaction keeps them for the sender.
+/// federation sends no unsigned data at all. A redaction keeps them for the
+/// sender.
 pub const PRIVATE: [&str; 2] = ["transaction_id", DELAY_ID];
 
 type BorrowedObject<'a> = BTreeMap<Cow<'a, str>, &'a RawJsonValue>;
