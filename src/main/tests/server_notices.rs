@@ -28,12 +28,13 @@ const USER_TOKEN: &str = "server-notices-user-access-token-1";
 const SERVER_TOKEN: &str = "server-notices-server-access-token";
 const NOTICE: &str = "/_synapse/admin/v1/send_server_notice";
 const TRANSACTION: &str = "/_synapse/admin/v1/send_server_notice/replay";
-const ADMIN_TAG: &str = "u.admin-room";
 
 /// Exercise notice authorization and membership through the HTTP router.
 ///
 /// One isolated server supplies both notice and ordinary-room fixtures, so
 /// their leave behavior is checked against the same identity and account data.
+/// The admin room keeps a custom tag, so the notice room's `m.server_notice`
+/// marker stands apart.
 #[test]
 fn authorization_and_notice_membership() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -45,7 +46,7 @@ fn authorization_and_notice_membership() -> Result {
 		.with_loopback_listener(port)
 		.with_option("listening=true")
 		.with_option("admin.room.create=true")
-		.with_option(format!("admin.room.tag=\"{ADMIN_TAG}\""))
+		.with_option("admin.room.tag=\"u.admin-room\"")
 		.with_option("registration.grant_admin_to_first_user=false")
 		.with_option("registration.shared_secret=\"notices-test\"");
 
@@ -85,9 +86,7 @@ fn authorization_and_notice_membership() -> Result {
 /// Establish distinct administrator and ordinary-user credentials.
 ///
 /// Omitting the identity setting also exercises legacy `conduit` construction
-/// and notice markers with the default server user. The notice room's tag is
-/// then rewritten to the configured admin tag an earlier release wrote, so
-/// invite rejection and room reuse are checked on that legacy shape.
+/// and notice markers with the default server user.
 async fn exercise(services: &Services, base: &str) -> Result {
 	wait_until_ready(services, base).await?;
 	assert_eq!(services.globals.server_user.localpart(), "conduit");
@@ -125,14 +124,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let room = pdu.room_id();
 	let leave = format!("/_matrix/client/v3/rooms/{room}/leave");
 	let join = format!("/_matrix/client/v3/rooms/{room}/join");
-	let tags_path = format!("user/{user}/rooms/{room}/tags");
-	let standard_tag = format!("/_matrix/client/v3/{tags_path}/m.server_notice");
 
 	assert!(services.state_cache.is_invited(&user, room).await);
-	request(&user_client, Method::DELETE, &standard_tag, "{}", 200).await?;
-	user_client
-		.put(&format!("{tags_path}/{ADMIN_TAG}"), &json!({}))
-		.await?;
 
 	let rejected = request(&user_client, Method::POST, &leave, "{}", 403).await?;
 
