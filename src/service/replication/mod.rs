@@ -38,9 +38,10 @@ use tokio::sync::{Notify, RwLock, watch};
 use tuwunel_core::{Result, err, error, info, warn};
 use tuwunel_database::{Database, FRAME_TYPE_DATA, RawBatchGroup, WalFrame, is_wal_gap_error};
 
-pub use self::role::Role;
+pub use self::{drain::Drain, role::Role};
 use crate::service::{Args, make_name};
 
+pub mod drain;
 mod role;
 
 /// Marks the error `run_stream` returns when this replica should take its
@@ -88,6 +89,9 @@ pub struct Service {
 	was_primary: AtomicBool,
 	/// Fast rejoin is attempted at most once per process.
 	rejoin_tried: AtomicBool,
+	/// Open WAL streams served by this process as a primary, and the
+	/// shutdown request that ends them. See the `drain` module.
+	drain: Drain,
 }
 
 #[async_trait]
@@ -116,6 +120,7 @@ impl crate::Service for Service {
 			apply_lock: std::sync::Mutex::new(()),
 			was_primary: AtomicBool::new(false),
 			rejoin_tried: AtomicBool::new(false),
+			drain: Drain::new(),
 		}))
 	}
 
@@ -508,6 +513,64 @@ impl Service {
 	/// changed; re-read [`Self::role`] after each wake-up.
 	#[must_use]
 	pub fn subscribe_role(&self) -> watch::Receiver<Role> { self.role_tx.subscribe() }
+
+	/// Open WAL streams and their shutdown drain. The WAL endpoint registers
+	/// each stream here.
+	#[must_use]
+	pub fn drain(&self) -> &Drain { &self.drain }
+
+	/// Shutdown step, after every data writer has stopped and while the HTTP
+	/// listener still serves: send each connected secondary the WAL through
+	/// this database's final sequence, then end its stream. Bounded by
+	/// `rocksdb_replication_shutdown_drain_secs`; on timeout shutdown goes on,
+	/// and a fast rejoin later will (correctly) refuse.
+	///
+	/// Returns the sequence the streams were asked to deliver through.
+	pub async fn drain_streams(&self) -> u64 {
+		let db = self.db.clone();
+		// `manual_wal_flush`: the stream's WAL iterator only sees what has been
+		// flushed, and nothing else will flush it now that the writers are
+		// stopped.
+		let target = tokio::task::spawn_blocking(move || {
+			if let Err(e) = db.flush_wal() {
+				warn!("Flushing the WAL before the replication drain: {e}");
+			}
+			db.latest_wal_sequence()
+		})
+		.await
+		.unwrap_or_else(|_| self.db.latest_wal_sequence());
+
+		let timeout = Duration::from_secs(
+			self.server
+				.config
+				.rocksdb_replication_shutdown_drain_secs,
+		);
+		let out = self.drain.run(target, timeout).await;
+
+		match out {
+			| drain::Outcome { streams: 0, .. } => {
+				tuwunel_core::debug!(seq = target, "No secondary connected; nothing to drain.");
+			},
+			| drain::Outcome { remaining: 0, streams, .. } => {
+				info!(
+					seq = target,
+					streams, "Replication drain: every connected secondary was sent the WAL through the final sequence."
+				);
+			},
+			| drain::Outcome { remaining, streams, .. } => {
+				warn!(
+					seq = target,
+					streams,
+					remaining,
+					timeout_secs = timeout.as_secs(),
+					"Replication drain timed out; a secondary may not have the final writes, so a \
+					 fast rejoin of this node will need a full copy instead."
+				);
+			},
+		}
+
+		target
+	}
 
 	/// Tell role watchers about the current role. Called after every change
 	/// to the inputs of [`Self::role`].

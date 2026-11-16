@@ -10,7 +10,7 @@
 //! - `POST /_tuwunel/replication/demote`        — demote primary back to
 //!   secondary
 
-use std::time::Duration;
+use std::{task::Poll, time::Duration};
 
 use axum::{
 	Json,
@@ -22,8 +22,10 @@ use axum::{
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 use tuwunel_core::Result;
-use tuwunel_database::{WalFrame, is_wal_gap_error};
+use tuwunel_database::{Database, WalFrame, is_wal_gap_error};
+use tuwunel_service::replication::drain;
 
 /// Query parameters for `GET /_tuwunel/replication/wal`.
 #[derive(Debug, Deserialize)]
@@ -141,113 +143,36 @@ pub(crate) async fn replication_wal(
 	}
 
 	// Channel that bridges the blocking WAL reader with the async HTTP body.
-	let (mut tx, rx) = futures::channel::mpsc::channel::<Bytes>(256);
+	let (tx, rx) = futures::channel::mpsc::channel::<Bytes>(256);
 
-	tokio::spawn(async move {
-		let mut seq = since;
+	// Registered with the shutdown drain: a clean stop asks this stream to
+	// send through the final sequence and end, and waits until it has.
+	let (guard, drain) = services.replication.drain().open();
 
-		loop {
-			// Drain all available WAL frames in a blocking thread.
-			//
-			// Each frame must be the batch directly after the cursor. The gap
-			// check above only runs when the stream opens; a secondary that
-			// falls behind far enough *while connected* has the WAL deleted
-			// out from under it, and the iterator then quietly starts at the
-			// oldest batch it still has. Sending that would leave a hole the
-			// secondary cannot see. Stop instead: the secondary reconnects,
-			// meets the gap check, and re-syncs from a checkpoint.
-			let result = tokio::task::spawn_blocking({
-				let db = db.clone();
-				move || -> (Vec<Bytes>, u64, Option<String>) {
-					let mut frames: Vec<Bytes> = Vec::new();
-					let mut next_seq = seq;
-					let iter = match db.wal_frame_iter(seq) {
-						| Ok(iter) => iter,
-						| Err(e) => return (frames, next_seq, Some(format!("WAL read: {e}"))),
-					};
-					for frame in iter {
-						let frame = match frame {
-							| Ok(frame) => frame,
-							| Err(e) =>
-								return (frames, next_seq, Some(format!("WAL read: {e}"))),
-						};
-						if next_seq != 0 && frame.sequence != next_seq.saturating_add(1) {
-							return (
-								frames,
-								next_seq,
-								Some(format!(
-									"WAL is not contiguous after seq {next_seq}: next batch \
-									 starts at {}",
-									frame.sequence
-								)),
-							);
-						}
-						next_seq = frame.resume_seq();
-						frames.push(Bytes::from(frame.encode()));
-					}
-					(frames, next_seq, None)
-				}
-			})
-			.await;
+	tokio::spawn(stream_wal(
+		move |seq, flush| read_round(&db, seq, flush),
+		since,
+		tx,
+		drain,
+		interval_ms,
+		batch_ms,
+	));
 
-			let Ok((frames, next_seq, broken)) = result else {
-				break; // spawn_blocking panicked
-			};
-
-			let advanced = next_seq != seq;
-			seq = next_seq;
-
-			// One network chunk per round, not one per frame. Each item sent
-			// on this channel becomes its own HTTP chunk, and the secondary
-			// reads the body a chunk at a time — so frames sent singly reach
-			// it singly, however many were ready, and it applies each as a
-			// separate write. Joined, a round arrives as one read and is
-			// applied as one write. The frame encoding is unchanged; a
-			// secondary has always decoded as many frames as a read holds.
-			for chunk in coalesce(frames, SEND_CHUNK_BYTES) {
-				if tx.send(chunk).await.is_err() {
-					return; // client disconnected
-				}
+	// The guard lives in the body, so the drain counts this stream as open
+	// until the body has been handed over in full (or the connection went
+	// away), not merely until its last frame was queued.
+	let mut guard = Some(guard);
+	let mut rx = rx;
+	let stream = futures::stream::poll_fn(move |cx| match rx.poll_next_unpin(cx) {
+		| Poll::Ready(None) => {
+			if let Some(guard) = guard.take() {
+				drop(guard);
 			}
-
-			if let Some(reason) = broken {
-				tuwunel_core::warn!(
-					"Closing WAL stream to a secondary at seq {seq}: {reason}. It will \
-					 reconnect and re-sync if the WAL it needs is gone."
-				);
-				return;
-			}
-
-			// Always emit a heartbeat so the secondary can tell the primary is alive.
-			// When no data was produced, sleep first to avoid a busy-loop.
-			//
-			// When data was produced, pause briefly instead of re-reading the
-			// WAL at once: under steady writes that turns a stream of one- or
-			// two-write rounds into fewer, larger ones (see
-			// `rocksdb_replication_batch_ms`). Nothing is skipped by waiting —
-			// the next round resumes from `seq` either way.
-			if !advanced {
-				tokio::time::sleep(Duration::from_millis(interval_ms)).await;
-			} else if batch_ms > 0 {
-				tokio::time::sleep(Duration::from_millis(batch_ms)).await;
-			}
-
-			// The heartbeat carries `seq` — this stream's own cursor, the last
-			// sequence it has sent — not the primary's latest sequence. The
-			// secondary saves a heartbeat's sequence as its resume cursor, and
-			// the latest sequence is read after the drain above, so any write
-			// landing in between made the cursor claim batches this stream had
-			// not sent: a reconnect after that heartbeat skipped them for good.
-			// It is also what a promoted node records as how far it got (see
-			// `rejoin::Handoff`), which has to be exact.
-			let hb = WalFrame::heartbeat(seq);
-			if tx.send(Bytes::from(hb.encode())).await.is_err() {
-				return; // client disconnected
-			}
-		}
+			Poll::Ready(None)
+		},
+		| other => other.map(|item| item.map(Ok::<_, std::convert::Infallible>)),
 	});
 
-	let stream = rx.map(Ok::<_, std::convert::Infallible>);
 	Response::builder()
 		.status(StatusCode::OK)
 		.header(header::CONTENT_TYPE, "application/octet-stream")
@@ -258,6 +183,174 @@ pub(crate) async fn replication_wal(
 		.header("x-tuwunel-instance-id", instance)
 		.body(Body::from_stream(stream))
 		.expect("Failed to build WAL streaming response")
+}
+
+/// One round of a WAL stream: the encoded frames read, the cursor after them,
+/// and why the stream must close, if it must.
+type Round = (Vec<Bytes>, u64, Option<String>);
+
+/// Read every WAL batch after `seq` that is available now. `flush` first
+/// flushes the in-memory WAL buffer (`manual_wal_flush`), so that a round run
+/// for the shutdown drain sees every write up to the final sequence.
+///
+/// Each frame must be the batch directly after the cursor. The gap check in
+/// the handler only runs when the stream opens; a secondary that falls behind
+/// far enough *while connected* has the WAL deleted out from under it, and the
+/// iterator then quietly starts at the oldest batch it still has. Sending that
+/// would leave a hole the secondary cannot see. Stop instead: the secondary
+/// reconnects, meets the gap check, and re-syncs from a checkpoint.
+fn read_round(db: &Database, seq: u64, flush: bool) -> Round {
+	if flush {
+		let _: Result<()> = db.flush_wal();
+	}
+
+	let mut frames: Vec<Bytes> = Vec::new();
+	let mut next_seq = seq;
+	let iter = match db.wal_frame_iter(seq) {
+		| Ok(iter) => iter,
+		| Err(e) => return (frames, next_seq, Some(format!("WAL read: {e}"))),
+	};
+	for frame in iter {
+		let frame = match frame {
+			| Ok(frame) => frame,
+			| Err(e) => return (frames, next_seq, Some(format!("WAL read: {e}"))),
+		};
+		if next_seq != 0 && frame.sequence != next_seq.saturating_add(1) {
+			return (
+				frames,
+				next_seq,
+				Some(format!(
+					"WAL is not contiguous after seq {next_seq}: next batch starts at {}",
+					frame.sequence
+				)),
+			);
+		}
+		next_seq = frame.resume_seq();
+		frames.push(Bytes::from(frame.encode()));
+	}
+	(frames, next_seq, None)
+}
+
+/// The body of one WAL stream: rounds of frames, each followed by a
+/// heartbeat, until the secondary disconnects, the WAL breaks, or a clean
+/// shutdown's drain asks it to finish.
+///
+/// On a drain (`drain` becomes `Some(target)`, set only once every writer has
+/// stopped) the stream stops pacing, reads through `target`, sends a final
+/// heartbeat carrying the sequence it reached — which the secondary saves as
+/// its cursor, and records in its handoff if it is promoted — and ends.
+async fn stream_wal<R>(
+	read: R,
+	since: u64,
+	mut tx: futures::channel::mpsc::Sender<Bytes>,
+	mut drain: watch::Receiver<Option<u64>>,
+	interval_ms: u64,
+	batch_ms: u64,
+) where
+	R: Fn(u64, bool) -> Round + Clone + Send + 'static,
+{
+	let mut seq = since;
+
+	loop {
+		// The drain target as this round starts. A round that starts after
+		// the drain was requested reads (and flushes) through the final
+		// sequence.
+		let target = *drain.borrow_and_update();
+
+		// Drain all available WAL frames in a blocking thread.
+		let result = tokio::task::spawn_blocking({
+			let read = read.clone();
+			move || read(seq, target.is_some())
+		})
+		.await;
+
+		let Ok((frames, next_seq, broken)) = result else {
+			return; // spawn_blocking panicked
+		};
+
+		let advanced = next_seq != seq;
+		seq = next_seq;
+
+		// One network chunk per round, not one per frame. Each item sent
+		// on this channel becomes its own HTTP chunk, and the secondary
+		// reads the body a chunk at a time — so frames sent singly reach
+		// it singly, however many were ready, and it applies each as a
+		// separate write. Joined, a round arrives as one read and is
+		// applied as one write. The frame encoding is unchanged; a
+		// secondary has always decoded as many frames as a read holds.
+		for chunk in coalesce(frames, SEND_CHUNK_BYTES) {
+			if tx.send(chunk).await.is_err() {
+				return; // client disconnected
+			}
+		}
+
+		if let Some(reason) = broken {
+			tuwunel_core::warn!(
+				"Closing WAL stream to a secondary at seq {seq}: {reason}. It will reconnect \
+				 and re-sync if the WAL it needs is gone."
+			);
+			return;
+		}
+
+		if drain::reached(target, seq) {
+			// Everything through the final sequence has been sent. Say where
+			// it ends, and close: the primary is stopping.
+			let hb = WalFrame::heartbeat(seq);
+			if tx.send(Bytes::from(hb.encode())).await.is_ok() {
+				tuwunel_core::info!(
+					seq,
+					"WAL stream to a secondary drained through the final sequence; closing."
+				);
+			}
+			return;
+		}
+
+		// Always emit a heartbeat so the secondary can tell the primary is alive.
+		// When no data was produced, sleep first to avoid a busy-loop.
+		//
+		// When data was produced, pause briefly instead of re-reading the
+		// WAL at once: under steady writes that turns a stream of one- or
+		// two-write rounds into fewer, larger ones (see
+		// `rocksdb_replication_batch_ms`). Nothing is skipped by waiting —
+		// the next round resumes from `seq` either way.
+		//
+		// A drain request cuts either pause short. While draining there is
+		// no pause after data; and if a draining round found nothing new yet
+		// (the WAL does not reach the target — not expected once the writers
+		// are stopped and the WAL flushed), it waits out the interval rather
+		// than spinning, and the drain's own timeout bounds the whole thing.
+		let pause = match (target, advanced) {
+			| (_, false) => interval_ms,
+			| (None, true) => batch_ms,
+			| (Some(_), true) => 0,
+		};
+		if pause > 0 {
+			let sleep = tokio::time::sleep(Duration::from_millis(pause));
+			if target.is_some() {
+				sleep.await;
+			} else {
+				tokio::select! {
+					() = sleep => {},
+					changed = drain.changed() => if changed.is_err() {
+						return; // the server is going away
+					},
+				}
+			}
+		}
+
+		// The heartbeat carries `seq` — this stream's own cursor, the last
+		// sequence it has sent — not the primary's latest sequence. The
+		// secondary saves a heartbeat's sequence as its resume cursor, and
+		// the latest sequence is read after the drain above, so any write
+		// landing in between made the cursor claim batches this stream had
+		// not sent: a reconnect after that heartbeat skipped them for good.
+		// It is also what a promoted node records as how far it got (see
+		// `rejoin::Handoff`), which has to be exact.
+		let hb = WalFrame::heartbeat(seq);
+		if tx.send(Bytes::from(hb.encode())).await.is_err() {
+			return; // client disconnected
+		}
+	}
 }
 
 /// Largest network chunk a round of frames is joined into. A round bigger
@@ -707,6 +800,187 @@ mod tests {
 			assert_eq!(got.sequence, want.sequence);
 			assert_eq!(got.batch_data, want.batch_data);
 		}
+	}
+
+	/// A WAL for `stream_wal` tests: batches `(sequence, count)`, and how
+	/// often a round asked for a flush.
+	#[derive(Clone, Default)]
+	struct FakeWal {
+		batches: std::sync::Arc<std::sync::Mutex<Vec<(u64, u64)>>>,
+		flushes: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+	}
+
+	impl FakeWal {
+		fn push(&self, sequence: u64, count: u64) {
+			self.batches.lock().unwrap().push((sequence, count));
+		}
+
+		fn reader(&self) -> impl Fn(u64, bool) -> Round + Clone + Send + 'static {
+			let wal = self.clone();
+			move |seq, flush| {
+				if flush {
+					wal.flushes
+						.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+				}
+				let mut next = seq;
+				let mut frames = Vec::new();
+				for &(sequence, count) in wal.batches.lock().unwrap().iter() {
+					if sequence > next {
+						let frame = WalFrame::data(sequence, count, vec![1, 2, 3]);
+						next = frame.resume_seq();
+						frames.push(Bytes::from(frame.encode()));
+					}
+				}
+				(frames, next, None)
+			}
+		}
+	}
+
+	/// Decode whatever arrives within `wait` (one overall deadline, not per
+	/// chunk: heartbeats keep arriving); `true` when the body ended.
+	async fn collect(
+		rx: &mut futures::channel::mpsc::Receiver<Bytes>,
+		wait: Duration,
+	) -> (Vec<WalFrame>, bool) {
+		let deadline = tokio::time::Instant::now()
+			.checked_add(wait)
+			.unwrap();
+		let mut buf = Vec::new();
+		let ended = loop {
+			match tokio::time::timeout_at(deadline, rx.next()).await {
+				| Ok(Some(chunk)) => buf.extend_from_slice(&chunk),
+				| Ok(None) => break true,
+				| Err(_) => break false,
+			}
+		};
+		let mut frames = Vec::new();
+		let mut offset = 0;
+		while offset < buf.len() {
+			let (frame, used) = WalFrame::decode(&buf[offset..]).unwrap();
+			frames.push(frame);
+			offset = offset.saturating_add(used);
+		}
+		(frames, ended)
+	}
+
+	fn data_seqs(frames: &[WalFrame]) -> Vec<u64> {
+		frames
+			.iter()
+			.filter(|f| f.frame_type == tuwunel_database::FRAME_TYPE_DATA)
+			.map(|f| f.sequence)
+			.collect()
+	}
+
+	/// The shutdown case: an idle stream (long poll interval) wakes as soon
+	/// as the drain is requested, sends the writes made while stopping,
+	/// flushes before reading, ends with a heartbeat at the final sequence,
+	/// and closes — well before its interval would have elapsed.
+	#[tokio::test]
+	async fn drain_sends_final_writes_then_closes() {
+		let wal = FakeWal::default();
+		wal.push(11, 1);
+		wal.push(12, 2);
+		wal.push(14, 1);
+
+		let (tx, mut rx) = futures::channel::mpsc::channel::<Bytes>(256);
+		let (target_tx, target_rx) = watch::channel(None);
+		let stream = tokio::spawn(stream_wal(wal.reader(), 10, tx, target_rx, 60_000, 0));
+
+		let (frames, ended) = collect(&mut rx, Duration::from_millis(300)).await;
+		assert!(!ended);
+		assert_eq!(data_seqs(&frames), vec![11, 12, 14]);
+		assert_eq!(frames.last().unwrap().sequence, 14, "heartbeat carries the cursor");
+		assert_eq!(wal.flushes.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+		// What the stopping services wrote, then the drain request.
+		wal.push(15, 1);
+		wal.push(16, 3);
+		let start = std::time::Instant::now();
+		target_tx.send_replace(Some(18));
+
+		let (frames, ended) = collect(&mut rx, Duration::from_secs(5)).await;
+		assert!(ended, "stream must close after the drain");
+		assert!(start.elapsed() < Duration::from_secs(2), "{:?}", start.elapsed());
+		assert_eq!(data_seqs(&frames), vec![15, 16]);
+		let last = frames.last().unwrap();
+		assert_eq!(last.frame_type, tuwunel_database::FRAME_TYPE_HEARTBEAT);
+		assert_eq!(last.sequence, 18, "final heartbeat is the final sequence");
+		assert!(wal.flushes.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+		stream.await.unwrap();
+	}
+
+	/// A stream opened after the drain began (or that reaches the target in
+	/// its first round) sends what is left, the final heartbeat, and closes
+	/// without another round or pause.
+	#[tokio::test]
+	async fn drain_target_already_sent_closes_at_once() {
+		let wal = FakeWal::default();
+		wal.push(21, 1);
+
+		let (tx, mut rx) = futures::channel::mpsc::channel::<Bytes>(256);
+		let (_target_tx, target_rx) = watch::channel(Some(21));
+		let stream = tokio::spawn(stream_wal(wal.reader(), 20, tx, target_rx, 60_000, 25));
+
+		let (frames, ended) = collect(&mut rx, Duration::from_secs(5)).await;
+		assert!(ended);
+		assert_eq!(data_seqs(&frames), vec![21]);
+		assert_eq!(frames.len(), 2, "data, then the final heartbeat; no extra round");
+		assert_eq!(frames[1].frame_type, tuwunel_database::FRAME_TYPE_HEARTBEAT);
+		assert_eq!(frames[1].sequence, 21);
+		stream.await.unwrap();
+	}
+
+	/// The drain waits for writes it was told about: a target past what the
+	/// WAL holds keeps the stream open (paced, not spinning) until they show
+	/// up. The drain's own timeout bounds this in a real shutdown.
+	#[tokio::test]
+	async fn drain_waits_until_the_target_is_in_the_wal() {
+		let wal = FakeWal::default();
+
+		let (tx, mut rx) = futures::channel::mpsc::channel::<Bytes>(256);
+		let (_target_tx, target_rx) = watch::channel(Some(31));
+		let stream = tokio::spawn(stream_wal(wal.reader(), 30, tx, target_rx, 50, 0));
+
+		let (frames, ended) = collect(&mut rx, Duration::from_millis(200)).await;
+		assert!(!ended);
+		assert!(data_seqs(&frames).is_empty());
+		let rounds = wal.flushes.load(std::sync::atomic::Ordering::SeqCst);
+		assert!(rounds < 20, "paced while waiting, not spinning: {rounds} rounds");
+
+		wal.push(31, 1);
+		let (frames, ended) = collect(&mut rx, Duration::from_secs(5)).await;
+		assert!(ended);
+		assert_eq!(data_seqs(&frames), vec![31]);
+		assert_eq!(frames.last().unwrap().sequence, 31);
+		stream.await.unwrap();
+	}
+
+	/// No drain: the stream is unchanged — it keeps sending heartbeats and
+	/// never closes on its own.
+	#[tokio::test]
+	async fn without_drain_stream_stays_open() {
+		let wal = FakeWal::default();
+		wal.push(41, 1);
+
+		let (tx, mut rx) = futures::channel::mpsc::channel::<Bytes>(256);
+		let (_target_tx, target_rx) = watch::channel(None);
+		let stream = tokio::spawn(stream_wal(wal.reader(), 40, tx, target_rx, 20, 0));
+
+		let (frames, ended) = collect(&mut rx, Duration::from_millis(300)).await;
+		assert!(!ended);
+		assert_eq!(data_seqs(&frames), vec![41]);
+		let heartbeats = frames
+			.iter()
+			.filter(|f| f.frame_type == tuwunel_database::FRAME_TYPE_HEARTBEAT)
+			.count();
+		assert!(heartbeats >= 2, "{heartbeats}");
+		assert_eq!(wal.flushes.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+		drop(rx);
+		tokio::time::timeout(Duration::from_secs(2), stream)
+			.await
+			.expect("stream ends once the secondary disconnects")
+			.unwrap();
 	}
 
 	#[test]

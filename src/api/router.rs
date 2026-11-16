@@ -199,6 +199,11 @@ pub fn build(router: Router<State>, server: &Server, state: State) -> Router<Sta
 		.ruma_route(&client::well_known_support)
 		.ruma_route(&client::well_known_client)
 		.route("/_tuwunel/server_version", get(client::tuwunel_server_version))
+		// Appservice-only (as_token checked in the handler), read-only.
+		.route(
+			"/_tuwunel/appservice/v1/shared_rooms",
+			get(client::tuwunel_appservice_shared_rooms),
+		)
 		.ruma_route(&client::room_initial_sync_route)
 		.route("/client/server.json", get(client::syncv3_client_server_json));
 

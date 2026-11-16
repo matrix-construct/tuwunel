@@ -1444,6 +1444,22 @@ pub struct Config {
 	#[serde(default = "default_rocksdb_replication_batch_ms")]
 	pub rocksdb_replication_batch_ms: u64,
 
+	/// Longest a primary waits, in seconds, during a clean shutdown for its
+	/// connected secondaries to be sent the last of its WAL.
+	///
+	/// On a clean stop the primary first stops everything that writes
+	/// (in-flight requests, outbound sending, presence, ...), then sends each
+	/// connected secondary the WAL through its final sequence and ends the
+	/// stream, and only then closes its listener and records the clean stop.
+	/// That is what lets this node later rejoin the promoted secondary
+	/// without a full database copy. Normally this takes well under a second.
+	/// If a secondary is absent or too slow the primary stops anyway after
+	/// this long; a later rejoin then needs a full copy, as before. Keep the
+	/// whole shutdown comfortably inside the time your failover tooling
+	/// waits before promoting the secondary. Default: 5.
+	#[serde(default = "default_rocksdb_replication_shutdown_drain_secs")]
+	pub rocksdb_replication_shutdown_drain_secs: u64,
+
 	/// Enables idle CPU priority for compaction thread. This is not enabled by
 	/// default to prevent compaction from falling too far behind on busy
 	/// systems.
@@ -3504,6 +3520,8 @@ fn default_rocksdb_wal_size_limit_mb() -> u64 { 8192 }
 fn default_rocksdb_replication_interval_ms() -> u64 { 250 }
 
 fn default_rocksdb_replication_batch_ms() -> u64 { 25 }
+
+fn default_rocksdb_replication_shutdown_drain_secs() -> u64 { 5 }
 
 // I know, it's a great name
 #[must_use]

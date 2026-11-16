@@ -216,14 +216,87 @@ pub async fn start(self: &Arc<Self>) -> Result<Arc<Self>> {
 	Ok(Arc::clone(self))
 }
 
+/// First half of a clean stop, run once shutdown has begun but while the HTTP
+/// listener still serves: stop everything that writes data, then hand each
+/// connected replica the WAL through the final sequence.
+///
+/// The order matters for fast rejoin (`tuwunel_database::rejoin`): a write
+/// made after the replica's stream has ended is a write the promoted replica
+/// never has, and this node then needs a full copy to rejoin. So:
+///
+/// 1. In-flight requests finish (new ones are already refused). Bounded by
+///    `client_shutdown_timeout`, which is when the request layer gives up on
+///    them anyway.
+/// 2. The service workers stop: the outbound sender finishes its in-flight
+///    transactions (`sender_shutdown_timeout`) and records them, presence
+///    writes the server user offline, retention and the rest end.
+/// 3. Each open WAL stream is sent everything through the final sequence and
+///    ends; bounded by `rocksdb_replication_shutdown_drain_secs`.
+///
+/// [`Services::stop`] does the rest after the listener has closed. Idempotent
+/// with it: interrupting and stopping the workers twice is harmless.
+///
+/// The caller must not be holding [`Services::poll`] (it holds the manager
+/// lock).
 #[implement(Services)]
-pub async fn stop(&self) {
-	info!("Shutting down services...");
+pub async fn quiesce(&self) {
+	self.wait_for_requests().await;
 
+	debug!("Stopping service workers before the replication drain...");
+	self.stop_workers().await;
+
+	self.replication.drain_streams().await;
+}
+
+/// Wait until no request handler is running, or `client_shutdown_timeout`.
+#[implement(Services)]
+async fn wait_for_requests(&self) {
+	use std::{
+		sync::atomic::Ordering,
+		time::{Duration, Instant},
+	};
+
+	let active = || {
+		self.server
+			.metrics
+			.requests_handle_active
+			.load(Ordering::SeqCst)
+	};
+
+	let timeout = Duration::from_secs(self.server.config.client_shutdown_timeout);
+	let deadline = Instant::now().checked_add(timeout);
+	let pending = active();
+	if pending > 0 {
+		debug!(pending, ?timeout, "Waiting for in-flight requests before stopping writers...");
+	}
+
+	while active() > 0 && deadline.is_some_and(|deadline| Instant::now() < deadline) {
+		tokio::time::sleep(Duration::from_millis(20)).await;
+	}
+
+	let left = active();
+	if left > 0 {
+		warn!(
+			left,
+			"Requests still running at shutdown; any write they make after the replication \
+			 drain means a full copy if this node later rejoins as a replica."
+		);
+	}
+}
+
+#[implement(Services)]
+async fn stop_workers(&self) {
 	self.interrupt().await;
 	if let Some(manager) = self.manager.lock().await.as_ref() {
 		manager.stop().await;
 	}
+}
+
+#[implement(Services)]
+pub async fn stop(&self) {
+	info!("Shutting down services...");
+
+	self.stop_workers().await;
 
 	// Everything that dispatches PDU counts has stopped, so the counter is
 	// final and can be recorded for the next startup to read instead of
@@ -239,7 +312,11 @@ pub async fn stop(&self) {
 	// rejoins as a replica (see `tuwunel_database::rejoin`). Failing to write
 	// it costs only that shortcut — the node does a full checkpoint instead.
 	match self.db.record_clean_stop() {
-		| Ok(()) => info!(seq = self.db.latest_wal_sequence(), "Recorded clean stop."),
+		| Ok(()) => info!(
+			seq = self.db.latest_wal_sequence(),
+			replicated_through = ?self.replication.drain().target(),
+			"Recorded clean stop."
+		),
 		| Err(e) => warn!("Could not record clean stop; a rejoin will need a full checkpoint: {e}"),
 	}
 

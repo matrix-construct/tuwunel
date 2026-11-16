@@ -13,6 +13,17 @@ use tuwunel_service::Services;
 use crate::{handle::ServerHandle, serve};
 
 /// Main loop base
+///
+/// Shutdown order, which fast rejoin depends on (`tuwunel_database::rejoin`):
+/// once shutdown begins, new requests are refused at once
+/// (`request::handle`), but the listener keeps serving the requests already
+/// running and, above all, any replica's WAL stream. The services that write
+/// stop next, then each replica is sent the WAL through the final sequence
+/// ([`Services::quiesce`]); only then are connections closed. The rest of
+/// the services' shutdown, and the clean-stop record, follow in [`stop`].
+/// Before, the listener closed first — cutting the replica's stream at the
+/// graceful-shutdown timeout — and the services stopped after, so whatever
+/// they wrote while stopping never reached the replica.
 #[tracing::instrument(skip_all)]
 pub(crate) async fn run(services: Arc<Services>) -> Result {
 	let server = &services.server;
@@ -21,34 +32,38 @@ pub(crate) async fn run(services: Arc<Services>) -> Result {
 	// Install the admin room callback here for now
 	tuwunel_admin::init(&services.admin).await;
 
-	// Setup shutdown/signal handling
 	let handle = ServerHandle::new();
-	let sigs = server
-		.runtime()
-		.spawn(signal(server.clone(), handle.clone()));
-
 	let listener = services
 		.config
 		.listening
 		.then_async(|| {
 			server
 				.runtime()
-				.spawn(serve::serve(services.clone(), handle))
+				.spawn(serve::serve(services.clone(), handle.clone()))
 				.map(|res| res.map_err(Error::from).unwrap_or_else(Err))
 		})
 		.unwrap_or_else_async(|| server.until_shutdown().map(Ok));
 
-	// Focal point
+	// Focal point. `tokio::select!` drops the other branches' futures before
+	// running a handler, so `services.poll()` (which holds the service
+	// manager's lock) is gone by the time `quiesce` needs that lock.
 	debug!("Running");
 	pin_mut!(listener);
 	let res = tokio::select! {
 		res = &mut listener => res.unwrap_or(Ok(())),
-		res = services.poll() => handle_services_finish(server, res, listener.await),
+		res = services.poll() => {
+			let res = handle_services_finish(server, res);
+			shutdown(&services, &handle).await;
+			if let Some(Err(e)) = listener.await {
+				error!("Client listener task finished with error: {e}");
+			}
+			res
+		},
+		() = server.until_shutdown() => {
+			shutdown(&services, &handle).await;
+			listener.await.unwrap_or(Ok(()))
+		},
 	};
-
-	// Join the signal handler before we leave.
-	sigs.abort();
-	_ = sigs.await;
 
 	// Remove the admin room callback
 	tuwunel_admin::fini(&services.admin).await;
@@ -108,10 +123,11 @@ pub(crate) async fn stop(services: Arc<Services>) -> Result {
 	Ok(())
 }
 
-#[tracing::instrument(skip_all)]
-async fn signal(server: Arc<Server>, handle: ServerHandle) {
-	server.until_shutdown().await;
-	handle_shutdown(&server, &handle);
+/// Stop the writers and drain the replicas while the listener still serves,
+/// then close the listener's connections.
+async fn shutdown(services: &Arc<Services>, handle: &ServerHandle) {
+	services.quiesce().await;
+	handle_shutdown(&services.server, handle);
 }
 
 fn handle_shutdown(server: &Arc<Server>, handle: &ServerHandle) {
@@ -126,21 +142,13 @@ fn handle_shutdown(server: &Arc<Server>, handle: &ServerHandle) {
 	handle.graceful_shutdown(Some(timeout));
 }
 
-fn handle_services_finish(
-	server: &Arc<Server>,
-	result: Result,
-	listener: Option<Result>,
-) -> Result {
+fn handle_services_finish(server: &Arc<Server>, result: Result) -> Result {
 	debug!("Service manager finished: {result:?}");
 
 	if server.is_running()
 		&& let Err(e) = server.shutdown()
 	{
 		error!("Failed to send shutdown signal: {e}");
-	}
-
-	if let Some(Err(e)) = listener {
-		error!("Client listener task finished with error: {e}");
 	}
 
 	result

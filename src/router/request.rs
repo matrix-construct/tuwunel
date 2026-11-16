@@ -34,6 +34,12 @@ pub(crate) async fn handle(
 	req: http::Request<axum::body::Body>,
 	next: axum::middleware::Next,
 ) -> Result<Response, StatusCode> {
+	// Counted before the running check, and released only when the request
+	// task ends: shutdown clears the running flag and then waits for this to
+	// reach zero before it stops the services that write, so a request either
+	// sees the flag cleared and is refused, or is counted and waited for.
+	let active = ActiveRequest::enter(&services);
+
 	if !services.server.is_running() {
 		debug_warn!(
 			method = %req.method(),
@@ -49,6 +55,7 @@ pub(crate) async fn handle(
 	let services_ = services.clone();
 	let parent = Span::current();
 	let task = services.server.runtime().spawn(async move {
+		let _active = active;
 		tokio::select! {
 			response = execute(&services_, req, next, &parent) => response,
 			response = services_.server.until_shutdown()
@@ -84,7 +91,7 @@ pub(crate) async fn handle(
 		task = %task::id(),
 	)
 )]
-#[cfg_attr(not(debug_assertions), expect(unused_variables))]
+#[expect(unused_variables)]
 async fn execute(
 	// we made a safety contract that Services will not go out of scope
 	// during the request; this ensures a reference is accounted for at
@@ -94,26 +101,36 @@ async fn execute(
 	next: axum::middleware::Next,
 	parent: &Span,
 ) -> Response {
-	#[cfg(debug_assertions)]
-	services
-		.server
-		.metrics
-		.requests_handle_active
-		.fetch_add(1, Ordering::Relaxed);
+	next.run(req).await
+}
 
-	#[cfg(debug_assertions)]
-	defer! {{
-		_ = services.server
-			.metrics
-			.requests_handle_finished
-			.fetch_add(1, Ordering::Relaxed);
-		_ = services.server
+/// One request being handled, for `metrics.requests_handle_active`, which
+/// shutdown waits on (see `tuwunel_service::Services::quiesce`). Counted in
+/// every build: it used to be debug-only.
+struct ActiveRequest(Arc<Services>);
+
+impl ActiveRequest {
+	fn enter(services: &Arc<Services>) -> Self {
+		services
+			.server
 			.metrics
 			.requests_handle_active
-			.fetch_sub(1, Ordering::Relaxed);
-	}};
+			.fetch_add(1, Ordering::SeqCst);
 
-	next.run(req).await
+		Self(services.clone())
+	}
+}
+
+impl Drop for ActiveRequest {
+	fn drop(&mut self) {
+		let metrics = &self.0.server.metrics;
+		metrics
+			.requests_handle_finished
+			.fetch_add(1, Ordering::Relaxed);
+		metrics
+			.requests_handle_active
+			.fetch_sub(1, Ordering::SeqCst);
+	}
 }
 
 fn handle_result(method: &Method, uri: &Uri, result: Response) -> Result<Response, StatusCode> {

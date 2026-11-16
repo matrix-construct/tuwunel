@@ -65,6 +65,12 @@ impl Manager {
 
 	pub(super) async fn stop(&self) {
 		if let Some(manager) = self.manager.lock().await.take() {
+			// Already joined by `poll()` (every worker ended, or one failed):
+			// awaiting a consumed JoinHandle again panics.
+			if manager.is_finished() {
+				return;
+			}
+
 			debug!("Waiting for service manager...");
 			if let Err(e) = manager.await {
 				error!("Manager shutdown error: {e:?}");

@@ -1225,6 +1225,22 @@
 #
 #rocksdb_replication_batch_ms =
 
+# Longest a primary waits, in seconds, during a clean shutdown for its
+# connected secondaries to be sent the last of its WAL.
+#
+# On a clean stop the primary first stops everything that writes
+# (in-flight requests, outbound sending, presence, ...), then sends each
+# connected secondary the WAL through its final sequence and ends the
+# stream, and only then closes its listener and records the clean stop.
+# That is what lets this node later rejoin the promoted secondary
+# without a full database copy. Normally this takes well under a second.
+# If a secondary is absent or too slow the primary stops anyway after
+# this long; a later rejoin then needs a full copy, as before. Keep the
+# whole shutdown comfortably inside the time your failover tooling
+# waits before promoting the secondary. Default: 5.
+#
+#rocksdb_replication_shutdown_drain_secs =
+
 # Enables idle CPU priority for compaction thread. This is not enabled by
 # default to prevent compaction from falling too far behind on busy
 # systems.
