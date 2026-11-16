@@ -188,7 +188,7 @@ pub use self::{
 	directory::get_public_rooms_filtered_helper,
 	keys::{claim_keys_helper, get_keys_helper},
 	message::{MessagesArgs, get_messages, with_membership},
-	notice::{notice_tag, room_is_notice},
+	notice::room_is_notice,
 	space::{HierarchyArgs, get_client_hierarchy},
 	sync::calculate_heroes,
 };

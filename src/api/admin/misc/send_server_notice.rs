@@ -21,7 +21,7 @@ use synapse_admin_api::server_notices::send::{
 	by_txn,
 	v1::{self, Response},
 };
-use tuwunel_api_client::{notice_tag, room_is_notice};
+use tuwunel_api_client::room_is_notice;
 use tuwunel_core::{
 	Err, Result, err,
 	utils::{
@@ -131,16 +131,10 @@ async fn send_notice(
 		return Err!(Request(NotFound("User not found")));
 	}
 
-	let room_id = find_notice_room(services, target)
-		.then(|room| {
-			room.map(|room_id| ready(Ok(room_id)).right_future())
-				.unwrap_or_else(|| {
-					create_notice_room(services, target)
-						.boxed() // Cold room-creation layout cut.
-						.left_future()
-				})
-		})
-		.await?;
+	let room_id = match find_notice_room(services, target).await {
+		| Some(id) => id,
+		| None => create_notice_room(services, target).await?,
+	};
 
 	let server_user = services.globals.server_user.as_ref();
 	let state_lock = services.state.mutex.lock(&room_id).await;
@@ -194,8 +188,6 @@ async fn find_notice_room(services: &Services, target: &UserId) -> Option<OwnedR
 		.map(Result::ok)
 		.await;
 
-	let tag = notice_tag(&services.config.admin.room.tag);
-
 	services
 		.state_cache
 		.get_shared_rooms(server_user, target)
@@ -213,26 +205,15 @@ async fn find_notice_room(services: &Services, target: &UserId) -> Option<OwnedR
 				.map(ToOwned::to_owned),
 		)
 		.ready_filter(|room_id| admin_room.as_ref() != Some(room_id))
-		.filter_map(|room_id| notice_candidate(services, target, &tag, room_id))
+		.filter_map(async |room_id| {
+			room_is_notice(services, target, &room_id)
+				.await
+				.unwrap_or(false)
+				.then_some(room_id)
+		})
 		.take(1)
 		.ready_fold(None, |_, room_id| Some(room_id))
 		.await
-}
-
-/// Retains a candidate room only when its notice marker can be verified.
-///
-/// A named future keeps the borrowed membership stream compatible with Send.
-#[tracing::instrument(level = "trace", skip_all)]
-async fn notice_candidate(
-	services: &Services,
-	target: &UserId,
-	tag: &TagName,
-	room_id: OwnedRoomId,
-) -> Option<OwnedRoomId> {
-	room_is_notice(services, &services.globals.server_user, target, tag, &room_id)
-		.map(|notice| notice.is_ok_and(|notice| notice))
-		.await
-		.then_some(room_id)
 }
 
 /// Creates a private room whose recipient can read notices but cannot post.
@@ -285,7 +266,7 @@ async fn create_notice_room(services: &Services, target: &UserId) -> Result<Owne
 
 	services
 		.account_data
-		.set_room_tag(target, &room_id, notice_tag(&services.config.admin.room.tag), None)
+		.set_room_tag(target, &room_id, TagName::ServerNotice, None)
 		.await?;
 
 	Ok(room_id)
