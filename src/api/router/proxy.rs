@@ -26,7 +26,10 @@ use ruma::{
 		auth_scheme::AccessToken, error::ErrorKind, federation::authentication::ServerSignatures,
 	},
 };
-use tuwunel_core::{Err, Error, Result, err, utils::url::is_plain_path};
+use tuwunel_core::{
+	Err, Error, Result, err,
+	utils::{BoolExt, url::is_plain_path},
+};
 use tuwunel_service::{
 	Services,
 	appservice::{
@@ -117,19 +120,20 @@ pub async fn proxy(services: &Services, request: HttpRequest<Body>) -> Result<Re
 	Ok(downstream_response(response))
 }
 
-/// The API and registration a request's method and path are proxied to.
+/// The API and registration a request is proxied to.
 ///
-/// Only the methods the MSC proxies qualify, and only a path whose remainder
-/// after the version an appservice validly claims.
+/// Every method but TRACE qualifies, since the MSC forwards any authenticated
+/// request under a claim, while a TRACE must carry no credential its echo could
+/// disclose (RFC 9110 §9.3.8) and the forwarded request carries the `hs_token`.
+/// A path qualifies when an appservice validly claims its remainder after the
+/// version.
 #[tracing::instrument(level = "trace", skip_all)]
 async fn claim(
 	services: &Services,
 	method: &Method,
 	uri: &Uri,
 ) -> Option<(Root, RegistrationInfo)> {
-	if !matches!(*method, Method::GET | Method::POST | Method::PUT | Method::DELETE) {
-		return None;
-	}
+	method.ne(&Method::TRACE).into_option()?;
 
 	let (root, remainder) = split_path(uri.path())?;
 	let appservice = services

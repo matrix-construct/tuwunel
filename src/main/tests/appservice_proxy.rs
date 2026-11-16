@@ -246,7 +246,7 @@ async fn client_requests(
 		);
 	}
 
-	for method in [Method::GET, Method::PUT, Method::DELETE] {
+	for method in [Method::GET, Method::PUT, Method::DELETE, Method::PATCH] {
 		let response =
 			send(services, method.clone(), &format!("{base}{GET_TOKEN}"), Some(USER_TOKEN))
 				.await?;
@@ -279,8 +279,8 @@ async fn client_requests(
 
 /// Requests the proxy refuses never reach the stand-in.
 ///
-/// Unclaimed paths and methods are the plain 404 and a dot segment under the
-/// claim is 400.
+/// Unclaimed paths and a TRACE under the claim are the plain 404, a known
+/// path's wrong method the plain 405, and a dot segment under the claim is 400.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn refused_requests(
 	services: &Services,
@@ -298,8 +298,8 @@ async fn refused_requests(
 		assert_eq!(refusal(response).await?, (404, "M_UNRECOGNIZED".into()), "{path}");
 	}
 
-	let patch =
-		send(services, Method::PATCH, &format!("{base}{GET_TOKEN}"), Some(USER_TOKEN)).await?;
+	let trace =
+		send(services, Method::TRACE, &format!("{base}{GET_TOKEN}"), Some(USER_TOKEN)).await?;
 
 	let wrong_method = send(
 		services,
@@ -309,7 +309,7 @@ async fn refused_requests(
 	)
 	.await?;
 
-	assert_eq!(refusal(patch).await?, (404, "M_UNRECOGNIZED".into()));
+	assert_eq!(refusal(trace).await?, (404, "M_UNRECOGNIZED".into()));
 	assert_eq!(wrong_method.status(), StatusCode::METHOD_NOT_ALLOWED);
 
 	for path in [
