@@ -1,16 +1,6 @@
-use std::collections::BTreeSet;
-
 use axum::extract::State;
 use futures::{StreamExt, TryStreamExt};
-use ruma::{
-	OwnedUserId,
-	api::client::threads::get_threads,
-	events::{
-		AnySyncMessageLikeEvent, GlobalAccountDataEventType,
-		ignored_user_list::IgnoredUserListEvent,
-	},
-	serde::Raw,
-};
+use ruma::api::client::threads::get_threads;
 use tuwunel_core::{
 	Err, Result, at,
 	result::{FlatOk, LogErr},
@@ -20,7 +10,6 @@ use tuwunel_matrix::{
 	Event,
 	pdu::{PduCount, PduEvent},
 };
-use tuwunel_service::rooms::pdu_metadata::IgnoredThreadView;
 
 use crate::Ruma;
 
@@ -59,13 +48,8 @@ pub(crate) async fn get_threads_route(
 		.transpose()?
 		.unwrap_or_else(PduCount::max);
 
-	// MSC3856: the requester's ignore list adjusts the served threads.
-	let ignored: BTreeSet<OwnedUserId> = services
-		.account_data
-		.get_global(sender_user, GlobalAccountDataEventType::IgnoredUserList)
-		.await
-		.map(|event: IgnoredUserListEvent| event.content.ignored_users.into_keys().collect())
-		.unwrap_or_default();
+	// MSC3856: an ignored sender's root is served redacted.
+	let ignored = services.users.ignored_users(sender_user).await;
 
 	// One extra row probes whether the list continues past this page.
 	let mut threads: Vec<(PduCount, PduEvent)> = services
@@ -78,26 +62,19 @@ pub(crate) async fn get_threads_route(
 				.await
 				.then_some((count, pdu)))
 		})
-		.and_then(async |(count, pdu)| {
-			let view = match ignored.is_empty() {
-				| true => IgnoredThreadView::Unchanged,
-				| false =>
-					services
-						.pdu_metadata
-						.ignored_thread_view(sender_user, &ignored, &pdu)
-						.await,
-			};
-
-			Ok((count, pdu, view))
-		})
 		.take(limit.saturating_add(1))
-		.wide_and_then(async |(count, pdu, view)| {
+		.wide_and_then(async |(count, pdu)| {
+			let root = services
+				.pdu_metadata
+				.redacted_root(ignored.as_ref(), &pdu)
+				.await;
+
 			let pdu = services
 				.pdu_metadata
 				.bundle_aggregations(sender_user, pdu)
 				.await;
 
-			Ok((count, apply_ignored_view(pdu, view)))
+			Ok((count, apply_redacted_root(pdu, root)))
 		})
 		.try_collect()
 		.await?;
@@ -122,51 +99,18 @@ pub(crate) async fn get_threads_route(
 	})
 }
 
-/// MSC3856 ignored-user adjustments, applied after the bundle pass corrects
-/// the served `unsigned`: the redacted root replaces content only and keeps
-/// that `unsigned`, minus any `m.replace` bundle (a folded edit shares the
-/// root's sender, so it would re-serve the ignored content).
-fn apply_ignored_view(pdu: PduEvent, view: IgnoredThreadView) -> PduEvent {
-	match view {
-		| IgnoredThreadView::Unchanged => pdu,
-		| IgnoredThreadView::WithoutSummary { root } =>
-			without_thread_bundle(apply_redacted_root(pdu, root)),
-		| IgnoredThreadView::Adjusted { root, count, latest } =>
-			apply_redacted_root(adjust_thread_bundle(pdu, count, latest), root),
-	}
-}
-
-fn without_thread_bundle(mut pdu: PduEvent) -> PduEvent {
-	pdu.remove_thread_bundle().log_err().ok();
-	pdu
-}
-
-fn apply_redacted_root(pdu: PduEvent, root: Option<Box<PduEvent>>) -> PduEvent {
+/// MSC3856: an ignored sender's root is served with its redacted content.
+///
+/// It keeps the `unsigned` the bundle pass served, minus any `m.replace`
+/// bundle: a folded edit shares the root's sender, so it would re-serve the
+/// ignored content.
+fn apply_redacted_root(pdu: PduEvent, root: Option<PduEvent>) -> PduEvent {
 	match root {
 		| None => pdu,
 		| Some(mut root) => {
 			root.unsigned = pdu.unsigned;
 			root.remove_replacement_bundle().log_err().ok();
-
-			*root
+			root
 		},
 	}
-}
-
-fn adjust_thread_bundle(
-	mut pdu: PduEvent,
-	count: Option<usize>,
-	latest: Option<Raw<AnySyncMessageLikeEvent>>,
-) -> PduEvent {
-	if let Some(count) = count {
-		pdu.set_thread_count(count).log_err().ok();
-	}
-
-	if let Some(latest) = latest {
-		pdu.set_thread_latest_event(&latest)
-			.log_err()
-			.ok();
-	}
-
-	pdu
 }

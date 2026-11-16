@@ -5295,7 +5295,7 @@
 # Adds optional edit and reference summaries to events served to clients.
 # Both are off by default; most clients build these themselves, so enable
 # one only for a client that relies on it. Thread summaries are always
-# bundled and do not depend on these keys.
+# bundled; only the search limit below applies to them.
 #
 #[global.rooms.relations]
 
@@ -5325,6 +5325,20 @@
 # reloadable: yes
 #
 #bundle_references = false
+
+# Limits relation rows read to rebuild one thread summary for a
+# requester.
+#
+# A requester who ignores a thread participant, or who may not see the
+# thread's latest reply, gets the summary rebuilt from at most this many
+# of the root's newest relation rows; missing, unrelated, and redacted
+# events consume the budget. Hidden replies beyond it stay in the reply
+# count, and when no reply the requester may see is within it, the
+# summary is omitted.
+#
+# reloadable: yes
+#
+#thread_summary_search_limit = 1024
 
 
 ################################################################################

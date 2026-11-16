@@ -1,17 +1,18 @@
-//! Thread replies and the ignored-user list, for the tests that declare this
-//! module by path.
+//! Thread replies, the thread list and the ignored-user list, for the tests that
+//! declare this module by path.
 //!
 //! It stands apart from the client harness so that only a binary declaring it
 //! compiles it. A binary declaring it also declares the client harness and its
-//! PUT and event modules, whose `Client`, `put` and `put_event` it builds on.
+//! GET, PUT and event modules, whose `Client`, `get_url`, `put` and `put_event`
+//! it builds on.
 
-use serde_json::json;
+use serde_json::{Value, json};
 use tuwunel_core::{
 	Result, implement,
 	ruma::{EventId, OwnedEventId, RoomId, UserId},
 };
 
-use super::client::Client;
+use super::client::{Client, accepted};
 
 /// Reply in the thread rooted at `root` as this user and return the reply's ID.
 ///
@@ -54,4 +55,28 @@ pub(crate) async fn set_ignored(&self, user_id: &UserId, ignored: &UserId) -> Re
 	self.put(&path, &list).await?;
 
 	Ok(())
+}
+
+/// Get one page of a room's thread list as this user.
+///
+/// The page holds at most `limit` roots and continues from a previous page's
+/// `next_batch` when one is given.
+#[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(crate) async fn threads(
+	&self,
+	room_id: &RoomId,
+	limit: usize,
+	from: Option<&str>,
+) -> Result<Value> {
+	let from = from
+		.map(|from| format!("&from={from}"))
+		.unwrap_or_default();
+
+	let path = format!("rooms/{room_id}/threads?limit={limit}{from}");
+	let response = self
+		.get_url(&self.client_url("v1/", &path))
+		.await?;
+
+	accepted(response).await
 }

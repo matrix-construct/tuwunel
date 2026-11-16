@@ -620,9 +620,9 @@ pub struct Redaction {
 /// Adds optional edit and reference summaries to events served to clients.
 /// Both are off by default; most clients build these themselves, so enable
 /// one only for a client that relies on it. Thread summaries are always
-/// bundled and do not depend on these keys.
+/// bundled; only the search limit below applies to them.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
-#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global.rooms.relations",
@@ -659,6 +659,21 @@ pub struct Relations {
 	/// legacy: bundle_reference_relations
 	#[serde(default)]
 	pub bundle_references: bool,
+
+	/// Limits relation rows read to rebuild one thread summary for a
+	/// requester.
+	///
+	/// A requester who ignores a thread participant, or who may not see the
+	/// thread's latest reply, gets the summary rebuilt from at most this many
+	/// of the root's newest relation rows; missing, unrelated, and redacted
+	/// events consume the budget. Hidden replies beyond it stay in the reply
+	/// count, and when no reply the requester may see is within it, the
+	/// summary is omitted.
+	///
+	/// reloadable: yes
+	/// default: 1024
+	#[serde(default = "default_thread_summary_search_limit")]
+	pub thread_summary_search_limit: usize,
 }
 
 impl Default for Rooms {
@@ -726,6 +741,16 @@ impl Default for PolicyServer {
 	}
 }
 
+impl Default for Relations {
+	fn default() -> Self {
+		Self {
+			bundle_edits: false,
+			bundle_references: false,
+			thread_summary_search_limit: default_thread_summary_search_limit(),
+		}
+	}
+}
+
 impl Default for Redaction {
 	fn default() -> Self {
 		Self {
@@ -768,5 +793,7 @@ fn default_max_attempts_per_request() -> usize { 3 }
 fn default_request_timeout() -> u64 { 5 }
 
 fn default_thread_latest_reply_search_limit() -> usize { 1024 }
+
+fn default_thread_summary_search_limit() -> usize { 1024 }
 
 fn default_retention_seconds() -> u64 { 5_184_000 }

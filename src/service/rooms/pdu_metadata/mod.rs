@@ -2,16 +2,12 @@ use std::sync::Arc;
 
 use ruma::{
 	OwnedRoomId,
-	events::{
-		AnySyncMessageLikeEvent, ignored_user_list::IgnoredUserListEventContent,
-		room::encrypted::Relation,
-	},
-	serde::Raw,
+	events::{ignored_user_list::IgnoredUserListEventContent, room::encrypted::Relation},
 };
 use serde::Deserialize;
 use tuwunel_core::Result;
 use tuwunel_database::Map;
-use tuwunel_matrix::{Event, Pdu};
+use tuwunel_matrix::Event;
 
 use crate::users::is_ignored;
 
@@ -47,30 +43,6 @@ struct ExtractRelatesTo {
 #[derive(Deserialize)]
 struct ExtractRoomId {
 	room_id: OwnedRoomId,
-}
-
-/// Requester-specific MSC3856 adjustment for one thread root in `/threads`.
-///
-/// Root redaction, visible replies, latest event, and reply count depend on the
-/// requesting user and their ignore list, so the resulting view must not be
-/// reused across requesters.
-///
-/// `Unchanged` preserves the served root, while `WithoutSummary` removes only
-/// its thread bundle. Each `Adjusted` field is `None` when that facet needs no
-/// change. A supplied `root` provides redacted content while the caller retains
-/// the served `unsigned`.
-pub enum IgnoredThreadView {
-	Unchanged,
-	/// Retains the root without its thread summary.
-	WithoutSummary {
-		/// The redacted root to serve when its sender is ignored.
-		root: Option<Box<Pdu>>,
-	},
-	Adjusted {
-		root: Option<Box<Pdu>>,
-		count: Option<usize>,
-		latest: Option<Raw<AnySyncMessageLikeEvent>>,
-	},
 }
 
 impl crate::Service for Service {

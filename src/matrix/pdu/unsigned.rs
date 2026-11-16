@@ -608,8 +608,29 @@ fn without(&self, relation_type: &str) -> Result<Option<Unsigned>> {
 	}
 }
 
-/// MSC3856: overwrite `unsigned.m.relations.m.thread.count` with a
-/// per-requester value excluding ignored senders' replies. No-op when the
+/// The stored reply count of `unsigned.m.relations.m.thread`.
+///
+/// It counts every reply, so a requester's view subtracts the replies it hides.
+/// `None` when the event carries no thread bundle or the bundle no count.
+#[implement(Pdu)]
+pub fn thread_count(&self) -> Result<Option<usize>> {
+	self.unsigned
+		.as_ref()
+		.map(Unsigned::json)
+		.map(thread_bundle)
+		.transpose()?
+		.flatten()
+		.map(|thread| raw_field(thread, "count", "thread bundle"))
+		.transpose()?
+		.flatten()
+		.map(|count| serde_json::from_str(count.get()))
+		.transpose()
+		.map_err(|error| err!(Database("Invalid thread count in PDU event: {error}")))
+}
+
+/// MSC3856: overwrite `unsigned.m.relations.m.thread.count` for one requester.
+///
+/// The value leaves out the replies that requester may not see. No-op when the
 /// event carries no thread bundle.
 #[implement(Pdu)]
 pub fn set_thread_count(&mut self, count: usize) -> Result {

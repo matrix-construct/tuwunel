@@ -30,11 +30,14 @@ use tuwunel_matrix::{
 
 use crate::{
 	Services,
-	rooms::{short::ShortRoomId, threads::thread_root},
+	rooms::{short::ShortRoomId, state_compressor::CompressedStateEvent, threads::thread_root},
 	test_utils::{fixture, poll_once},
 };
 
-/// A room with just its create event, so redaction can read its version.
+/// A room with just its create event and world-readable history.
+///
+/// Redaction reads the room version from the create event, and the history
+/// lets the reader be shown every reply.
 struct Room<'a>(&'a Services, ShortRoomId, &'static RoomId);
 
 /// The root's stored count when the redacted reply's write is announced.
@@ -455,7 +458,14 @@ async fn redacting_the_latest_reply_shows_the_newest_remaining_one() -> Result {
 		.pdu_metadata
 		.bundle_aggregations(sender(), served);
 
-	assert!(!to_string(&served.await)?.contains("secret"));
+	let served = to_value(served.await)?;
+
+	assert!(!served.to_string().contains("secret"));
+	assert_eq!(
+		served["unsigned"]["m.relations"]["m.thread"]["latest_event"]["event_id"],
+		json!(second),
+	);
+
 	assert_eq!(room.latest(&root).await?, json!(second));
 
 	room.redact(&second).await?;
@@ -636,19 +646,16 @@ impl<'a> Room<'a> {
 
 	async fn create(services: &'a Services, room: &'static RoomId) -> Result<Self> {
 		let (short, state) = (&services.short, &services.state);
-		let create = &id(&format!("create-{}", room.strip_sigil().replace(':', "-")));
+		let name = room.strip_sigil().replace(':', "-");
+		let create = &id(&format!("create-{name}"));
 		let content = json!({ "creator": sender(), "room_version": "10" });
-		let mut pdu = event(room, create, "m.room.create", content);
-
-		pdu["state_key"] = json!("");
-		services.db["eventid_outlierpdu"].raw_put(create, Json(pdu));
-
-		let key = short.get_or_create_shortstatekey(&StateEventType::RoomCreate, "");
-		let compressed = services
-			.state_compressor
-			.compress_state_event(key.await, create);
-
-		let state_hash = state.set_event_state(create, room, Arc::new([compressed.await].into()));
+		let create_state = put_state(services, room, create, StateEventType::RoomCreate, content);
+		let visibility = &id(&format!("visibility-{name}"));
+		let content = json!({ "history_visibility": "world_readable" });
+		let kind = StateEventType::RoomHistoryVisibility;
+		let visibility_state = put_state(services, room, visibility, kind, content);
+		let room_state = [create_state.await, visibility_state.await].into();
+		let state_hash = state.set_event_state(create, room, Arc::new(room_state));
 
 		state.set_room_state(room, state_hash.await?, &state.mutex.lock(room).await);
 
@@ -745,6 +752,32 @@ impl Wake for CountAtReplyWrite {
 		*count.lock().expect("locked") =
 			root["unsigned"]["m.relations"]["m.thread"]["count"].clone();
 	}
+}
+
+/// Store a state event as an outlier and return its room-state entry.
+///
+/// The event's state key is empty, which every state event here uses.
+async fn put_state(
+	services: &Services,
+	room: &RoomId,
+	event_id: &EventId,
+	kind: StateEventType,
+	content: Value,
+) -> CompressedStateEvent {
+	let mut pdu = event(room, event_id, &kind.to_string(), content);
+
+	pdu["state_key"] = json!("");
+	services.db["eventid_outlierpdu"].raw_put(event_id, Json(pdu));
+
+	let key = services
+		.short
+		.get_or_create_shortstatekey(&kind, "")
+		.await;
+
+	services
+		.state_compressor
+		.compress_state_event(key, event_id)
+		.await
 }
 
 fn id(name: &str) -> OwnedEventId {

@@ -196,6 +196,18 @@ fn check_relation_limits(config: &Config) -> Result {
 		));
 	}
 
+	if config
+		.rooms
+		.relations
+		.thread_summary_search_limit
+		.eq(&0)
+	{
+		return Err!(Config(
+			"rooms.relations.thread_summary_search_limit",
+			"Must be greater than zero"
+		));
+	}
+
 	Ok(())
 }
 

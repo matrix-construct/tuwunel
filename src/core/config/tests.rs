@@ -947,6 +947,49 @@ fn thread_latest_reply_search_limit_is_positive_and_reloadable() {
 }
 
 #[test]
+fn thread_summary_search_limit_is_positive_and_reloadable() {
+	let default = default_config();
+
+	let limit = default
+		.rooms
+		.relations
+		.thread_summary_search_limit;
+
+	assert_eq!(limit, 1024);
+
+	let empty = config_from_toml("[global.rooms.relations]\n").unwrap();
+
+	assert_eq!(empty.rooms.relations.thread_summary_search_limit, 1024);
+
+	let changed =
+		config_from_toml("[global.rooms.relations]\nthread_summary_search_limit = 3\n").unwrap();
+
+	assert_eq!(
+		changed
+			.rooms
+			.relations
+			.thread_summary_search_limit,
+		3
+	);
+
+	check(&changed).expect("a positive search limit should load");
+	reload(&default, &changed).expect("a positive search limit should reload");
+
+	let zero =
+		config_from_toml("[global.rooms.relations]\nthread_summary_search_limit = 0\n").unwrap();
+
+	let error = check(&zero).expect_err("zero must not disable the search limit");
+
+	assert!(
+		error
+			.to_string()
+			.contains("rooms.relations.thread_summary_search_limit")
+	);
+
+	assert!(reload(&default, &zero).is_err());
+}
+
+#[test]
 fn inverted_bounds_are_refused_at_startup_and_reload() {
 	let default = default_config();
 	let hierarchy = |min: u64, max: u64| {

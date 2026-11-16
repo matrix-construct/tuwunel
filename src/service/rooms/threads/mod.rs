@@ -673,8 +673,13 @@ async fn latest_thread_reply(
 		.map(|reply| reply.and_then(|(_, pdu)| thread_reply_json(&pdu)))
 }
 
+/// Walks a thread's unredacted replies, newest first, over at most `limit`
+/// relation rows of its root.
+///
+/// Rows that are missing, unrelated or redacted consume the limit, which counts
+/// rows before events load. Replies load without any sender-private field.
 #[implement(Service)]
-fn thread_replies(
+pub(crate) fn thread_replies(
 	&self,
 	root_id: RawPduId,
 	limit: usize,

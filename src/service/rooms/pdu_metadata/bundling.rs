@@ -1,10 +1,8 @@
-use std::collections::BTreeSet;
-
 use futures::{Stream, StreamExt, TryFutureExt, pin_mut};
-use ruma::{OwnedUserId, UserId, api::Direction, events::room::encrypted::Relation};
+use ruma::{UserId, events::ignored_user_list::IgnoredUserListEventContent};
 use tuwunel_core::{
 	arrayvec::ArrayVec,
-	implement,
+	async_noinline, implement,
 	result::LogErr,
 	utils::{
 		BoolExt,
@@ -15,17 +13,20 @@ use tuwunel_core::{
 use tuwunel_matrix::{Event, Pdu, PduCount, PduId, RawPduId};
 
 use super::{
-	ExtractRelatesTo, IgnoredThreadView,
-	IgnoredThreadView::{Adjusted, Unchanged, WithoutSummary},
-	Service,
+	Service, is_ignored_event,
 	typed_relations::{CHILD_COUNT_OFFSET, KEY_LEN, Tag, prefix},
 };
+use crate::users::is_ignored;
 
 type Seek = ArrayVec<u8, KEY_LEN>;
 
 /// Fold read-time bundled aggregations into a served event's `unsigned`,
-/// per-requester. MSC3816: the stored `m.thread` bundle carries a shared
-/// `current_user_participated`, recomputed here for `sender_user`. MSC3925:
+/// per-requester.
+///
+/// MSC3440: the stored `m.thread` bundle is rebuilt for a
+/// `sender_user` who ignores a participant or may not see its latest reply.
+/// MSC3816: the bundle's shared `current_user_participated` is recomputed for
+/// `sender_user`. MSC3925:
 /// when `bundle_edit_relations` is enabled, the newest `m.replace` edit is
 /// folded in as the full replacement event, and the bundled thread
 /// `latest_event` carries its own newest edit (MSC3856). MSC3267: when
@@ -122,6 +123,12 @@ async fn bundle_thread_for(&self, sender_user: &UserId, pdu: &mut Pdu) {
 		return;
 	}
 
+	let view = self.thread_view(sender_user, pdu).await;
+
+	if apply_thread_view(pdu, view).is_none() {
+		return;
+	}
+
 	let participated = self
 		.services
 		.threads
@@ -147,6 +154,184 @@ async fn bundle_thread_for(&self, sender_user: &UserId, pdu: &mut Pdu) {
 		.bundle_edits
 		.then_async(|| self.bundle_thread_latest_edit(sender_user, pdu))
 		.await;
+}
+
+/// The requester's view of the stored thread summary (MSC3440, MSC2675).
+///
+/// The stored `latest_event` and `count` cover every reply. A requester who
+/// ignores a participant, or who may not see the latest reply, gets them
+/// rebuilt from a bounded walk of the newest replies: the result is how many
+/// replies the walk hid, and the newest reply they may see when the stored
+/// latest is hidden. `None` drops the summary: no reply they may see is in
+/// reach, or the summary or its root cannot be read.
+#[implement(Service)]
+// Unspanned: span frames on this path overflow the debug-build worker stack.
+async fn thread_view(&self, sender_user: &UserId, pdu: &Pdu) -> Option<(usize, Option<Pdu>)> {
+	let (latest_id, _) = pdu
+		.thread_latest_event()
+		.log_err()
+		.ok()
+		.flatten()?;
+
+	let ignored = self
+		.services
+		.users
+		.ignored_users(sender_user)
+		.await;
+
+	let ignored = ignored.as_ref();
+
+	let latest_shown = match self.services.timeline.get_pdu(&latest_id).await {
+		| Err(_) => false,
+		| Ok(latest) => self.shown_to(sender_user, ignored, &latest).await,
+	};
+
+	let ignores_nobody = ignored.is_none_or(|list| list.ignored_users.is_empty());
+
+	if latest_shown && ignores_nobody {
+		return Some((0, None));
+	}
+
+	let root_id = self
+		.services
+		.timeline
+		.get_pdu_id(pdu.event_id())
+		.await
+		.ok()?;
+
+	if latest_shown && !self.ignores_participant(ignored, &root_id).await {
+		return Some((0, None));
+	}
+
+	let (hidden, newest_shown) = self
+		.walk_replies(sender_user, ignored, root_id)
+		.await;
+
+	match latest_shown {
+		| true => Some((hidden, None)),
+		| false => newest_shown.map(|reply| (hidden, Some(reply))),
+	}
+}
+
+/// Applies a requester's view to the served thread summary.
+///
+/// An unchanged view serves the stored summary as is. Otherwise the swapped-in
+/// reply becomes the latest event and the count loses the hidden replies. The
+/// summary is dropped, never served with a count alone, for no view, a missing
+/// or used-up count, or a failed rewrite; `None` then tells the caller to stop.
+fn apply_thread_view(pdu: &mut Pdu, view: Option<(usize, Option<Pdu>)>) -> Option<()> {
+	let Some((hidden, latest)) = view else {
+		drop_thread_bundle(pdu);
+		return None;
+	};
+
+	if hidden == 0 && latest.is_none() {
+		return Some(());
+	}
+
+	if let Some(latest) = latest {
+		let replaced = pdu
+			.set_thread_latest_event(&latest.into_format())
+			.log_err();
+
+		thread_result_or_drop(pdu, replaced)?;
+	}
+
+	let count = pdu.thread_count().log_err();
+	let count = thread_result_or_drop(pdu, count)?
+		.map(|count| count.saturating_sub(hidden))
+		.filter(|&count| count > 0);
+
+	let Some(count) = count else {
+		drop_thread_bundle(pdu);
+		return None;
+	};
+
+	let counted = pdu.set_thread_count(count).log_err();
+
+	thread_result_or_drop(pdu, counted)
+}
+
+/// Whether one requester may be shown `pdu` inside an aggregation.
+///
+/// An event the requester's ignore list hides never is (MSC2675); otherwise
+/// the room's history visibility decides. The ignore test runs first because
+/// it reads nothing.
+#[implement(Service)]
+// Unspanned: span frames on this path overflow the debug-build worker stack.
+async fn shown_to(
+	&self,
+	sender_user: &UserId,
+	ignored: Option<&IgnoredUserListEventContent>,
+	pdu: &Pdu,
+) -> bool {
+	!is_ignored_event(ignored, pdu)
+		&& self
+			.services
+			.state_accessor
+			.user_can_see_event(sender_user, pdu)
+			.await
+}
+
+/// Whether the ignore list names any participant of a thread.
+///
+/// Unreadable participants count as ignored, so the summary is rebuilt rather
+/// than served unfiltered.
+#[implement(Service)]
+#[tracing::instrument(skip_all, level = "trace")]
+async fn ignores_participant(
+	&self,
+	ignored: Option<&IgnoredUserListEventContent>,
+	root_id: &RawPduId,
+) -> bool {
+	self.services
+		.threads
+		.get_participants(root_id)
+		.await
+		.ok()
+		.is_none_or(|participants| {
+			participants
+				.iter()
+				.any(|user| is_ignored(ignored, user))
+		})
+}
+
+/// Walks a thread's newest replies within the summary search limit.
+///
+/// Returns how many the requester may not be shown, and the newest one they
+/// may. A reply that fails to load is skipped. The walk is sequential because
+/// callers already serve events concurrently.
+#[implement(Service)]
+// Unspanned: span frames on this path overflow the debug-build worker stack.
+// size firewall
+#[async_noinline]
+async fn walk_replies<'a>(
+	&'a self,
+	sender_user: &'a UserId,
+	ignored: Option<&'a IgnoredUserListEventContent>,
+	root_id: RawPduId,
+) -> (usize, Option<Pdu>) {
+	let limit = self
+		.services
+		.server
+		.config
+		.rooms
+		.relations
+		.thread_summary_search_limit;
+
+	self.services
+		.threads
+		.thread_replies(root_id, limit)
+		.ignore_err()
+		.fold((0, None), async |(hidden, newest): (usize, Option<Pdu>), (_, reply)| {
+			let shown = self.shown_to(sender_user, ignored, &reply).await;
+
+			match shown {
+				| true => (hidden, newest.or(Some(reply))),
+				| false => (hidden.saturating_add(1), newest),
+			}
+		})
+		.await
 }
 
 /// MSC4025: the stored thread bundle carries a full `latest_event` of any
@@ -323,123 +508,19 @@ fn replacement_children<'a>(
 		})
 }
 
-/// Evaluate one thread root against the requester's ignore list.
+/// The spec'd redacted form of a thread root whose sender the requester ignores.
 ///
-/// A cheap participant intersection gates the reply walk. One walk then yields
-/// the replacement `latest_event`, the ignored-aware `count`, and the
-/// summary-omission verdict when every reply is ignored. A root whose replies
-/// are not indexed adjusts nothing beyond its own redacted form.
+/// Content side only (MSC3856). `None` when the ignore list does not hide the
+/// root, or on a redaction failure, since serving it unredacted then matches the
+/// reference implementation.
 #[implement(Service)]
 #[tracing::instrument(skip_all, level = "trace")]
-pub async fn ignored_thread_view(
+pub async fn redacted_root(
 	&self,
-	sender_user: &UserId,
-	ignored: &BTreeSet<OwnedUserId>,
+	ignored: Option<&IgnoredUserListEventContent>,
 	root: &Pdu,
-) -> IgnoredThreadView {
-	let Ok(root_id) = self
-		.services
-		.timeline
-		.get_pdu_id(root.event_id())
-		.await
-	else {
-		return Unchanged;
-	};
-
-	let participants = self
-		.services
-		.threads
-		.get_participants(&root_id)
-		.await
-		.unwrap_or_default();
-
-	if !participants
-		.iter()
-		.any(|user| ignored.contains(user))
-	{
-		return Unchanged;
-	}
-
-	let root_pid: PduId = root_id.into();
-	let replies = self
-		.get_relations(
-			root_pid.shortroomid,
-			root_pid.count,
-			None,
-			Direction::Backward,
-			Some(sender_user),
-		)
-		.ready_filter_map(|(_, pdu)| {
-			pdu.get_content()
-				.is_ok_and(|content: ExtractRelatesTo| {
-					matches!(content.relates_to, Relation::Thread(_))
-				})
-				.then_some(pdu)
-		});
-
-	let fold = |(total, unignored, latest): (usize, usize, Option<Pdu>), pdu: Pdu| match ignored
-		.contains(pdu.sender())
-	{
-		| true => (total.saturating_add(1), unignored, latest),
-		| false => (total.saturating_add(1), unignored.saturating_add(1), latest.or(Some(pdu))),
-	};
-
-	let (total, unignored, latest) = replies.ready_fold((0, 0, None), fold).await;
-
-	if total == 0 {
-		return match self.redacted_root(ignored, root).await {
-			| None => Unchanged,
-			| root => Adjusted { root, count: None, latest: None },
-		};
-	}
-
-	if unignored == 0 {
-		return WithoutSummary {
-			root: self.redacted_root(ignored, root).await,
-		};
-	}
-
-	let swap = root
-		.thread_latest_event()
-		.ok()
-		.flatten()
-		.is_some_and(|(_, sender)| ignored.contains(&sender));
-
-	let latest = match swap.then_some(latest).flatten() {
-		| None => None,
-		| Some(reply) => {
-			// MSC4025: the swapped-in reply must not reopen the erased-sender
-			// seam the bundle pass gates on the stored latest.
-			let reply = self
-				.services
-				.state_accessor
-				.erased_view(sender_user, &reply)
-				.await
-				.unwrap_or(reply);
-
-			Some(reply.into_format())
-		},
-	};
-
-	let count = unignored.ne(&total).then_some(unignored);
-
-	let root = self.redacted_root(ignored, root).await;
-
-	if root.is_none() && count.is_none() && latest.is_none() {
-		return Unchanged;
-	}
-
-	Adjusted { root, count, latest }
-}
-
-/// The spec'd redacted form of an ignored sender's thread root, content side
-/// only; `None` when the sender is not ignored, or on a redaction failure
-/// (serving unredacted then matches the reference implementation).
-#[implement(Service)]
-#[tracing::instrument(skip_all, level = "trace")]
-async fn redacted_root(&self, ignored: &BTreeSet<OwnedUserId>, root: &Pdu) -> Option<Box<Pdu>> {
-	ignored
-		.contains(root.sender())
+) -> Option<Pdu> {
+	is_ignored_event(ignored, root)
 		.then_async(async || {
 			self.services
 				.state
@@ -448,7 +529,6 @@ async fn redacted_root(&self, ignored: &BTreeSet<OwnedUserId>, root: &Pdu) -> Op
 				.log_err()
 				.ok()
 				.and_then(|rules| root.redacted(&rules.redaction).log_err().ok())
-				.map(Box::new)
 		})
 		.await
 		.flatten()

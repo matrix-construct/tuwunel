@@ -19,6 +19,10 @@ mod client;
 #[path = "client/event.rs"]
 mod event;
 
+#[expect(dead_code)] // Only the raw GET is used from the add-on.
+#[path = "client/get.rs"]
+mod get;
+
 #[expect(dead_code)] // Only the self-membership action is used from the add-on.
 #[path = "client/membership.rs"]
 mod membership;
@@ -240,31 +244,4 @@ async fn edit(&self, room_id: &RoomId, txn: &str, root: &EventId) -> Result<Owne
 	let path = format!("rooms/{room_id}/send/m.room.message/{txn}");
 
 	self.put_event(&path, &content).await
-}
-
-#[implement(Client, params = "<'_>")]
-async fn threads(&self, room_id: &RoomId, limit: usize, from: Option<&str>) -> Result<Value> {
-	let url = format!("{}/_matrix/client/v1/rooms/{room_id}/threads", self.base);
-	let request = self
-		.services
-		.client
-		.clients
-		.default
-		.get(url)
-		.bearer_auth(self.token)
-		.query(&[("limit", limit)]);
-
-	let request = match from {
-		| None => request,
-		| Some(from) => request.query(&[("from", from)]),
-	};
-
-	let response = request
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	Ok(response)
 }

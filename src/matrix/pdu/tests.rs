@@ -549,6 +549,36 @@ fn thread_latest_event_rejects_null_bundle_fields() {
 }
 
 #[test]
+fn thread_count_reads_only_the_thread_bundle_count() {
+	let counted = member_pdu(&json!({
+		"m.relations": {
+			"m.replace": { "count": 7 },
+			"m.thread": { "count": 3, "current_user_participated": false },
+		},
+	}));
+
+	assert_eq!(
+		counted
+			.thread_count()
+			.expect("valid thread count"),
+		Some(3)
+	);
+
+	let threadless = member_pdu(&json!({ "m.relations": { "m.replace": { "count": 7 } } }));
+
+	assert_eq!(
+		threadless
+			.thread_count()
+			.expect("valid relations"),
+		None
+	);
+
+	let malformed = member_pdu(&json!({ "m.relations": { "m.thread": { "count": "3" } } }));
+
+	assert!(malformed.thread_count().is_err(), "a non-numeric count was read");
+}
+
+#[test]
 fn remove_thread_latest_transaction_id_for_other_user() {
 	let mut pdu = member_pdu(&json!({
 		"age": 4612,
