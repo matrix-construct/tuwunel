@@ -480,7 +480,7 @@
     "section": "global.rooms.policy_server",
     "field": "enable_policy_servers",
     "empty": "[global]\n[global.rooms.policy_server]\n",
-    "partial": "[global]\n[global.rooms.policy_server]\nenable = true\n",
+    "partial": "[global]\n[global.rooms.policy_server]\nenable = false\n",
     "unknown_input": "[global.rooms.policy_server]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
     "unknown_path": "rooms.policy_server.future_setting",
     "runtime_path": "rooms.policy_server.runtime_extra"

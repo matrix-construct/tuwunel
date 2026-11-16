@@ -101,7 +101,7 @@
   "dns_tcp_fallback": "false",
   "dns_timeout": "19",
   "emergency_password": "Some(\"baseline-emergency_password\")",
-  "enable_policy_servers": "true",
+  "enable_policy_servers": "false",
   "enable_set_displayname": "false",
   "encryption_enabled_by_default_for_room_type": "Some(\"baseline-encryption_enabled_by_default_for_room_type\")",
   "enforce_erasure_over_federation": "false",

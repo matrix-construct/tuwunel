@@ -478,16 +478,22 @@ pub struct Joins {
 /// Room policy servers (MSC4284)
 ///
 /// A room can name a policy server in its `m.room.policy` state event; that
-/// server is asked to sign each event before it federates. These keys decide
-/// whether this server takes part. Off by default, in which case policy
-/// servers are ignored: outgoing events are not sent for signing and
-/// incoming events are not checked.
+/// server is asked to sign each event before it federates. On by default,
+/// since the specification requires every server in such a room to take
+/// part: an outgoing event the policy server does not sign is not sent and
+/// the client request fails, and an incoming one is soft-failed.
 ///
 /// Tips:
-/// - When enabled, an outgoing event the policy server refuses is not sent
-///   and the client request fails; an incoming event it refuses is
-///   soft-failed. When the policy server cannot be reached, events pass.
-/// - `request_timeout` has no effect unless `enable = true`.
+/// - A refusal is always honoured. `fail_open = true` lets events through
+///   when the policy server gives no verdict; together with a small
+///   `request_timeout` it sends after a short wait when the policy server is
+///   slow or down.
+/// - A local user's leave, a kick or a ban is sent even when the policy
+///   server gives no verdict, so an outage never traps users in a room.
+/// - Each request can take up to `request_timeout`, and other local sends
+///   to the same room wait behind it.
+/// - `advisory_room_versions`, `fail_open` and `request_timeout` have no
+///   effect while `enable = false`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -496,28 +502,58 @@ pub struct Joins {
 	group = "true"
 )]
 pub struct PolicyServer {
-	/// Requests policy-server signatures for outgoing events under
+	/// Takes part in room policy servers under
 	/// [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284).
 	///
-	/// For a room with a valid `m.room.policy` state event, we request a
-	/// signature from its policy server's federation `/sign` endpoint before
-	/// federating each event. Refusal aborts the local request; network and
-	/// timeout failures fail open with a warning log so a transient outage
-	/// does not silently take the room offline.
+	/// For a room with a valid `m.room.policy` state event, each outgoing
+	/// event is sent to the policy server's federation `/sign` endpoint before
+	/// it federates, and incoming events are checked for its signature.
+	/// Turning this off is not recommended: other servers in the room keep
+	/// enforcing, so local users see events the rest of the room hides, and
+	/// events sent from here are soft-failed elsewhere when the policy server
+	/// would have refused them.
+	///
+	/// reloadable: yes
+	/// default: true
+	/// legacy: enable_policy_servers
+	#[serde(default = "true_fn")]
+	pub enable: bool,
+
+	/// Applies policy servers in rooms whose version treats the signature as
+	/// advisory.
+	///
+	/// In these versions an event without a valid policy-server signature is
+	/// soft-failed rather than failing authorization: version 12 and every
+	/// earlier version. False ignores policy servers in those rooms only.
+	///
+	/// reloadable: yes
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub advisory_room_versions: bool,
+
+	/// Lets events through when the policy server gives no verdict.
+	///
+	/// By default an outgoing event is not sent, and an incoming one is
+	/// soft-failed, unless the policy server signs it. When true, an event
+	/// passes when the policy server cannot be reached, times out, is backed
+	/// off, answers with an error other than a refusal, or returns a signature
+	/// that fails verification, and when this server's configuration forbids
+	/// contacting it. A refusal is honoured either way.
 	///
 	/// reloadable: yes
 	/// default: false
-	/// legacy: enable_policy_servers
 	#[serde(default)]
-	pub enable: bool,
+	pub fail_open: bool,
 
 	/// Sets the policy-server request timeout in seconds under
 	/// [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284).
 	///
-	/// This applies to outbound `/sign` calls and inbound signature fetches.
+	/// This applies to outbound `/sign` calls and inbound signature fetches. A
+	/// local send waits up to this long for its signature, and other local
+	/// sends to the same room wait behind it.
 	///
 	/// reloadable: yes
-	/// default: 5
+	/// default: 30
 	/// legacy: policy_server_request_timeout
 	#[serde(default = "default_request_timeout")]
 	pub request_timeout: u64,
@@ -735,7 +771,9 @@ impl Default for Joins {
 impl Default for PolicyServer {
 	fn default() -> Self {
 		Self {
-			enable: Default::default(),
+			enable: true_fn(),
+			advisory_room_versions: true_fn(),
+			fail_open: Default::default(),
 			request_timeout: default_request_timeout(),
 		}
 	}
@@ -790,7 +828,7 @@ fn default_max_make_join_per_attempt() -> usize { 48 }
 
 fn default_max_attempts_per_request() -> usize { 3 }
 
-fn default_request_timeout() -> u64 { 5 }
+fn default_request_timeout() -> u64 { 30 }
 
 fn default_thread_latest_reply_search_limit() -> usize { 1024 }
 

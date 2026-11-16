@@ -400,7 +400,7 @@ max_attempts_per_request = 11
 max_make_join_per_attempt = 10
 
 [global.rooms.policy_server]
-enable = true
+enable = false
 request_timeout = 11
 
 [global.rooms.redaction]

@@ -30,6 +30,7 @@ use crate::{
 		media::UrlPreview,
 		proxy::{ProxySnapshot, parse_environment_proxy_url},
 		regenerate::schema,
+		rooms::PolicyServer,
 	},
 	matrix::MAX_PREV_EVENTS,
 	utils::hash::{password, verify_password},
@@ -154,6 +155,25 @@ fn admin_escape_commands_default_to_off() {
 
 fn default_config() -> Config {
 	config_from_toml("[global]\n").expect("default config should parse")
+}
+
+#[test]
+fn policy_servers_default_to_the_specified_behaviour() {
+	let empty = config_from_toml("[global]\n[global.rooms.policy_server]\n")
+		.expect("an empty policy server section should parse");
+
+	let sections = [
+		default_config().rooms.policy_server,
+		empty.rooms.policy_server,
+		PolicyServer::default(),
+	];
+
+	for section in sections {
+		assert!(section.enable, "{section:?}");
+		assert!(section.advisory_room_versions, "{section:?}");
+		assert!(!section.fail_open, "{section:?}");
+		assert_eq!(section.request_timeout, 30, "{section:?}");
+	}
 }
 
 #[test]
