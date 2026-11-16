@@ -65,7 +65,7 @@ pub(crate) async fn get_notifications_route(
 				.await
 				.ok()
 				.filter(|event| !event.is_redacted())?
-				.without_private_unless_sender(Some(sender_user));
+				.served_unfolded_to(Some(sender_user));
 
 			let read = services
 				.pusher

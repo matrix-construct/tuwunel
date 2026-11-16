@@ -333,7 +333,7 @@ async fn get_member_event(
 	services
 		.state_accessor
 		.room_state_get(room_id, &StateEventType::RoomMember, user_id.as_str())
-		.map_ok(|event| event.without_private_unless_sender(Some(sender_user)))
+		.map_ok(|event| event.served_unfolded_to(Some(sender_user)))
 		.map_ok(Event::into_format)
 		.await
 		.ok()

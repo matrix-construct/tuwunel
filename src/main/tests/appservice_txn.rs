@@ -1,25 +1,20 @@
 #![cfg(test)]
 
-use std::{fs::remove_dir_all, iter::once, str::from_utf8, sync::Arc, time::Duration};
+use std::{fs::remove_dir_all, iter::once, sync::Arc};
 
 use serde_json::{Value, json};
-use tokio::{
-	io::{AsyncReadExt, AsyncWriteExt},
-	net::{TcpListener, TcpStream},
-	spawn,
-	sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
-	time::timeout,
-};
+use tokio::{net::TcpListener, spawn, sync::mpsc::unbounded_channel};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Err, Result, err,
-	ruma::{
-		DeviceId, UserId,
-		api::appservice::{Namespace, Namespaces, Registration, RegistrationInit},
-		device_id,
-	},
+	ruma::{DeviceId, UserId, device_id},
 };
 use tuwunel_service::{Services, users::DeviceListChange};
+
+use self::stub::{Stub, parse, recv_txn, register, serve};
+
+#[path = "appservice/stub.rs"]
+mod stub;
 
 const TO_DEVICE: &str = "de.sorunome.msc2409.to_device";
 const DEVICE_LISTS: &str = "org.matrix.msc3202.device_lists";
@@ -66,11 +61,27 @@ async fn run_cases(services: &Arc<Services>) -> Result {
 	let url = format!("http://{}", listener.local_addr()?);
 
 	let (tx, mut rx) = unbounded_channel();
-	let stub = spawn(stub_appservice(listener, tx));
+	let stub = spawn(serve(listener, tx));
 
 	let server_name = services.globals.server_name();
-	register(services, "voicebridge_on", &url, "_von", "@_von_.*", true).await?;
-	register(services, "voicebridge_off", &url, "_voff", "@_voff_.*", false).await?;
+	let on = Stub {
+		id: "voicebridge_on",
+		url: &url,
+		sender_localpart: "_von",
+		users: "@_von_.*",
+		msc3202: true,
+	};
+
+	let off = Stub {
+		id: "voicebridge_off",
+		sender_localpart: "_voff",
+		users: "@_voff_.*",
+		msc3202: false,
+		..on
+	};
+
+	register(services, &on).await?;
+	register(services, &off).await?;
 
 	let on_ghost = UserId::parse_with_server_name("_von_ghost", server_name)?;
 	let off_ghost = UserId::parse_with_server_name("_voff_ghost", server_name)?;
@@ -141,49 +152,6 @@ async fn send_to_device(
 		.await
 }
 
-async fn register(
-	services: &Services,
-	id: &str,
-	url: &str,
-	sender_localpart: &str,
-	user_regex: &str,
-	msc3202: bool,
-) -> Result {
-	let mut namespaces = Namespaces::new();
-	namespaces.users = vec![Namespace::new(true, user_regex.to_owned())];
-
-	let mut registration: Registration = RegistrationInit {
-		id: id.to_owned(),
-		url: Some(url.to_owned()),
-		as_token: format!("{id}_as_token"),
-		hs_token: format!("{id}_hs_token"),
-		sender_localpart: sender_localpart.to_owned(),
-		namespaces,
-		rate_limited: None,
-		protocols: None,
-	}
-	.into();
-
-	registration.msc3202_transaction_extensions = msc3202;
-
-	services
-		.appservice
-		.register_appservice(registration)
-		.await
-}
-
-async fn recv_txn(rx: &mut UnboundedReceiver<(String, Vec<u8>)>) -> Result<(String, Vec<u8>)> {
-	timeout(Duration::from_secs(10), rx.recv())
-		.await
-		.map_err(|_| err!("timed out waiting for an appservice transaction"))?
-		.ok_or_else(|| err!("stub appservice channel closed"))
-}
-
-fn parse(body: &[u8]) -> Result<Value> {
-	serde_json::from_slice(body)
-		.map_err(|e| err!("appservice transaction body was not json: {e}"))
-}
-
 fn assert_to_device(txn: &Value, target: &UserId, device: &DeviceId, sender: &UserId) -> Result {
 	let event = txn
 		.get(TO_DEVICE)
@@ -244,79 +212,4 @@ fn assert_device_lists_changed(txn: &Value, target: &UserId) -> Result {
 		.any(|user| user.as_str() == Some(target.as_str()))
 		.then_some(())
 		.ok_or_else(|| err!("{DEVICE_LISTS}.changed did not contain the re-keyed user"))
-}
-
-/// Minimal appservice transaction endpoint: captures the `{txnId}` path segment
-/// and the request body from each `PUT /transactions/{txnId}`, then answers an
-/// empty `200`.
-async fn stub_appservice(listener: TcpListener, tx: UnboundedSender<(String, Vec<u8>)>) {
-	while let Ok((mut socket, _)) = listener.accept().await {
-		if let Some((txn_id, body)) = read_request(&mut socket).await {
-			tx.send((txn_id, body)).ok();
-		}
-
-		socket
-			.write_all(
-				b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-			)
-			.await
-			.ok();
-		socket.flush().await.ok();
-	}
-}
-
-async fn read_request(socket: &mut TcpStream) -> Option<(String, Vec<u8>)> {
-	let mut buf = Vec::new();
-	let mut chunk = [0_u8; 4096];
-	loop {
-		if let Some(head_end) = find(&buf, b"\r\n\r\n") {
-			let content_length = content_length(&buf[..head_end])?;
-			let body_start = head_end.checked_add(4)?;
-			let body_end = body_start.checked_add(content_length)?;
-			if buf.len() >= body_end {
-				let txn_id = txn_id(&buf[..head_end])?;
-				let body = buf[body_start..body_end].to_vec();
-
-				return Some((txn_id, body));
-			}
-		}
-
-		let read = socket.read(&mut chunk).await.ok()?;
-		if read == 0 {
-			return None;
-		}
-
-		buf.extend_from_slice(&chunk[..read]);
-	}
-}
-
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-	haystack
-		.windows(needle.len())
-		.position(|window| window == needle)
-}
-
-fn content_length(head: &[u8]) -> Option<usize> {
-	from_utf8(head)
-		.ok()?
-		.lines()
-		.find_map(|line| {
-			line.split_once(':')
-				.filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-		})
-		.and_then(|(_, value)| value.trim().parse().ok())
-}
-
-fn txn_id(head: &[u8]) -> Option<String> {
-	from_utf8(head)
-		.ok()?
-		.lines()
-		.next()?
-		.split(' ')
-		.nth(1)?
-		.rsplit('/')
-		.next()?
-		.split('?')
-		.next()
-		.map(ToOwned::to_owned)
 }

@@ -16,7 +16,7 @@ use serde::{
 	ser::SerializeMap,
 };
 use serde_json::value::{RawValue as RawJsonValue, Value as JsonValue, to_raw_value};
-use tuwunel_core::{Result, err, implement, result::LogErr, utils::BoolExt, warn};
+use tuwunel_core::{Error, Result, err, implement, result::LogErr, utils::BoolExt, warn};
 
 use super::{Pdu, Unsigned};
 
@@ -144,11 +144,7 @@ pub fn remove_private(&mut self) {
 	}
 
 	self.unsigned = without_private(raw)
-		.inspect_err(|error| {
-			// Only a corrupt or old remote row has this shape; repair it with `query raw put`.
-			// Stock release builds strip `debug_warn!`, and nothing else would show it.
-			warn!(event_id = %self.event_id, %error, "Omitting unreadable unsigned data.");
-		})
+		.inspect_err(|error| self.warn_unreadable(error))
 		.ok();
 }
 
@@ -158,6 +154,76 @@ fn without_private(raw: &str) -> Result<Unsigned> {
 	unsigned.retain(|key, _| !PRIVATE.contains(key));
 
 	raw_as(&unsigned)
+}
+
+/// Readies the event for a path that serves it without folding aggregations.
+///
+/// Removes the private fields unless the requester sent the event, and the
+/// stored aggregations always, since such a path folds none for the requester.
+/// Unlike [`Pdu::served_to`], it adds no age.
+#[implement(Pdu)]
+#[must_use]
+pub fn served_unfolded_to(self, user_id: Option<&UserId>) -> Self {
+	self.without_private_unless_sender(user_id)
+		.without_aggregations()
+}
+
+/// Returns the event without the aggregations stored in its unsigned data.
+///
+/// The by-value form of [`Pdu::remove_aggregations`], for chains that own the
+/// event.
+#[implement(Pdu)]
+#[must_use]
+pub fn without_aggregations(mut self) -> Self {
+	self.remove_aggregations();
+
+	self
+}
+
+/// Removes the aggregations stored in unsigned event metadata.
+///
+/// Paths that serve an event without folding its aggregations for the
+/// requester call this, since a stored thread bundle copies another user's
+/// newest reply. All of `m.relations` goes, and an emptied object with it;
+/// other fields are kept. Unsigned data that may hold the key but cannot be
+/// read is logged and dropped whole, so the event is still served.
+#[implement(Pdu)]
+pub fn remove_aggregations(&mut self) {
+	let Some(unsigned) = &self.unsigned else {
+		return;
+	};
+
+	let raw = unsigned.json().get();
+
+	// An escaped key spelling needs a backslash, so it cannot pass this guard.
+	if !raw.contains("m.relations") && !raw.contains('\\') {
+		return;
+	}
+
+	self.unsigned = without_relations(unsigned)
+		.inspect_err(|error| self.warn_unreadable(error))
+		.ok()
+		.flatten();
+}
+
+fn without_relations(unsigned: &Unsigned) -> Result<Option<Unsigned>> {
+	let object = raw_object(unsigned.json(), "unsigned")?;
+
+	match object.len() {
+		| _ if !object.contains_key("m.relations") => Ok(Some(unsigned.clone())),
+		| 1 => Ok(None),
+		| _ => raw_as(&RawObjectRemove::new(&object, "m.relations")).map(Some),
+	}
+}
+
+/// Logs unsigned data dropped because it cannot be read.
+///
+/// Only a corrupt or old remote row has this shape; repair it with `query raw
+/// put`. Stock release builds strip `debug_warn!`, and nothing else would show
+/// it.
+#[implement(Pdu)]
+fn warn_unreadable(&self, error: &Error) {
+	warn!(event_id = %self.event_id, %error, "Omitting unreadable unsigned data.");
 }
 
 /// State-section serving strips the stored `prev_content`/`prev_sender`

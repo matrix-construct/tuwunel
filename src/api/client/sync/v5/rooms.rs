@@ -335,7 +335,7 @@ async fn leave_or_ban_response(
 			.inspect_err(|error| warn!(%room_id, %sender_user, %error, "Unreadable member event"))
 			.ok()
 			.flatten()
-			.map(|event| event.without_private_unless_sender(Some(sender_user))),
+			.map(|event| event.served_unfolded_to(Some(sender_user))),
 		| _ => own_departure(services, room_id, sender_user).await,
 	};
 

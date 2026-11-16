@@ -896,6 +896,81 @@ fn private_removal_drops_unparsable_unsigned() {
 }
 
 #[test]
+fn remove_aggregations_keeps_other_unsigned_fields() {
+	let unsigned = json!({
+		"prev_content": { "membership": "invite" },
+		"transaction_id": "secret",
+		"m.relations": {
+			"m.replace": { "event_id": "$edit:example.com" },
+			"m.thread": { "count": 1 },
+		},
+	});
+
+	let pdu = member_pdu(&unsigned).without_aggregations();
+	let unsigned = pdu.unsigned.expect("unsigned kept");
+	let unsigned: serde_json::Value =
+		serde_json::from_str(unsigned.json().get()).expect("valid unsigned");
+
+	let expected = json!({
+		"prev_content": { "membership": "invite" },
+		"transaction_id": "secret",
+	});
+
+	assert_eq!(unsigned, expected, "removal changed the other fields");
+}
+
+#[test]
+fn remove_aggregations_omits_emptied_unsigned() {
+	let unsigned = json!({ "m.relations": { "m.thread": { "count": 1 } } });
+	let pdu = member_pdu(&unsigned).without_aggregations();
+
+	assert!(pdu.unsigned.is_none(), "kept an emptied unsigned object");
+}
+
+#[test]
+fn remove_aggregations_decodes_escaped_key() {
+	let unsigned = r#"{"m\u002erelations":{"m.thread":{"count":1}},"age":1}"#;
+	let pdu = member_pdu_with_raw_unsigned(unsigned).without_aggregations();
+	let unsigned = pdu.unsigned.expect("unsigned kept");
+
+	assert_eq!(unsigned.json().get(), r#"{"age":1}"#, "escaped relations key survived");
+}
+
+#[test]
+fn remove_aggregations_drops_unreadable_unsigned() {
+	let unreadable = [
+		r#""m.relations""#,
+		r#"["m.relations", {}]"#,
+		r#"{ "m.relations": {}, "m.relations": {} }"#,
+	];
+
+	for unsigned in unreadable {
+		let pdu = member_pdu_with_raw_unsigned(unsigned).without_aggregations();
+
+		assert!(pdu.unsigned.is_none(), "kept unreadable unsigned: {unsigned}");
+	}
+}
+
+#[test]
+fn remove_aggregations_leaves_absent_untouched() {
+	let absent = Pdu { unsigned: None, ..member_pdu(&json!({})) };
+
+	assert!(absent.without_aggregations().unsigned.is_none(), "added unsigned data");
+
+	let untouched = [
+		r#"{"prev_sender":"@bob:example.com","age":1}"#,
+		r#"{"prev_content":{"topic":"m.relations"},"age":1}"#,
+	];
+
+	for unsigned in untouched {
+		let pdu = member_pdu_with_raw_unsigned(unsigned).without_aggregations();
+		let kept = pdu.unsigned.expect("unsigned kept");
+
+		assert_eq!(kept.json().get(), unsigned, "rewrote unsigned without aggregations");
+	}
+}
+
+#[test]
 fn outgoing_federation_omits_unsigned() {
 	let unsigned = json!({
 		"transaction_id": "secret",

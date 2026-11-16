@@ -221,7 +221,7 @@ async fn txn_part(&self, info: &RegistrationInfo, msc3202: bool, event: &Sending
 				pdu.without_private_unless_sender(None)
 			};
 
-			Part::Pdu(pdu.to_format(), sender)
+			Part::Pdu(pdu.without_aggregations().to_format(), sender)
 		},
 		| SendingEvent::Edu(edu) => {
 			if !info.registration.receive_ephemeral {

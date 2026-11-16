@@ -14,7 +14,7 @@ use tuwunel_core::{
 		stream::{TryTools, TryWidebandExt},
 	},
 };
-use tuwunel_matrix::{Event, PduCount};
+use tuwunel_matrix::{Event, PduCount, PduEvent};
 
 use crate::{Ruma, visibility_filter};
 
@@ -71,7 +71,7 @@ pub(crate) async fn room_initial_sync_route(
 		.state_accessor
 		.state_full_pdus_strict(shortstatehash)
 		.map_ok(Event::into_pdu)
-		.map_ok(|pdu| pdu.without_private_unless_sender(Some(sender_user)))
+		.map_ok(|pdu| pdu.served_unfolded_to(Some(sender_user)))
 		.map_ok(Event::into_format)
 		.try_collect::<Vec<_>>();
 
@@ -125,6 +125,7 @@ pub(crate) async fn room_initial_sync_route(
 			chunk: events
 				.into_iter()
 				.map(at!(1))
+				.map(PduEvent::without_aggregations)
 				.map(Event::into_format)
 				.collect(),
 		}

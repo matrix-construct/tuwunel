@@ -100,7 +100,7 @@ pub(crate) async fn get_state_events_route(
 		.state_accessor
 		.state_full_pdus(shortstatehash)
 		.map(Event::into_pdu)
-		.map(|pdu| pdu.without_private_unless_sender(Some(sender_user)))
+		.map(|pdu| pdu.served_unfolded_to(Some(sender_user)))
 		.broad_then(async |pdu| with_membership(&services, pdu, sender_user, encrypted).await)
 		.map(Event::into_format)
 		.collect()
@@ -158,7 +158,7 @@ pub(crate) async fn get_state_events_for_key_route(
 		.state_accessor
 		.state_get(shortstatehash, &body.event_type, &body.state_key)
 		.map_err(failed)
-		.map_ok(|event| event.without_private_unless_sender(Some(sender_user)))
+		.map_ok(|event| event.served_unfolded_to(Some(sender_user)))
 		.await?;
 
 	let event_or_content = match body.format {

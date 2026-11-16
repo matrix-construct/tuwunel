@@ -159,7 +159,7 @@ where
 		.wide_filter_map(|item| listen_filter(listen, item))
 		.take(EVENT_LIMIT)
 		.ready_fold((None, None, Vec::new()), |(first, _, mut chunk), (count, pdu)| {
-			chunk.push(pdu.into_format());
+			chunk.push(pdu.without_aggregations().into_format());
 			(first.or(Some(count)), Some(count), chunk)
 		})
 		.await;

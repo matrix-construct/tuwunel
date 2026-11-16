@@ -315,7 +315,7 @@ async fn procure_room_state(
 		.state_accessor
 		.room_state_full_pdus(room_id)
 		.map_ok(Event::into_pdu)
-		.map_ok(|pdu| pdu.without_private_unless_sender(Some(sender_user)))
+		.map_ok(|pdu| pdu.served_unfolded_to(Some(sender_user)))
 		.map_ok(Event::into_format)
 		.try_collect()
 		.await?;

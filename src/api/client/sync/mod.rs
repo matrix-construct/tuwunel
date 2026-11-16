@@ -270,11 +270,12 @@ fn invite_sender(
 
 /// Strips the unsigned fields a state section does not serve.
 ///
-/// Fields private to the sender go unless the requester sent the event. The
-/// stored `prev_content`/`prev_sender` pair goes too (Synapse injects it on
-/// timeline fetches only), except on the requester's own membership and on
-/// events duplicated from the returned timeline (MSC4222, full_state), the
-/// copies clients read membership transitions from.
+/// Fields private to the sender go unless the requester sent the event, and
+/// stored aggregations always go, since state events receive none. The stored
+/// `prev_content`/`prev_sender` pair goes too (Synapse injects it on timeline
+/// fetches only), except on the requester's own membership and on events
+/// duplicated from the returned timeline (MSC4222, full_state), the copies
+/// clients read membership transitions from.
 fn strip_state_unsigned(
 	mut pdu: PduEvent,
 	sender_user: &UserId,
@@ -284,6 +285,7 @@ fn strip_state_unsigned(
 		*pdu.kind() == RoomMember && pdu.state_key() == Some(sender_user.as_str());
 
 	pdu.remove_private_unless_sender(Some(sender_user));
+	pdu.remove_aggregations();
 
 	if !own_membership && !in_timeline(&pdu) {
 		pdu.remove_prev_state().log_err().ok();
@@ -319,7 +321,7 @@ async fn own_departure(
 				Some(MembershipState::Leave | MembershipState::Ban)
 			)
 		})
-		.map(|event| event.without_private_unless_sender(Some(user_id)))
+		.map(|event| event.served_unfolded_to(Some(user_id)))
 }
 
 /// Builds a minimal leave event for a left room whose state supplies none.

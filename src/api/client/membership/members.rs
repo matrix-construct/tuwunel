@@ -70,7 +70,7 @@ pub(crate) async fn get_member_events_route(
 					.is_ok_and(membership_filter)
 			})
 			.map(Event::into_pdu)
-			.map(|pdu| pdu.without_private_unless_sender(Some(body.sender_user())))
+			.map(|pdu| pdu.served_unfolded_to(Some(body.sender_user())))
 			.map(Event::into_format)
 			.collect()
 			.await,
