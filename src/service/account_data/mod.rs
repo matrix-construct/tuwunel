@@ -21,11 +21,16 @@ use ruma::{
 	push::{RuleKind, Ruleset},
 	serde::Raw,
 };
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, value::RawValue as RawJsonValue};
 use tuwunel_core::{
 	Err, Result, at, err, implement,
-	utils::{MutexMap, ReadyExt, TryReadyExt, result::LogErr, stream::TryIgnore},
+	utils::{
+		MutexMap, ReadyExt, TryReadyExt,
+		json::is_empty_object,
+		result::{LogErr, NotFound},
+		stream::TryIgnore,
+	},
 };
 use tuwunel_database::{Deserialized, Handle, Ignore, Interfix, Json, Map};
 
@@ -55,20 +60,30 @@ pub const MAX_RULE_BYTES: usize = 1024;
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
-	/// Serializes each user's updates and erases, from the first read to the
-	/// commit.
+	/// Serializes each user's updates, merges and erases, from the first read
+	/// to the commit.
 	///
 	/// A superseded revision is keyed by a count that only the pointer names, so
 	/// replacing it needs that read; skipping orphans on read instead would cost
-	/// every sync. An erase holds the lock across its scans, so no update lands
-	/// between a scan and the commit. An entry lives only while a writer for the
-	/// user holds or awaits the lock.
+	/// every sync. A merge holds the lock from its read of the stored event and an
+	/// erase across its scans, so no update lands between either and its commit.
+	/// An entry lives only while a writer for the user holds or awaits the lock.
 	updating: MutexMap<OwnedUserId, ()>,
 }
 
 struct Data {
 	roomuserdataid_accountdata: Arc<Map>,
 	roomusertype_roomuserdataid: Arc<Map>,
+}
+
+/// A stored account data event with its content left unparsed.
+///
+/// Only whether the content is empty matters to a reader of this, so the
+/// content is borrowed as raw JSON rather than built into a value.
+#[derive(Deserialize)]
+struct Envelope<'a> {
+	#[serde(borrow)]
+	content: &'a RawJsonValue,
 }
 
 impl crate::Service for Service {
@@ -116,12 +131,78 @@ pub async fn update(
 	event_type: RoomAccountDataEventType,
 	data: &serde_json::Value,
 ) -> Result {
+	// Taken before the count, so an update holds no sequence number of its own while it waits.
+	let _updating = self.updating.lock(user_id).await;
+
+	self.write(room_id, user_id, event_type, data)
+		.await
+}
+
+/// Rewrites an account data event from its stored revision under the user's update lock.
+///
+/// `merge` receives the stored event and returns the one to store, or `None` to keep the stored one
+/// and write nothing. A missing event and an MSC3391 tombstone both arrive as `None`, while any
+/// other read failure arrives as the error, so each caller decides whether an unreadable value
+/// blocks its change rather than having it replaced by one built from nothing. An error `merge`
+/// returns is returned without a write, and no other write for the user lands between the read and
+/// the write.
+///
+/// # Panics
+///
+/// Panics when dispatching the global sequence number fails.
+#[implement(Service)]
+#[tracing::instrument(
+	level = "debug",
+	skip_all,
+	fields(
+		?room_id,
+		%user_id,
+		%event_type,
+	),
+)]
+pub async fn modify<T, F>(
+	&self,
+	room_id: Option<&RoomId>,
+	user_id: &UserId,
+	event_type: RoomAccountDataEventType,
+	merge: F,
+) -> Result
+where
+	T: for<'de> Deserialize<'de> + Serialize,
+	F: FnOnce(Result<Option<T>>) -> Result<Option<T>> + Send,
+{
+	let _updating = self.updating.lock(user_id).await;
+
+	let stored = self
+		.stored_event(room_id, user_id, &event_type.to_cow_str())
+		.await;
+
+	let Some(event) = merge(stored)? else {
+		return Ok(());
+	};
+
+	let data = serde_json::to_value(event)?;
+
+	self.write(room_id, user_id, event_type, &data)
+		.await
+}
+
+/// Stores an event as the user's current revision and deletes the one it replaces.
+///
+/// The caller holds the user's update lock, so the pointer read here names the revision the last
+/// write stored.
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn write(
+	&self,
+	room_id: Option<&RoomId>,
+	user_id: &UserId,
+	event_type: RoomAccountDataEventType,
+	data: &serde_json::Value,
+) -> Result {
 	if data.get("type").is_none() || data.get("content").is_none() {
 		return Err!(Request(InvalidParam("Account data doesn't have all required fields.")));
 	}
-
-	// Taken before the count, so an update holds no sequence number of its own while it waits.
-	let _updating = self.updating.lock(user_id).await;
 
 	let key = (room_id, user_id, &event_type);
 	let prev = self
@@ -145,6 +226,38 @@ pub async fn update(
 	txn.execute();
 
 	Ok(())
+}
+
+/// Reads the stored revision of an event for a merge.
+///
+/// A missing event and an MSC3391 tombstone are both absent; any other read or decode failure is
+/// returned.
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn stored_event<T>(
+	&self,
+	room_id: Option<&RoomId>,
+	user_id: &UserId,
+	kind: &str,
+) -> Result<Option<T>>
+where
+	T: for<'de> Deserialize<'de>,
+{
+	self.get_raw(room_id, user_id, kind)
+		.await
+		.present()?
+		.filter(|event| !is_tombstone(event))
+		.map(|event| event.deserialized())
+		.transpose()
+}
+
+/// Whether a stored account data event is an MSC3391 tombstone.
+///
+/// A deletion stores the event with empty content, which delta sync delivers so
+/// clients drop their copy and every other read treats as absent.
+#[must_use]
+pub fn is_tombstone(event: &[u8]) -> bool {
+	serde_json::from_slice(event).is_ok_and(|Envelope { content }| is_empty_object(content))
 }
 
 /// Replaces an account data event with an MSC3391 tombstone.

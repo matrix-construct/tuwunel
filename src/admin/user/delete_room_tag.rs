@@ -1,12 +1,4 @@
-use std::collections::BTreeMap;
-
-use ruma::{
-	OwnedRoomId,
-	events::{
-		RoomAccountDataEventType,
-		tag::{TagEvent, TagEventContent},
-	},
-};
+use ruma::OwnedRoomId;
 use tuwunel_core::Result;
 
 use crate::{admin_command, utils::parse_active_local_user_id};
@@ -20,28 +12,9 @@ pub(super) async fn delete_room_tag(
 ) -> Result {
 	let user_id = parse_active_local_user_id(self.services, &user_id).await?;
 
-	let mut tags_event = self
-		.services
-		.account_data
-		.get_room(&room_id, &user_id, RoomAccountDataEventType::Tag)
-		.await
-		.unwrap_or(TagEvent {
-			content: TagEventContent { tags: BTreeMap::new() },
-		});
-
-	tags_event
-		.content
-		.tags
-		.remove(&tag.clone().into());
-
 	self.services
 		.account_data
-		.update(
-			Some(&room_id),
-			&user_id,
-			RoomAccountDataEventType::Tag,
-			&serde_json::to_value(tags_event).expect("to json value always works"),
-		)
+		.remove_room_tag(&user_id, &room_id, &tag.as_str().into())
 		.await?;
 
 	write!(

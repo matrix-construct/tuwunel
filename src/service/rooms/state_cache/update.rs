@@ -25,7 +25,7 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Result, at, implement, is_not_empty,
+	Result, at, implement, is_equal_to, is_not_empty,
 	utils::{
 		BoolExt, FutureBoolExt, OptionExt, ReadyExt,
 		future::ReadyBoolExt,
@@ -618,48 +618,43 @@ async fn copy_predecessor_direct(
 	user_id: &UserId,
 	predecessor: &RoomId,
 ) -> Result {
-	let Ok(mut direct_event) = self
-		.services
-		.account_data
-		.get_global::<DirectEvent>(user_id, GlobalAccountDataEventType::Direct)
-		.await
-	else {
-		return Ok(());
-	};
-
-	let room_ids_updated =
-		direct_event
-			.content
-			.0
-			.values_mut()
-			.fold(false, |updated, room_ids| {
-				if !room_ids
-					.iter()
-					.any(|direct_room_id| direct_room_id == predecessor)
-				{
-					return updated;
-				}
-
-				room_ids.push(room_id.to_owned());
-
-				true
-			});
-
-	if !room_ids_updated {
-		return Ok(());
-	}
-
 	let event_type = GlobalAccountDataEventType::Direct
 		.to_string()
 		.into();
 
-	let direct_event =
-		serde_json::to_value(&direct_event).expect("failed to serialize DirectEvent");
-
 	self.services
 		.account_data
-		.update(None, user_id, event_type, &direct_event)
+		.modify(None, user_id, event_type, |event: Result<Option<DirectEvent>>| {
+			let event = event
+				.inspect_err(|error| warn!(%error, "Unreadable m.direct, new room not added"))
+				.ok()
+				.flatten()
+				.and_then(|event| with_successor(event, predecessor, room_id));
+
+			Ok(event)
+		})
 		.await
+}
+
+/// The mapping with the room beside its predecessor, absent when no list names the predecessor.
+///
+/// Every counterparty list naming the predecessor gains the room and keeps the
+/// predecessor, so either room still reads as direct.
+fn with_successor(
+	mut event: DirectEvent,
+	predecessor: &RoomId,
+	room_id: &RoomId,
+) -> Option<DirectEvent> {
+	let listed = event
+		.content
+		.values_mut()
+		.filter(|room_ids| room_ids.iter().any(is_equal_to!(predecessor)))
+		.fold(false, |_, room_ids| {
+			room_ids.push(room_id.to_owned());
+			true
+		});
+
+	listed.then_some(event)
 }
 
 #[implement(super::Service)]

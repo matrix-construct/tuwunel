@@ -34,7 +34,9 @@ pub async fn direct_rooms(&self, user_id: &UserId) -> BTreeSet<OwnedRoomId> {
 ///
 /// The room joins the counterparty's list, which is created when this is
 /// their first direct room. A list already naming the room is left alone,
-/// so repeated calls settle on one entry.
+/// so repeated calls settle on one entry. The mapping is merged under the
+/// user's update lock, and one that cannot be read fails the call rather than
+/// being replaced.
 ///
 /// # Panics
 ///
@@ -42,35 +44,21 @@ pub async fn direct_rooms(&self, user_id: &UserId) -> BTreeSet<OwnedRoomId> {
 /// or persisted.
 #[implement(super::Service)]
 pub async fn mark_direct(&self, user_id: &UserId, target: &UserId, room_id: &RoomId) -> Result {
-	let mut content = self
-		.direct_content(user_id)
-		.await
-		.unwrap_or_default();
-
-	let target: &DirectUserIdentifier = target.into();
-	let listed = content
-		.get(target)
-		.is_some_and(|rooms| rooms.iter().any(is_equal_to!(room_id)));
-
-	if listed {
-		return Ok(());
-	}
-
-	content
-		.entry(target.to_owned())
-		.or_default()
-		.push(room_id.to_owned());
-
-	let event = serde_json::to_value(DirectEvent { content })?;
-
 	let event_type = GlobalAccountDataEventType::Direct
 		.to_string()
 		.into();
 
-	self.services
-		.account_data
-		.update(None, user_id, event_type, &event)
-		.await
+	self.modify(None, user_id, event_type, |event: Result<Option<DirectEvent>>| {
+		let content = event?
+			.map(|event| event.content)
+			.unwrap_or_default();
+
+		let event = with_direct_room(content, target.into(), room_id)
+			.map(|content| DirectEvent { content });
+
+		Ok(event)
+	})
+	.await
 }
 
 /// The user's `m.direct` content, absent when they have never had one.
@@ -84,4 +72,24 @@ async fn direct_content(&self, user_id: &UserId) -> Result<DirectEventContent> {
 		.get_global(user_id, GlobalAccountDataEventType::Direct)
 		.await
 		.map(|event: DirectEvent| event.content)
+}
+
+/// The mapping with the room in `target`'s list, absent when it is already there.
+///
+/// A counterparty with no list yet gets one holding just this room, and an
+/// unchanged mapping stores no new revision.
+fn with_direct_room(
+	mut content: DirectEventContent,
+	target: &DirectUserIdentifier,
+	room_id: &RoomId,
+) -> Option<DirectEventContent> {
+	let rooms = content.entry(target.to_owned()).or_default();
+
+	if rooms.iter().any(is_equal_to!(room_id)) {
+		return None;
+	}
+
+	rooms.push(room_id.to_owned());
+
+	Some(content)
 }

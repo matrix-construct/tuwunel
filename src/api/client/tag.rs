@@ -21,29 +21,11 @@ pub(crate) async fn update_tag_route(
 	State(services): State<crate::State>,
 	body: Ruma<create_tag::v3::Request>,
 ) -> Result<create_tag::v3::Response> {
-	let sender_user = body.sender_user();
-
-	let mut tags_event = services
-		.account_data
-		.get_room(&body.room_id, sender_user, RoomAccountDataEventType::Tag)
-		.await
-		.unwrap_or(TagEvent {
-			content: TagEventContent { tags: BTreeMap::new() },
-		});
-
-	tags_event
-		.content
-		.tags
-		.insert(body.tag.clone().into(), body.tag_info.clone());
+	let tag_info = Some(body.tag_info.clone());
 
 	services
 		.account_data
-		.update(
-			Some(&body.room_id),
-			sender_user,
-			RoomAccountDataEventType::Tag,
-			&serde_json::to_value(tags_event)?,
-		)
+		.set_room_tag(body.sender_user(), &body.room_id, body.tag.as_str().into(), tag_info)
 		.await?;
 
 	Ok(create_tag::v3::Response {})
@@ -58,29 +40,9 @@ pub(crate) async fn delete_tag_route(
 	State(services): State<crate::State>,
 	body: Ruma<delete_tag::v3::Request>,
 ) -> Result<delete_tag::v3::Response> {
-	let sender_user = body.sender_user();
-
-	let mut tags_event = services
-		.account_data
-		.get_room(&body.room_id, sender_user, RoomAccountDataEventType::Tag)
-		.await
-		.unwrap_or(TagEvent {
-			content: TagEventContent { tags: BTreeMap::new() },
-		});
-
-	tags_event
-		.content
-		.tags
-		.remove(&body.tag.clone().into());
-
 	services
 		.account_data
-		.update(
-			Some(&body.room_id),
-			sender_user,
-			RoomAccountDataEventType::Tag,
-			&serde_json::to_value(tags_event)?,
-		)
+		.remove_room_tag(body.sender_user(), &body.room_id, &body.tag.as_str().into())
 		.await?;
 
 	Ok(delete_tag::v3::Response {})

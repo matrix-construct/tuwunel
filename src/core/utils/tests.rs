@@ -15,6 +15,7 @@ use futures::{
 	future::{OptionFuture, ready, try_join},
 };
 use itertools::Itertools;
+use serde_json::value::RawValue as RawJsonValue;
 use tokio::{spawn, sync::Barrier};
 use url::Url;
 
@@ -25,6 +26,7 @@ use crate::{
 		debug::str_truncated,
 		future::OptionFutureExt,
 		increment,
+		json::is_empty_object,
 		math::usize_from_f64,
 		set::{
 			difference_sorted_stream2, intersection, intersection_sorted,
@@ -602,4 +604,14 @@ async fn try_unzip_partial_keeps_every_pair_and_error() {
 	assert_eq!(numbers, [1, 2]);
 	assert_eq!(letters, ['a', 'b']);
 	assert!(matches!(errors.as_slice(), [Error::Arithmetic(_)]));
+}
+
+#[test]
+fn is_empty_object_holds_only_for_an_object_without_members() {
+	let raw = |json: &str| RawJsonValue::from_string(json.to_owned()).expect("valid JSON");
+	let empty = ["{}", "{ }", "{\n\t}"].map(raw);
+	let filled = [r#"{"a":1}"#, r#"{ "": {} }"#, "[]", r#""{}""#, "null"].map(raw);
+
+	assert!(empty.iter().all(|json| is_empty_object(json)));
+	assert!(filled.iter().all(|json| !is_empty_object(json)));
 }

@@ -3,7 +3,7 @@
 //! The conversion functions bridge Serde values to Ruma's raw and canonical
 //! representations. A generic deserializer adapts string-backed fields to types
 //! implementing `FromStr`, and a lenient one reads a boolean that may arrive
-//! spelled as a string.
+//! spelled as a string. An empty-object test reads raw JSON without parsing it.
 
 use std::{borrow::Cow, fmt, io, marker::PhantomData, str::FromStr};
 
@@ -11,6 +11,7 @@ use ruma::{
 	CanonicalJsonError, CanonicalJsonObject, canonical_json::try_from_json_map, serde::Raw,
 };
 use serde::{Deserialize, Deserializer, de::IgnoredAny};
+use serde_json::value::RawValue as RawJsonValue;
 
 use crate::Result;
 
@@ -73,6 +74,19 @@ impl io::Write for Counter {
 	}
 
 	fn flush(&mut self) -> io::Result<()> { Ok(()) }
+}
+
+/// Whether raw JSON is an object with no members.
+///
+/// Raw JSON is valid by construction, so an object holding nothing but
+/// whitespace between its braces is the empty one, and the test parses nothing.
+#[must_use]
+pub fn is_empty_object(json: &RawJsonValue) -> bool {
+	json.get()
+		.trim_ascii()
+		.strip_prefix('{')
+		.and_then(|members| members.strip_suffix('}'))
+		.is_some_and(|members| members.trim_ascii().is_empty())
 }
 
 /// Deserializes a string and parses it through `FromStr`.
