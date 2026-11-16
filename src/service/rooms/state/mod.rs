@@ -242,8 +242,10 @@ pub(crate) fn install_force_state(
 /// Record the membership transition a replayed `m.room.member` event carries.
 ///
 /// A replayed invite is judged by the sender named in its stripped state, so a
-/// local invitee's row has to carry one. An event whose state key or content
-/// does not parse is skipped rather than failing the whole replay.
+/// local invitee's row has to carry one. A leave or ban over a recorded
+/// departure keeps that departure's position, which bounds the user's history
+/// visibility; the leave policy still applies. An event whose state key or
+/// content does not parse is skipped rather than failing the whole replay.
 #[implement(Service)]
 async fn force_member_effects(&self, room_id: &RoomId, pdu: &PduEvent) -> Result {
 	let Some(user_id) = pdu
@@ -258,6 +260,20 @@ async fn force_member_effects(&self, room_id: &RoomId, pdu: &PduEvent) -> Result
 	let Ok(membership_event): Result<RoomMemberEventContent> = pdu.get_content() else {
 		return Ok(());
 	};
+
+	// A failed read is an error, not an absence, so it cannot move the boundary.
+	let departure =
+		matches!(membership_event.membership, MembershipState::Leave | MembershipState::Ban)
+			.then_async(|| {
+				self.services
+					.state_cache
+					.get_left_count(room_id, &user_id)
+					.map(NotFound::optional)
+			})
+			.await
+			.transpose()?
+			.flatten()
+			.map(PduCount::from_unsigned);
 
 	let last_state = membership_event
 		.membership
@@ -287,7 +303,7 @@ async fn force_member_effects(&self, room_id: &RoomId, pdu: &PduEvent) -> Result
 			invite_via: None,
 			update_joined_count: false,
 			replaced_join: None,
-			count: PduCount::Normal(*count),
+			count: departure.unwrap_or(PduCount::Normal(*count)),
 		})
 		.await
 }

@@ -8,7 +8,7 @@ use ruma::{
 use tuwunel_core::{
 	Result, debug, debug_info, debug_warn, implement, is_equal_to, trace,
 	utils::{
-		BoolExt,
+		BoolExt, IterStream,
 		stream::{BroadbandExt, ReadyExt},
 	},
 	warn,
@@ -184,7 +184,7 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	}
 
 	// A soft-failed event is not a forward extremity, so it never drives the
-	// room's current state; only an accepted state event resolves forward.
+	// room's current state; an accepted state event or soft-failed branch does.
 	let shortstatehash = self
 		.prepare_accepted_state_after(
 			room_id,
@@ -567,6 +567,11 @@ async fn compute_remaining_extremities(
 	extremities
 }
 
+/// Resolves the room's next current state when an accepted event moves it.
+///
+/// A state event always moves it. So does an event naming a soft-failed prev,
+/// whose branch state may hold the soft-failed event and now meets current
+/// state at a forward extremity; resolution decides whether that event stays.
 #[implement(super::Service)]
 async fn prepare_accepted_state_after(
 	&self,
@@ -577,10 +582,10 @@ async fn prepare_accepted_state_after(
 	soft_fail: bool,
 	state_lock: &RoomMutexGuard,
 ) -> Result<Option<u64>> {
-	incoming_pdu
-		.state_key()
-		.is_some()
-		.and_is(!soft_fail)
+	let moves_state = !soft_fail
+		&& (incoming_pdu.state_key().is_some() || self.adopts_soft_failed(incoming_pdu).await);
+
+	moves_state
 		.then_async(|| {
 			self.resolve_and_prepare_state_after(
 				room_id,
@@ -589,9 +594,21 @@ async fn prepare_accepted_state_after(
 				state_at_incoming_event,
 				state_lock,
 			)
-			.boxed() // cold arm: state event
+			.boxed() // cold arm: state event or adopted branch
 		})
 		.map(Option::transpose)
+		.await
+}
+
+#[implement(super::Service)]
+async fn adopts_soft_failed(&self, pdu: &PduEvent) -> bool {
+	pdu.prev_events()
+		.stream()
+		.any(|prev| {
+			self.services
+				.pdu_metadata
+				.is_event_soft_failed(prev)
+		})
 		.await
 }
 

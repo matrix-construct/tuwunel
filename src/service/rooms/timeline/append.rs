@@ -7,7 +7,7 @@
 use std::{collections::btree_map::Entry, sync::Arc};
 
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, RoomId, UserId,
 	events::{
 		TimelineEventType,
 		receipt::ReceiptThread,
@@ -260,14 +260,15 @@ where
 		.append_pdu_effects(appended, state_lock)
 		.await;
 
-	if let Some(shortstatehash) = shortstatehash {
-		self.services
-			.state
-			.set_room_state(pdu.room_id(), shortstatehash, state_lock);
-	}
+	let state_changed = shortstatehash
+		.map_async(|shortstatehash| {
+			self.install_room_state(pdu.room_id(), shortstatehash, state_lock)
+		})
+		.await
+		.unwrap_or(false);
 
 	// The cached hierarchy summary projects the installed room state.
-	if pdu.state_key().is_some() {
+	if pdu.state_key().is_some() || state_changed {
 		self.services.spaces.cache_evict(pdu.room_id());
 	}
 
@@ -282,6 +283,33 @@ where
 		.ok();
 
 	Ok(pdu_id)
+}
+
+/// Installs a prepared room state snapshot and reports whether it replaced
+/// another.
+///
+/// A local message supplies the snapshot the room already holds, which changes
+/// nothing a state projection depends on. An unreadable previous snapshot
+/// counts as replaced.
+#[implement(super::Service)]
+async fn install_room_state(
+	&self,
+	room_id: &RoomId,
+	shortstatehash: ShortStateHash,
+	state_lock: &RoomMutexGuard,
+) -> bool {
+	let previous = self
+		.services
+		.state
+		.get_room_shortstatehash(room_id)
+		.await
+		.ok();
+
+	self.services
+		.state
+		.set_room_state(room_id, shortstatehash, state_lock);
+
+	previous != Some(shortstatehash)
 }
 
 /// Fill a state event's `unsigned` from the event it replaced, and find the

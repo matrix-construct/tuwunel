@@ -21,7 +21,7 @@ use super::{
 	positional::{missing_create_falls_through_to_fetch, positional_rejection_stays_uncommitted},
 	prev_walk::prev_walk_ends,
 	redelivery::gapped_redelivery_backs_off,
-	soft_fail::soft_failed_event_keeps_state_row,
+	soft_fail::{soft_failed_event_keeps_state_row, soft_failed_state_reaches_sync},
 };
 
 pub(super) async fn enabled_baseline(
@@ -76,6 +76,10 @@ pub(super) async fn enabled_baseline(
 	soft_failed_event_keeps_state_row(services, user_id, &soft_fail_room)
 		.await
 		.map_err(step(label))?;
+
+	soft_failed_state_reaches_sync(services, base, token, user_id)
+		.await
+		.map_err(step("soft-failed state reaches sync"))?;
 
 	let label = "soft-failed backfill";
 	let backfill_room = create_room(services, base, token)

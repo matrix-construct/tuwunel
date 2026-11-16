@@ -31,7 +31,7 @@ mod auth_chain;
 mod backfill;
 #[path = "state_local_build/baseline.rs"]
 mod baseline;
-#[expect(dead_code)] // This fixture uses only registration.
+#[expect(dead_code)] // This fixture uses only registration and the sync requests.
 mod client;
 #[path = "state_local_build/derived.rs"]
 mod derived;
@@ -39,6 +39,8 @@ mod derived;
 mod disabled;
 #[expect(dead_code)] // Membership routes are not driven here.
 mod federation;
+#[path = "client/get.rs"]
+mod get;
 #[path = "state_local_build/helpers.rs"]
 mod helpers;
 #[path = "state_local_build/memo.rs"]
@@ -51,10 +53,17 @@ mod positional;
 mod prev_walk;
 #[path = "state_local_build/redelivery.rs"]
 mod redelivery;
+#[path = "sliding_sync/required_state.rs"]
+mod required_state;
+#[path = "sliding_sync/resume.rs"]
+mod resume;
+mod sliding_sync;
 #[path = "state_local_build/soft_fail.rs"]
 mod soft_fail;
 #[path = "state_local_build/state_miss.rs"]
 mod state_miss;
+#[path = "client/sync.rs"]
+mod sync;
 
 #[derive(Clone, Copy)]
 enum Case {

@@ -203,7 +203,9 @@ or down.
 
 By default, an outgoing event the policy server does not sign is not sent.
 An incoming event left without a valid signature soft-fails, which keeps it
-out of the room timeline and away from clients.
+out of the room timeline; [Soft-failed events and
+recovery](#soft-failed-events-and-recovery) covers when its state can still
+reach clients.
 
 An explicit refusal stops outgoing sends and soft-fails incoming events,
 even with `fail_open = true`. A refusal is `400 M_FORBIDDEN` or, on the
@@ -245,25 +247,33 @@ policy server. Otherwise, events in that room get no verdict.
 
 ### Soft-failed events and recovery
 
-A soft-failed event is kept out of the room timeline and is never relayed
-to clients, but it stays stored and can still be fetched directly over
-federation. Contributors include invalid redact permission, a policy
-server that refused the event or gave no verdict, and failure to pass
-authorization against current room state (server-server receipt check 6).
-The standing verdict is not permanent. It is re-checked whenever
-federation supplies the event again, on a schedule that widens from five
-minutes to a day, and is released when the event later passes.
+A soft-failed event stays stored but never appears in the room timeline or
+reaches clients as a timeline event. Other servers can still fetch it
+directly over federation. An event can soft-fail because its sender lacks
+permission to redact, a policy server refused it or gave no verdict, or it
+failed authorization against the current room state (server-server receipt
+check 6).
 
-An explicit refusal is persisted in the cache for 24 hours, so re-checks
-inside that window answer from the cache and the policy server is only
-asked again once it lapses.
-`!admin rooms clear-soft-failed-events <room>` drops the stored verdicts
-for one room to force the question immediately.
+A refused membership or power-level change cannot take effect when it first
+arrives. Its stored state can still affect the room later through *state
+resolution*, which reconciles room state from different event branches.
+When a later accepted event names a soft-failed event among its predecessors,
+Tuwunel resolves the room's current state against that branch, as the
+specification requires. If state resolution keeps the soft-failed event, it
+becomes current state. Clients receive it through the `state` of their sync
+responses, though it still never enters the timeline.
 
-Soft-failed events are not added to the room's forward extremities and do
-not directly drive current state, so a refused membership or power-level
-change cannot take effect locally. Their committed state remains
-available when descendant events participate in state resolution.
+The soft-fail verdict is not permanent. When federation supplies the event
+again, Tuwunel re-checks it if the retry interval has elapsed. That interval
+widens from five minutes to a day. If the event passes, Tuwunel clears the
+verdict. An explicit policy-server refusal stays cached for 24 hours.
+Re-checks within that window use the cached refusal. Tuwunel asks the policy
+server again only after it expires.
+
+To clear the stored verdicts for a room, run
+`!admin rooms clear-soft-failed-events <room>` in the admin room. This also
+clears cached policy decisions and retry delays. Events are checked again
+when federation supplies them.
 
 ### Privacy in encrypted rooms
 
