@@ -581,9 +581,13 @@ registration error.
 
 > [!WARNING]
 > Keep `LIVEKIT_FULL_ACCESS_HOMESERVERS` set to `yourdomain.com` alone.
-> lk-jwt-service checks membership only while that list names exactly the
-> server in `LIVEKIT_HS_SERVER_NAME`. It logs a warning at startup when
-> the list does not match.
+> lk-jwt-service's own endpoints (`/sfu/get`, `/get_token` and
+> `/delegate_delayed_leave`) check room membership only while that list
+> names exactly the server in `LIVEKIT_HS_SERVER_NAME`. lk-jwt-service logs
+> a warning at startup when the list does not match.
+>
+> For [call tokens requested through Tuwunel](#call-tokens-through-tuwunel),
+> room membership is checked regardless of this list.
 
 5. lk-jwt-service finds Tuwunel through
    `https://yourdomain.com/.well-known/matrix/client`, set up in section 3
