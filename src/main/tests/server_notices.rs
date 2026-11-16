@@ -16,11 +16,19 @@ use self::client::{Client, field, register, wait_until_ready};
 
 mod client;
 
+#[path = "client/membership.rs"]
+#[expect(dead_code, reason = "Only the self-action is used.")]
+mod membership;
+
+#[path = "client/put.rs"]
+mod put;
+
 const ADMIN_TOKEN: &str = "server-notices-admin-access-token";
 const USER_TOKEN: &str = "server-notices-user-access-token-1";
 const SERVER_TOKEN: &str = "server-notices-server-access-token";
 const NOTICE: &str = "/_synapse/admin/v1/send_server_notice";
 const TRANSACTION: &str = "/_synapse/admin/v1/send_server_notice/replay";
+const ADMIN_TAG: &str = "u.admin-room";
 
 /// Exercise notice authorization and membership through the HTTP router.
 ///
@@ -37,6 +45,7 @@ fn authorization_and_notice_membership() -> Result {
 		.with_loopback_listener(port)
 		.with_option("listening=true")
 		.with_option("admin.room.create=true")
+		.with_option(format!("admin.room.tag=\"{ADMIN_TAG}\""))
 		.with_option("registration.grant_admin_to_first_user=false")
 		.with_option("registration.shared_secret=\"notices-test\"");
 
@@ -76,7 +85,9 @@ fn authorization_and_notice_membership() -> Result {
 /// Establish distinct administrator and ordinary-user credentials.
 ///
 /// Omitting the identity setting also exercises legacy `conduit` construction
-/// and notice markers with the default server user.
+/// and notice markers with the default server user. The notice room's tag is
+/// then rewritten to the configured admin tag an earlier release wrote, so
+/// invite rejection and room reuse are checked on that legacy shape.
 async fn exercise(services: &Services, base: &str) -> Result {
 	wait_until_ready(services, base).await?;
 	assert_eq!(services.globals.server_user.localpart(), "conduit");
@@ -85,10 +96,23 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let user = register(services, "notice-user", USER_TOKEN).await?;
 
 	services.admin.make_user_admin(&admin).await?;
+	services
+		.users
+		.create_device(
+			&services.globals.server_user,
+			None,
+			(Some(SERVER_TOKEN), None),
+			None,
+			None,
+			None,
+		)
+		.await?;
+
 	precedence(services, base).await?;
 
 	let admin = Client { services, base, token: ADMIN_TOKEN };
 	let user_client = Client { services, base, token: USER_TOKEN };
+	let server_client = Client { services, base, token: SERVER_TOKEN };
 	let body = json!({
 		"user_id": user,
 		"content": {"msgtype": "m.text", "body": "notice"},
@@ -101,8 +125,14 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let room = pdu.room_id();
 	let leave = format!("/_matrix/client/v3/rooms/{room}/leave");
 	let join = format!("/_matrix/client/v3/rooms/{room}/join");
+	let tags_path = format!("user/{user}/rooms/{room}/tags");
+	let standard_tag = format!("/_matrix/client/v3/{tags_path}/m.server_notice");
 
 	assert!(services.state_cache.is_invited(&user, room).await);
+	request(&user_client, Method::DELETE, &standard_tag, "{}", 200).await?;
+	user_client
+		.put(&format!("{tags_path}/{ADMIN_TAG}"), &json!({}))
+		.await?;
 
 	let rejected = request(&user_client, Method::POST, &leave, "{}", 403).await?;
 
@@ -119,7 +149,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert_eq!(sent["event_id"], replay["event_id"]);
 	assert_eq!(sent_pdu.room_id(), room);
 	assert!(services.state_cache.is_invited(&user, room).await);
-	ordinary_invite(&user_client, &user).await
+	ordinary_invite(&server_client, &user_client, &user).await?;
+	foreign_invite(&admin, &server_client, &user_client, &user).await
 }
 
 /// Check that only notice routes defer body failures until authorization.
@@ -168,29 +199,44 @@ async fn body_cases(client: &Client<'_>, method: Method, path: &str, expected: u
 ///
 /// The missing tag must classify this room as ordinary even though its creator
 /// and joined server member satisfy the other notice-marker checks.
-async fn ordinary_invite(client: &Client<'_>, user: &UserId) -> Result {
-	let services = client.services;
-	let server_user = &services.globals.server_user;
-
-	services
-		.users
-		.create_device(server_user, None, (Some(SERVER_TOKEN), None), None, None, None)
-		.await?;
-
-	let server_client = Client {
-		services,
-		base: client.base,
-		token: SERVER_TOKEN,
-	};
-
+async fn ordinary_invite(
+	server_client: &Client<'_>,
+	user_client: &Client<'_>,
+	user: &UserId,
+) -> Result {
+	let services = user_client.services;
 	let room = server_client
 		.create_room(&json!({"invite": [user]}))
 		.await?;
 
-	let leave = format!("/_matrix/client/v3/rooms/{room}/leave");
-
 	assert!(services.state_cache.is_invited(user, &room).await);
-	request(client, Method::POST, &leave, "{}", 200).await?;
+	user_client.act(&room, "leave").await?;
+	assert!(!services.state_cache.is_invited(user, &room).await);
+
+	Ok(())
+}
+
+/// Reject an invitation to a tagged room the server joined but did not create.
+///
+/// The target's tag and the server's membership satisfy the other notice-marker
+/// checks, so only the creator check keeps this room ordinary.
+async fn foreign_invite(
+	admin: &Client<'_>,
+	server_client: &Client<'_>,
+	user_client: &Client<'_>,
+	user: &UserId,
+) -> Result {
+	let services = user_client.services;
+	let server_user = &services.globals.server_user;
+	let room = admin
+		.create_room(&json!({"invite": [server_user, user]}))
+		.await?;
+
+	let standard_tag = format!("user/{user}/rooms/{room}/tags/m.server_notice");
+
+	server_client.act(&room, "join").await?;
+	user_client.put(&standard_tag, &json!({})).await?;
+	user_client.act(&room, "leave").await?;
 	assert!(!services.state_cache.is_invited(user, &room).await);
 
 	Ok(())

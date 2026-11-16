@@ -26,10 +26,11 @@ use tuwunel_core::{
 	Err, Result, err,
 	utils::{
 		BoolExt, FutureBoolExt,
-		future::ReadyBoolExt,
+		future::{ReadyBoolExt, TryExtExt},
 		str_from_bytes,
 		stream::{IterStream, ReadyExt},
 	},
+	warn,
 };
 use tuwunel_matrix::pdu::PduBuilder;
 use tuwunel_service::Services;
@@ -132,8 +133,11 @@ async fn send_notice(
 	}
 
 	let room_id = match find_notice_room(services, target).await {
-		| Some(id) => id,
-		| None => create_notice_room(services, target).await?,
+		| Some(room_id) => room_id,
+		| None =>
+			create_notice_room(services, target)
+				.boxed() // cold arm
+				.await?,
 	};
 
 	let server_user = services.globals.server_user.as_ref();
@@ -207,8 +211,11 @@ async fn find_notice_room(services: &Services, target: &UserId) -> Option<OwnedR
 		.ready_filter(|room_id| admin_room.as_ref() != Some(room_id))
 		.filter_map(async |room_id| {
 			room_is_notice(services, target, &room_id)
-				.await
+				.inspect_err(
+					|error| warn!(%room_id, %error, "Unreadable notice marker, skipping room"),
+				)
 				.unwrap_or(false)
+				.await
 				.then_some(room_id)
 		})
 		.take(1)
