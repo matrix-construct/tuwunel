@@ -5,10 +5,47 @@ referenced for other `apt`-based distros such as Ubuntu.
 
 ### Installation
 
-It is recommended to see the [generic deployment guide](https://matrix-construct.github.io/tuwunel/deploying/generic.html)
-for further information if needed as usage of the Debian package is generally
-related. The package is statically linked, so it works on any current Debian or
-Ubuntu release.
+We recommend the [generic deployment guide](https://matrix-construct.github.io/tuwunel/deploying/generic.html)
+for further deployment information.
+
+An `apt` repository serves the stable releases for `amd64` and `arm64`. The
+package is statically linked, so it works on any current Debian or Ubuntu
+release.
+
+On the machine where you will run Tuwunel, install `ca-certificates` and
+`curl` if they are missing. Then run the commands below to add the repository
+and install Tuwunel.
+
+```sh
+sudo curl -fsSL -o /usr/share/keyrings/tuwunel-archive-keyring.gpg https://apt.tuwunel.chat/tuwunel-archive-keyring.gpg
+sudo tee /etc/apt/sources.list.d/tuwunel.sources >/dev/null <<EOF
+Types: deb
+URIs: https://apt.tuwunel.chat
+Suites: stable
+Components: main
+Signed-By: /usr/share/keyrings/tuwunel-archive-keyring.gpg
+EOF
+sudo apt update
+sudo apt install tuwunel
+```
+
+The repository is signed by the Tuwunel release key, whose fingerprint the
+downloaded keyring should show: `676A7C65B0461DC24DB792A356FF52E2711A8833`.
+For `amd64` the repository carries the baseline `-v1-` build.
+
+Previous releases remain available from the repository and can be selected
+with, e.g. `apt install tuwunel=1.7.1-1`.
+
+#### Moving from apt.f.dog
+
+The repository previously lived at `apt.f.dog`, which no longer receives
+updates, under a different signing key.
+
+If your system uses that repository:
+
+1. Run the `curl` and `tee` commands above to replace the old keyring and
+   sources file in place.
+2. Run `sudo apt update && sudo apt upgrade`.
 
 ### Migrating from another homeserver
 

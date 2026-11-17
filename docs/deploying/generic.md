@@ -17,6 +17,9 @@ release [here](https://github.com/matrix-construct/tuwunel/releases/latest) or
 `main` CI branch workflow artifact output. These also include `.deb` packages
 for Debian or Ubuntu and `.rpm` packages for Red Hat or Fedora.
 
+On Debian and Ubuntu, you can install and update Tuwunel through the `apt`
+repository. Follow the [Debian guide](debian.md) to set it up.
+
 The static binaries do not bundle CA certificates. Federation and every other
 outbound HTTPS request uses the system trust store, so the host needs a CA
 bundle installed (`ca-certificates` on Debian and Ubuntu). When running the
