@@ -203,8 +203,6 @@ jobs:
       release_url: ${{steps.release.outputs.upload_url}}
       docker_repo: ${{vars.DOCKER_REPO}}
       docker_acct: ${{vars.DOCKER_ACCT}}
-      apt_ssh_dest: ${{vars.APT_SSH_DEST}}
-      apt_ssh_hostkey: ${{vars.APT_SSH_HOSTKEY}}
 
     strategy:
       fail-fast: true
@@ -504,8 +502,6 @@ jobs:
       checkout: ${{needs.init.outputs.checkout}}
       docker_repo: ${{needs.init.outputs.docker_repo}}
       docker_acct: ${{needs.init.outputs.docker_acct}}
-      apt_ssh_dest: ${{needs.init.outputs.apt_ssh_dest}}
-      apt_ssh_hostkey: ${{needs.init.outputs.apt_ssh_hostkey}}
       release_url: ${{needs.init.outputs.release_url}}
       pages_url: ${{needs.init.outputs.pages_url}}
       cargo_profiles: ${{needs.init.outputs.cargo_profiles}}
@@ -544,7 +540,6 @@ jobs:
     secrets:
       ghcr_token: ${{ secrets.GHCR_TOKEN }}
       dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
-      apt_ssh_key: ${{ secrets.APT_DEPLOY_SSH_KEY }}
 
 #  stats:
 #    if: >

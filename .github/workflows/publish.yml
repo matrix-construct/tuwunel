@@ -5,7 +5,6 @@ on:
     secrets:
       ghcr_token:
       dockerhub_token:
-      apt_ssh_key:
     inputs:
       cargo_profiles:
         type: string
@@ -48,12 +47,6 @@ on:
       docker_acct:
         type: string
         description: DockerHub account name
-      apt_ssh_dest:
-        type: string
-        description: Apt repository ssh destination
-      apt_ssh_hostkey:
-        type: string
-        description: Apt repository ssh host key
       release_url:
         type: string
         description: For release assets
@@ -300,40 +293,6 @@ jobs:
           docker manifest create "${registry}/${repo}:latest" \
             --amend "${registry}/${repo}:${ref_name}-${cargo_profile}-${feat_set}-${sys_target}"
 
-  apt:
-    if: >
-      !failure() && !cancelled()
-      && inputs.apt_ssh_dest != ''
-      && contains(github.ref, 'refs/tags/v')
-      && !contains(github.ref, '-draft')
-      && !contains(github.ref, '-pre')
-      && !contains(github.ref, '-rc')
-
-    name: Apt Repository
-    runs-on: 'apt-publisher'
-    timeout-minutes: 10
-    steps:
-      - name: Publish Release
-        env:
-          ref_name: ${{github.ref_name}}
-          ssh_dest: ${{inputs.apt_ssh_dest}}
-          ssh_hostkey: ${{inputs.apt_ssh_hostkey}}
-          deploy_key: ${{secrets.apt_ssh_key}}
-
-        run: |
-          if [ -z "$deploy_key" ]; then
-            echo "apt_ssh_key secret is not set; skipping"
-            exit 0
-          fi
-          key="$(mktemp)"
-          hosts="$(mktemp)"
-          trap 'shred -u "$key"; rm -f "$hosts"' EXIT
-          printf '%s\n' "$deploy_key" > "$key"
-          printf '%s\n' "$ssh_hostkey" > "$hosts"
-          ssh -i "$key" -o UserKnownHostsFile="$hosts" -o IdentitiesOnly=yes \
-            -o BatchMode=yes -o ConnectTimeout=30 \
-            "$ssh_dest" "$ref_name"
-
   delivery:
     if: >
       !cancelled()
@@ -344,7 +303,7 @@ jobs:
       && (github.ref == 'refs/heads/main' || contains(github.ref, 'refs/tags/v'))
 
     name: Delivery
-    needs: [bundles, documents, apt]
+    needs: [bundles, documents]
     runs-on: 'bundle-publisher'
     steps:
       - name: GitHub Login
