@@ -7,27 +7,8 @@ referenced for other `apt`-based distros such as Ubuntu.
 
 It is recommended to see the [generic deployment guide](https://matrix-construct.github.io/tuwunel/deploying/generic.html)
 for further information if needed as usage of the Debian package is generally
-related.
-
-An `apt` repository serves the stable releases for `amd64` and `arm64`. The
-package is statically linked, so it works on any current Debian or Ubuntu
-release:
-
-```sh
-sudo curl -fsSL -o /usr/share/keyrings/tuwunel-archive-keyring.gpg https://apt.f.dog/tuwunel-archive-keyring.gpg
-sudo tee /etc/apt/sources.list.d/tuwunel.sources >/dev/null <<EOF
-Types: deb
-URIs: https://apt.f.dog
-Suites: stable
-Components: main
-Signed-By: /usr/share/keyrings/tuwunel-archive-keyring.gpg
-EOF
-sudo apt update
-sudo apt install tuwunel
-```
-
-Previous releases remain available from the repository and can be selected
-with, e.g. `apt install tuwunel=1.7.1-1`.
+related. The package is statically linked, so it works on any current Debian or
+Ubuntu release.
 
 ### Migrating from another homeserver
 
