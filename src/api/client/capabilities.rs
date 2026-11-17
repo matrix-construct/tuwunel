@@ -173,6 +173,8 @@ fn delayed_events_capability(
 
 #[cfg(test)]
 mod tests {
+	use serde_json::to_value;
+
 	use super::{Capabilities, json, set_preview_url};
 
 	#[test]
@@ -187,6 +189,9 @@ mod tests {
 
 			assert_eq!(stable.as_ref(), &json!({"enabled": enabled}));
 			assert_eq!(capabilities.get("io.element.msc4452.preview_url"), Some(stable));
+			let wire = to_value(&capabilities).expect("capabilities serialize");
+
+			assert_eq!(wire["m.preview_url"], json!({"enabled": enabled}));
 		}
 	}
 }

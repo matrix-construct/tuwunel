@@ -128,3 +128,29 @@ pub fn get_transports(&self) -> Result<Vec<RtcTransport>> {
 		.collect::<Result<Vec<_>>>()
 		.inspect_err(inspect_log)
 }
+
+#[cfg(test)]
+mod tests {
+	use serde_json::{json, to_value};
+
+	use crate::{Result, config::WellKnownConfig};
+
+	#[test]
+	fn livekit_transport_keeps_service_url_wire() -> Result {
+		let url = "https://livekit.example.org";
+		let config = WellKnownConfig {
+			livekit_url: Some(url.into()),
+			..Default::default()
+		};
+		let transports = config.get_transports()?;
+
+		assert_eq!(
+			to_value(&transports[0])?,
+			json!({
+				"type": "livekit",
+				"livekit_service_url": url,
+			})
+		);
+		Ok(())
+	}
+}
