@@ -466,7 +466,6 @@ mod tests {
 			.into_parts();
 
 		let query = QueryParams {
-			access_token: None,
 			user_id: None,
 			device_id: None,
 			msc3202_device_id: None,

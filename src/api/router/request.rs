@@ -14,8 +14,6 @@ use tuwunel_service::Services;
 
 #[derive(Debug, Deserialize)]
 pub(super) struct QueryParams {
-	pub(super) access_token: Option<String>,
-
 	pub(super) user_id: Option<UserId>,
 
 	pub(super) device_id: Option<DeviceId>,

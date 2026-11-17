@@ -68,10 +68,10 @@ pub(super) async fn auth<A: AuthDispatch>(
 	let bearer: Option<TypedHeader<Authorization<Bearer>>> =
 		request.parts.extract().await.unwrap_or(None);
 
-	let access_token = match &bearer {
-		| Some(TypedHeader(Authorization(bearer))) => Some(bearer.token()),
-		| None => request.query.access_token.as_deref(),
-	};
+	// MSC4127: the `access_token` query parameter is not a token transport.
+	let access_token = bearer
+		.as_ref()
+		.map(|TypedHeader(Authorization(bearer))| bearer.token());
 
 	// An expired token can still sign out, so a client can end a session it cannot resume.
 	let token = match find_token(services, access_token).await? {

@@ -126,7 +126,11 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let unknown = send(services, Method::POST, &probe, Some("not-a-token")).await?;
 
+	let query_token = format!("{probe}?access_token={USER_TOKEN}");
+	let by_query = send(services, Method::POST, &query_token, None).await?;
+
 	assert_eq!(refusal(unknown).await?, (401, "M_UNKNOWN_TOKEN".into()));
+	assert_eq!(refusal(by_query).await?, (401, "M_MISSING_TOKEN".into()));
 	assert!(seen.try_recv().is_err(), "an unauthenticated request was forwarded");
 
 	client_requests(services, base, &user_id, &mut seen).await?;
@@ -217,8 +221,8 @@ async fn client_requests(
 	let alice = format!("@lk_alice:{ours}");
 	let bot = format!("@lk_bot:{ours}");
 	let masquerade = format!("{GET_TOKEN}?user_id={alice}");
-	let by_query = format!("{GET_TOKEN}?access%5Ftoken={USER_TOKEN}&c=3");
-	let by_query_upstream = format!("{GET_TOKEN}?c=3");
+	let encoded = format!("{GET_TOKEN}?access%5Ftoken={USER_TOKEN}&c=3");
+	let encoded_upstream = format!("{GET_TOKEN}?c=3");
 
 	for (path, token, uri, identity) in [
 		(PROBE, Some(USER_TOKEN), PROBE, user_id.as_str()),
@@ -228,7 +232,7 @@ async fn client_requests(
 			"/_matrix/client/v1/rtc/livekit",
 			user_id.as_str(),
 		),
-		(by_query.as_str(), None, by_query_upstream.as_str(), user_id.as_str()),
+		(encoded.as_str(), Some(USER_TOKEN), encoded_upstream.as_str(), user_id.as_str()),
 		(GET_TOKEN, Some(AS_TOKEN), GET_TOKEN, bot.as_str()),
 		(masquerade.as_str(), Some(AS_TOKEN), masquerade.as_str(), alice.as_str()),
 	] {
