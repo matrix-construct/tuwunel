@@ -29,13 +29,13 @@
 
 | ✅ `yes` | 🟨 `part` | 🟥 `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 294 | 60 | 444 | 312 | 1110 |
+| 295 | 59 | 444 | 312 | 1110 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
-| merged | 191 | 21 | 12 | 57 | 281 |
+| merged | 192 | 20 | 12 | 57 | 281 |
 | open | 67 | 24 | 346 | 181 | 618 |
 | closed | 36 | 15 | 86 | 74 | 211 |
 
@@ -214,7 +214,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2403 | ✅ ● | 90/90 | Add "knock" feature | Knock CS+SS endpoints, sync key, public-rooms join_rule all wired |
 | MSC2367 | ✅ ● | 100/100 | Allowing Reasons in all Membership Events | reason field handled in invite/leave/kick/ban/unban/join membership routes |
 | MSC2334 | ✅ ● | 100/100 | [MSC2334](https://github.com/matrix-org/matrix-doc/pull/2334) - Change defaul... | Default room version is V12, well past V5 |
-| MSC2324 | 🟨 ◐ | 60/100 | Facilitating early releases of software dependent on spec | two MUST misses: unprefixed unstable SSO callback; stable v1/auth_issuer |
+| MSC2324 | ✅ ◐ | 100/100 | Facilitating early releases of software dependent on spec | SSO callback under /_tuwunel; legacy alias only for config-pinned IdPs |
 | MSC2313 | 🟥 ● | 0/0 | Moderation policies as rooms (ban lists) | no server-side policy-list consumption; bot/client subscribers excluded |
 | MSC2290 | 🟨 ● | 65/55 | Separate Endpoints for Binding Threepids | add endpoint (UIA+dupe) + HS email validation; IS-bind half out of scope |
 | MSC2285 | ✅ ● | 90/100 | Private read receipts | src/api/client/read_marker.rs handles ReadPrivate via private_read_set |
@@ -289,7 +289,6 @@ for spec compliance.
 | MSC4548 | 🟨 ◐ | 70/90 | next | Sliding Sync Extensions: Account data | Client caching excluded; first-enable and independent room-scope gaps |
 | MSC2290 | 🟨 ● | 65/55 | 1.0 | Separate Endpoints for Binding Threepids | add endpoint (UIA+dupe) + HS email validation; IS-bind half out of scope |
 | MSC1915 | 🟨 ● | 60/55 | 1.0 | MSC 1915 - Add unbind 3PID APIs | delete + deactivate return id_server_unbind_result; IS unbind out of HS scope |
-| MSC2324 | 🟨 ◐ | 60/100 | 1.0 | Facilitating early releases of software dependent on spec | two MUST misses: unprefixed unstable SSO callback; stable v1/auth_issuer |
 | MSC2675 | 🟨 ◐ | 60/75 | 1.3 | Serverside aggregations of message relationships | thread+edit+reference bundled (edit/ref gated); reactions unbundled |
 | MSC3267 | 🟨 ◐ | 60/80 | 1.5 | reference relationships | m.reference bundle added; gated default-off; no ignore/visibility filter |
 | MSC4508 | 🟨 ◐ | 60/80 | next | Sliding Sync Extensions: Common format and Typing | Typing exists; joined-only filtering and scope reentry remain incomplete. |

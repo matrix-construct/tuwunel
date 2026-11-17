@@ -2,6 +2,7 @@
 
 mod baseline;
 mod hierarchy;
+mod sso_callback;
 
 use std::{
 	cell::RefCell,

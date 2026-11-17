@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use serde_json::{Map as JsonObject, Value as JsonValue};
 use tokio::sync::RwLock;
 pub use tuwunel_core::config::IdentityProvider as Provider;
-use tuwunel_core::{Err, Result, debug, debug::INFO_SPAN_LEVEL, err, implement};
+use tuwunel_core::{
+	Err, Result, config::SSO_CALLBACK_PATH, debug, debug::INFO_SPAN_LEVEL, err, implement,
+};
 use url::Url;
 
 use crate::{SelfServices, client::read_response_capped};
@@ -248,8 +250,7 @@ async fn configure(&self, mut provider: Provider) -> Result<Provider> {
 	if provider.callback_url.is_none()
 		&& let Some(server_url) = self.services.config.well_known.client.as_ref()
 	{
-		let callback_path =
-			format!("_matrix/client/unstable/login/sso/callback/{}", provider.client_id);
+		let callback_path = format!("{SSO_CALLBACK_PATH}/{}", provider.client_id);
 
 		provider.callback_url = Some(server_url.join(&callback_path)?);
 	}

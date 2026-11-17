@@ -136,6 +136,18 @@ use crate::{
 // Later prefixes override earlier ones.
 pub(crate) const ENV_PREFIXES: [&str; 3] = ["CONDUIT_", "CONDUWUIT_", "TUWUNEL_"];
 
+/// Callback path for upstream identity providers, relative to the server's base URL.
+///
+/// The provider's `client_id` follows as one more segment. The default
+/// `callback_url` joins it onto `well_known.client`.
+pub const SSO_CALLBACK_PATH: &str = "_tuwunel/sso/callback";
+
+/// Callback path served before [`SSO_CALLBACK_PATH`], relative to the base URL.
+///
+/// Its route stays mounted while a configured provider still sends users there,
+/// and is removed in 3.0.
+pub const LEGACY_SSO_CALLBACK_PATH: &str = "_matrix/client/unstable/login/sso/callback";
+
 /// Stores the configured localpart for the server's administrative user.
 ///
 /// The inline budget covers ordinary Matrix localparts without a heap
@@ -1670,9 +1682,9 @@ pub struct SmtpConfig {
 /// empty `client_secret_file`. `issuer_url` is
 /// required except for the `github`, `gitlab` and `google` brands.
 /// Register `well_known.client` followed by
-/// `/_matrix/client/unstable/login/sso/callback/<client_id>` as the redirect
-/// URI at the provider; it is the default `callback_url`, so set that
-/// yourself when `well_known.client` is unset.
+/// `/_tuwunel/sso/callback/<client_id>` as the redirect URI at the provider;
+/// it is the default `callback_url`, so set that yourself when
+/// `well_known.client` is unset. The reverse proxy must forward `/_tuwunel/`.
 ///
 /// Minimal example:
 ///
@@ -1756,11 +1768,14 @@ pub struct IdentityProvider {
 	pub issuer_url: Option<Url>,
 
 	/// The callback URL configured when registering the OAuth application with
-	/// the provider. Tuwunel's callback URL must be strictly formatted exactly
-	/// as instructed. The URL host must point directly at the matrix server and
-	/// use the following path:
-	/// `/_matrix/client/unstable/login/sso/callback/<client_id>` where
-	/// `<client_id>` is the same one configured for this provider above.
+	/// the provider.
+	///
+	/// The URL host must point directly at the matrix server and use the path
+	/// `/_tuwunel/sso/callback/<client_id>`, where `<client_id>` is the one
+	/// configured for this provider above. The legacy path
+	/// `/_matrix/client/unstable/login/sso/callback/<client_id>` keeps working
+	/// until 3.0 with a startup warning. A change takes effect on restart, not
+	/// on reload.
 	pub callback_url: Option<Url>,
 
 	/// When more than one identity_provider has been configured and
@@ -2846,6 +2861,68 @@ pub fn lists_identity_providers(&self) -> bool {
 		.sso_custom_providers_page
 		.is_false()
 		&& !self.authentication.login.single_sso
+}
+
+/// Returns whether the legacy callback route for identity providers is mounted.
+///
+/// A provider whose `callback_url` names the legacy path still sends users
+/// there, and so does one returning users to the redirect URI it has
+/// registered. The router reads this once at startup.
+#[implement(Config)]
+#[must_use]
+pub fn mounts_legacy_sso_callback(&self) -> bool {
+	self.identity_provider.values().any(|provider| {
+		self.uses_registered_callback(provider) || provider.pins_legacy_callback()
+	})
+}
+
+/// Returns whether a provider returns users to the redirect URI it has registered.
+///
+/// With neither `callback_url` nor `well_known.client` set, sign-in sends the
+/// provider no `redirect_uri`, so the provider picks the URI itself.
+#[implement(Config)]
+#[inline]
+#[must_use]
+pub fn uses_registered_callback(&self, provider: &IdentityProvider) -> bool {
+	provider.callback_url.is_none() && self.well_known.client.is_none()
+}
+
+/// Returns whether the provider's `callback_url` names the legacy callback path.
+///
+/// A path prefix ahead of the legacy segments still counts, since a reverse
+/// proxy strips it before the request reaches the legacy route.
+#[implement(IdentityProvider)]
+#[must_use]
+pub fn pins_legacy_callback(&self) -> bool {
+	self.callback_url
+		.as_ref()
+		.and_then(legacy_callback_parts)
+		.is_some()
+}
+
+/// Returns the replacement for a `callback_url` naming the legacy callback path.
+///
+/// The replacement keeps the host, any path prefix ahead of the legacy
+/// segments, and the provider segment after them. `None` means the provider has
+/// no `callback_url` or it names another path.
+#[implement(IdentityProvider)]
+#[must_use]
+pub fn moved_callback_url(&self) -> Option<Url> {
+	let url = self.callback_url.as_ref()?;
+	let (base, client_id) = legacy_callback_parts(url)?;
+
+	url.join(&format!("{base}{SSO_CALLBACK_PATH}/{client_id}"))
+		.ok()
+}
+
+/// Splits a legacy callback URL's path into its prefix and provider segment.
+fn legacy_callback_parts(url: &Url) -> Option<(&str, &str)> {
+	let (prefix, client_id) = url.path().rsplit_once('/')?;
+	let base = prefix
+		.strip_suffix(LEGACY_SSO_CALLBACK_PATH)
+		.filter(|base| base.ends_with('/'))?;
+
+	Some((base, client_id))
 }
 
 /// Returns whether new accounts may be registered with a password.

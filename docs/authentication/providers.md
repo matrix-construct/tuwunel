@@ -52,9 +52,23 @@ please refer to the section on [environment variables](#configuring-via-environm
 
 ### Callback
 
-| Field | Description |
-|---|---|
-| `callback_url` | The callback URL registered with the provider when you created the OAuth application. Must be exactly: `https://<your-matrix-server>/_matrix/client/unstable/login/sso/callback/<client_id>` |
+The callback URL is where the provider returns the browser after sign-in.
+
+> [!IMPORTANT]
+> Changes to `callback_url` require a Tuwunel restart. Reloading the
+> configuration does not apply them.
+
+1. Your reverse proxy must forward `/_tuwunel/` to Tuwunel.
+2. Register `https://<your-matrix-server>/_tuwunel/sso/callback/<client_id>`
+   as the callback URL in the provider's OAuth application settings. Replace
+   `<your-matrix-server>` with your Matrix server's public hostname and
+   `<client_id>` with this provider's configured `client_id`.
+3. Set `callback_url` in the provider's `[[global.identity_provider]]` table
+   to exactly the same URL, then restart Tuwunel.
+
+If you still use `/_matrix/client/unstable/login/sso/callback/<client_id>`,
+that legacy path keeps working until `3.0` and produces a warning at startup.
+Follow the steps above to switch to the new URL.
 
 ### Login behavior
 
@@ -130,13 +144,13 @@ The variable name is built from three parts joined by `__` (double underscore):
 TUWUNEL_IDENTITY_PROVIDER__<index>__<FIELD>
 ```
 
-- **`TUWUNEL_IDENTITY_PROVIDER`** — fixed prefix that maps to the
+- `TUWUNEL_IDENTITY_PROVIDER` is the fixed prefix that maps to the
   `[[global.identity_provider]]` table array.
-- **`<index>`** — an arbitrary string (typically `0`, `1`, `2`, …) that groups
+- `<index>` is an arbitrary string (such as `0`, `1`, `2`) that groups
   variables belonging to the same provider. All variables sharing the same
   index are treated as a single `[[global.identity_provider]]` entry. Indexes
   are sorted lexicographically, so numeric indexes give a predictable order.
-- **`<FIELD>`** — the field name from the tables below, uppercased.
+- `<FIELD>` is the field name from the tables above, uppercased.
 
 Multiple providers are expressed by using different indexes:
 
@@ -145,17 +159,17 @@ Multiple providers are expressed by using different indexes:
 TUWUNEL_IDENTITY_PROVIDER__0__BRAND="github"
 TUWUNEL_IDENTITY_PROVIDER__0__CLIENT_ID="Ov23liYourGitHubClientId"
 TUWUNEL_IDENTITY_PROVIDER__0__CLIENT_SECRET="your_github_secret"
-TUWUNEL_IDENTITY_PROVIDER__0__CALLBACK_URL="https://matrix.example.com/_matrix/client/unstable/login/sso/callback/Ov23liYourGitHubClientId"
+TUWUNEL_IDENTITY_PROVIDER__0__CALLBACK_URL="https://matrix.example.com/_tuwunel/sso/callback/Ov23liYourGitHubClientId"
 
 # Second provider — Google (marked as default)
 TUWUNEL_IDENTITY_PROVIDER__1__BRAND="google"
 TUWUNEL_IDENTITY_PROVIDER__1__CLIENT_ID="123456789-abc.apps.googleusercontent.com"
 TUWUNEL_IDENTITY_PROVIDER__1__CLIENT_SECRET="GOCSPX-your_secret"
-TUWUNEL_IDENTITY_PROVIDER__1__CALLBACK_URL="https://matrix.example.com/_matrix/client/unstable/login/sso/callback/123456789-abc.apps.googleusercontent.com"
+TUWUNEL_IDENTITY_PROVIDER__1__CALLBACK_URL="https://matrix.example.com/_tuwunel/sso/callback/123456789-abc.apps.googleusercontent.com"
 TUWUNEL_IDENTITY_PROVIDER__1__DEFAULT="true"
 ```
 
-Every field listed in the tables below has a matching environment variable. For
+Every field listed in the tables above has a matching environment variable. For
 example, `trusted = true` in TOML becomes
 `TUWUNEL_IDENTITY_PROVIDER__0__TRUSTED="true"`.
 
@@ -168,7 +182,7 @@ example, `trusted = true` in TOML becomes
 brand = "GitHub"
 client_id = "Ov23liYourGitHubClientId"
 client_secret = "your_github_client_secret"
-callback_url = "https://matrix.example.com/_matrix/client/unstable/login/sso/callback/Ov23liYourGitHubClientId"
+callback_url = "https://matrix.example.com/_tuwunel/sso/callback/Ov23liYourGitHubClientId"
 ```
 
 GitHub's `issuer_url` and `base_path` are pre-configured. `client_id` doubles
@@ -181,7 +195,7 @@ as the provider ID in the callback URL.
 brand = "Google"
 client_id = "123456789-abc.apps.googleusercontent.com"
 client_secret = "GOCSPX-your_secret"
-callback_url = "https://matrix.example.com/_matrix/client/unstable/login/sso/callback/123456789-abc.apps.googleusercontent.com"
+callback_url = "https://matrix.example.com/_tuwunel/sso/callback/123456789-abc.apps.googleusercontent.com"
 ```
 
 ### Self-hosted Keycloak
@@ -192,7 +206,7 @@ brand = "Keycloak"
 client_id = "tuwunel"
 client_secret = "your_keycloak_secret"
 issuer_url = "https://sso.example.com/realms/myrealm"
-callback_url = "https://matrix.example.com/_matrix/client/unstable/login/sso/callback/tuwunel"
+callback_url = "https://matrix.example.com/_tuwunel/sso/callback/tuwunel"
 trusted = true
 ```
 
@@ -208,7 +222,7 @@ brand = "MAS"
 client_id = "01J44Q10GR4AMTFZEEF936DTCM"
 client_secret = "<client_secret>"
 issuer_url = "https://auth.example.com"
-callback_url = "https://matrix.example.com/_matrix/client/unstable/login/sso/callback/01J44Q10GR4AMTFZEEF936DTCM"
+callback_url = "https://matrix.example.com/_tuwunel/sso/callback/01J44Q10GR4AMTFZEEF936DTCM"
 ```
 
 MAS attaches as an upstream provider; Tuwunel remains its own next-generation
@@ -420,7 +434,7 @@ These admin room commands help manage OAuth state:
    `/_matrix/client/v3/login/sso/redirect/<client_id>`.
 3. Tuwunel redirects the user to the provider's authorization endpoint.
 4. The provider authenticates the user and redirects back to
-   `/_matrix/client/unstable/login/sso/callback/<client_id>`.
+   `/_tuwunel/sso/callback/<client_id>`.
 5. Tuwunel exchanges the code for tokens, fetches user claims, maps them to a
    Matrix user ID, and issues a login token back to the client. Redirects on
    the configured client origin or the OIDC redirect allowlist continue

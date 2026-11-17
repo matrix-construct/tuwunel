@@ -20,7 +20,7 @@ identity_providers:
         claims_policy: "tuwunel"
         public: false
         redirect_uris:
-          - "https://<your.matrix.example.com>/_matrix/client/unstable/login/sso/callback/<client_id>"
+          - "https://<your.matrix.example.com>/_tuwunel/sso/callback/<client_id>"
         scopes:
           - 'openid'
           - 'groups'
@@ -38,9 +38,20 @@ identity_providers:
 
 ## Tuwunel configuration
 
+Your reverse proxy must forward `/_tuwunel/` to Tuwunel. Register the callback
+URL with the provider and use exactly the same URL for `callback_url` below.
+See the [callback setup steps](../providers.md#callback).
+
+> [!IMPORTANT]
+> Restart Tuwunel after changing `callback_url`. Reloading the configuration
+> does not apply the change.
+
 > [!NOTE]
 > The `client_secret` value here is the **plain-text** password, not the hash
 > stored in Authelia. Authelia stores the hash; Tuwunel supplies the password.
+
+Add the following provider entry to your `tuwunel.toml`. Replace the
+placeholders with your hostnames and client credentials.
 
 ```toml
 [[global.identity_provider]]
@@ -49,7 +60,7 @@ name = "Authelia"
 client_id = "<client_id>"
 client_secret = "<client_secret_password>"
 issuer_url = "https://<your.authelia.example.com>"
-callback_url = "https://<your.matrix.example.com>/_matrix/client/unstable/login/sso/callback/<client_id>"
+callback_url = "https://<your.matrix.example.com>/_tuwunel/sso/callback/<client_id>"
 ```
 
 See the [Authelia OIDC documentation](https://www.authelia.com/configuration/identity-providers/openid-connect/clients/)

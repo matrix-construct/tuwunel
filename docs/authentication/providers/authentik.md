@@ -26,9 +26,9 @@ Select **OAuth2/OpenID Provider**.
 - **Authorization flow**: any built-in flow is fine if you have not created
   custom ones.
 - **Client ID** and **Client Secret**: Authentik generates these. Save both
-  values — tuwunel needs them.
+  values for the Tuwunel configuration below.
 - **Redirect URIs/Origins**: set this to
-  `https://<your.matrix.example.com>/_matrix/client/unstable/login/sso/callback/<client_id>`,
+  `https://<your.matrix.example.com>/_tuwunel/sso/callback/<client_id>`,
   substituting your Matrix server's public hostname and the **Client ID** from
   the previous step.
 - All other fields can stay at their defaults.
@@ -41,6 +41,14 @@ Authentik users.
 
 ## Tuwunel configuration
 
+Your reverse proxy must forward `/_tuwunel/` to Tuwunel. Register the callback
+URL with the provider and use exactly the same URL for `callback_url` below.
+See the [callback setup steps](../providers.md#callback).
+
+> [!IMPORTANT]
+> Restart Tuwunel after changing `callback_url`. Reloading the configuration
+> does not apply the change.
+
 Add an `[[global.identity_provider]]` entry to your `tuwunel.toml`:
 
 ```toml
@@ -49,17 +57,17 @@ brand = "Authentik"
 client_id = "<client_id>"
 client_secret = "<client_secret>"
 issuer_url = "https://<your.authentik.example.com>/application/o/<slug>/"
-callback_url = "https://<your.matrix.example.com>/_matrix/client/unstable/login/sso/callback/<client_id>"
+callback_url = "https://<your.matrix.example.com>/_tuwunel/sso/callback/<client_id>"
 ```
 
 `issuer_url` is the application's slug-based path with a trailing slash. This
-is the value Authentik returns as the `iss` claim in issued tokens, and tuwunel
+is the value Authentik returns as the `iss` claim in issued tokens. Tuwunel
 discovers all other endpoints from
 `<issuer_url>.well-known/openid-configuration` automatically.
 
-If your Authentik instance reports a different `iss` — for example when running
-behind a path prefix, or with a non-default **Issuer Mode** on the provider —
-override discovery directly:
+If your Authentik instance reports a different `iss` (for example, when running
+behind a path prefix or with a non-default **Issuer Mode** on the provider),
+set `issuer_url` to that issuer value and override discovery directly:
 
 ```toml
 discovery_url = "https://<your.authentik.example.com>/application/o/<slug>/.well-known/openid-configuration"

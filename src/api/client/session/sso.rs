@@ -1202,14 +1202,12 @@ mod tests {
 
 	#[test]
 	fn grant_session_cookie_path_uses_the_callback_path() {
-		let callback = Url::parse(
-			"https://matrix.example/_matrix/client/unstable/login/sso/callback/tuwunel_abc",
-		)
-		.expect("valid URL");
+		let callback = Url::parse("https://matrix.example/_tuwunel/sso/callback/tuwunel_abc")
+			.expect("valid URL");
 
 		assert_eq!(
 			grant_session_cookie_path(Some(&callback)),
-			"/_matrix/client/unstable/login/sso/callback/tuwunel_abc"
+			"/_tuwunel/sso/callback/tuwunel_abc"
 		);
 		assert_eq!(grant_session_cookie_path(None), "/");
 	}
@@ -1234,7 +1232,7 @@ mod tests {
 		assert!(
 			removal
 				.to_string()
-				.contains("Path=/_matrix/client/unstable/login/sso/callback/tuwunel_abc"),
+				.contains("Path=/_tuwunel/sso/callback/tuwunel_abc"),
 			"unexpected removal cookie: {removal}"
 		);
 	}
@@ -1243,7 +1241,7 @@ mod tests {
 		serde_json::from_value(json!({
 			"brand": "authentik",
 			"client_id": "tuwunel_abc",
-			"callback_url": "https://matrix.example/_matrix/client/unstable/login/sso/callback/tuwunel_abc",
+			"callback_url": "https://matrix.example/_tuwunel/sso/callback/tuwunel_abc",
 		}))
 		.expect("valid provider")
 	}

@@ -44,7 +44,7 @@ clients:
     client_auth_method: client_secret_post
     client_secret: <oauth_client_secret>
     redirect_uris:
-      - https://matrix.example.com/_matrix/client/unstable/login/sso/callback/01J44Q10GR4AMTFZEEF936DTCM
+      - https://matrix.example.com/_tuwunel/sso/callback/01J44Q10GR4AMTFZEEF936DTCM
 ```
 
 MAS requires a statically configured `client_id` to be a ULID, which is 26
@@ -59,13 +59,17 @@ for the complete client schema.
 
 ### Configure Tuwunel
 
+Add the following provider entry to your Tuwunel configuration file. If you
+use a reverse proxy, configure it to forward `/_tuwunel/` to Tuwunel so the
+browser can return from MAS after login.
+
 ```toml
 [[global.identity_provider]]
 brand = "MAS"
 client_id = "01J44Q10GR4AMTFZEEF936DTCM"
 client_secret = "<oauth_client_secret>"
 issuer_url = "https://auth.example.com"
-callback_url = "https://matrix.example.com/_matrix/client/unstable/login/sso/callback/01J44Q10GR4AMTFZEEF936DTCM"
+callback_url = "https://matrix.example.com/_tuwunel/sso/callback/01J44Q10GR4AMTFZEEF936DTCM"
 scope = ["openid"]
 ```
 
@@ -219,7 +223,7 @@ TUWUNEL_IDENTITY_PROVIDER__0__BRAND="mas"
 TUWUNEL_IDENTITY_PROVIDER__0__CLIENT_ID="01J44Q10GR4AMTFZEEF936DTCM"
 TUWUNEL_IDENTITY_PROVIDER__0__CLIENT_SECRET="<oauth_client_secret>"
 TUWUNEL_IDENTITY_PROVIDER__0__ISSUER_URL="https://auth.example.com"
-TUWUNEL_IDENTITY_PROVIDER__0__CALLBACK_URL="https://matrix.example.com/_matrix/client/unstable/login/sso/callback/01J44Q10GR4AMTFZEEF936DTCM"
+TUWUNEL_IDENTITY_PROVIDER__0__CALLBACK_URL="https://matrix.example.com/_tuwunel/sso/callback/01J44Q10GR4AMTFZEEF936DTCM"
 TUWUNEL_IDENTITY_PROVIDER__0__SCOPE='["openid"]'
 TUWUNEL_MAS_SECRET="<provisioning_secret>"
 TUWUNEL_IDENTITY_PROVIDER__0__TRUSTED="true"

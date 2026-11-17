@@ -46,6 +46,8 @@ type TokenForm = HashMap<String, String>;
 
 const IDP: &str = "test-idp";
 const CLIENT: &str = "https://client.example/callback";
+const LEGACY_CALLBACK: &str = "_matrix/client/unstable/login/sso/callback";
+const CALLBACK: &str = "_tuwunel/sso/callback";
 
 static LOGS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 
@@ -59,7 +61,9 @@ static LOGS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 /// while her identity binding cannot be read, a user-wide delete keeps her
 /// session and a forced association is refused. Alice's provider-verified
 /// address is bound to her new account, and Carol's registration leaves the
-/// identical address with Alice.
+/// identical address with Alice. The provider sets no `callback_url` and the
+/// server no `well_known.client`, so the legacy callback stays mounted beside
+/// the new one, and Carol's last sign-in returns through the new one.
 #[test]
 fn sso_fallback_account() -> Result {
 	let provider = TcpListener::bind(("127.0.0.1", 0))?;
@@ -164,7 +168,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let bob = unique_id_sub((&provider, "bob"))?;
 	let fallback = fallback_localpart(&bob);
 
-	let response = sign_in(&client, base, "alice", &fallback).await?;
+	let response = sign_in(&client, base, LEGACY_CALLBACK, "alice", &fallback).await?;
 	let alice_account = signed_in(services, &response).await?;
 	let email = format!("{fallback}@example.org");
 	let holder = services
@@ -179,7 +183,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		"alice's verified address is bound to her"
 	);
 
-	let response = sign_in(&client, base, "bob", &fallback).await?;
+	let response = sign_in(&client, base, LEGACY_CALLBACK, "bob", &fallback).await?;
 
 	assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
@@ -194,7 +198,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert!(linked.is_not_found(), "bob's identity is linked to no account");
 
 	let carol = unique_id_sub((&provider, "carol"))?;
-	let response = sign_in(&client, base, "carol", &fallback).await?;
+	let response = sign_in(&client, base, LEGACY_CALLBACK, "carol", &fallback).await?;
 	let account = signed_in(services, &response).await?;
 	let holder = services
 		.threepid
@@ -264,7 +268,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert!(linked.is_not_found(), "carol's identity is linked to no account");
 	assert!(stale.is_missing(), "carol's session on a removed provider is deleted");
 
-	let response = sign_in(&client, base, "carol", &fallback).await?;
+	let response = sign_in(&client, base, CALLBACK, "carol", &fallback).await?;
 
 	assert_eq!(signed_in(services, &response).await?, account);
 
@@ -281,9 +285,15 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 /// Sign in at the provider as `sub` claiming `username`.
 ///
-/// The callback's response returns unfollowed, so the caller reads its status
-/// and where it redirects.
-async fn sign_in(client: &Client, base: &str, sub: &str, username: &str) -> Result<Response> {
+/// The provider returns to the server at `callback`. The callback's response
+/// returns unfollowed, so the caller reads its status and where it redirects.
+async fn sign_in(
+	client: &Client,
+	base: &str,
+	callback: &str,
+	sub: &str,
+	username: &str,
+) -> Result<Response> {
 	let url = format!("{base}/_matrix/client/v3/login/sso/redirect/{IDP}");
 	let redirect = client
 		.get(url)
@@ -301,7 +311,7 @@ async fn sign_in(client: &Client, base: &str, sub: &str, username: &str) -> Resu
 		.next()
 		.expect("cookie pair");
 
-	let url = format!("{base}/_matrix/client/unstable/login/sso/callback/{IDP}");
+	let url = format!("{base}/{callback}/{IDP}");
 	let code = format!("{sub}.{username}");
 
 	client

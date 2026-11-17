@@ -2188,9 +2188,9 @@
 # empty `client_secret_file`. `issuer_url` is
 # required except for the `github`, `gitlab` and `google` brands.
 # Register `well_known.client` followed by
-# `/_matrix/client/unstable/login/sso/callback/<client_id>` as the redirect
-# URI at the provider; it is the default `callback_url`, so set that
-# yourself when `well_known.client` is unset.
+# `/_tuwunel/sso/callback/<client_id>` as the redirect URI at the provider;
+# it is the default `callback_url`, so set that yourself when
+# `well_known.client` is unset. The reverse proxy must forward `/_tuwunel/`.
 #
 # Minimal example:
 #
@@ -2270,11 +2270,14 @@
 #issuer_url =
 
 # The callback URL configured when registering the OAuth application with
-# the provider. Tuwunel's callback URL must be strictly formatted exactly
-# as instructed. The URL host must point directly at the matrix server and
-# use the following path:
-# `/_matrix/client/unstable/login/sso/callback/<client_id>` where
-# `<client_id>` is the same one configured for this provider above.
+# the provider.
+#
+# The URL host must point directly at the matrix server and use the path
+# `/_tuwunel/sso/callback/<client_id>`, where `<client_id>` is the one
+# configured for this provider above. The legacy path
+# `/_matrix/client/unstable/login/sso/callback/<client_id>` keeps working
+# until 3.0 with a startup warning. A change takes effect on restart, not
+# on reload.
 #
 #callback_url =
 

@@ -220,8 +220,8 @@ We recommend Caddy as a reverse proxy, as it is trivial to use, handling TLS cer
 Regardless of which reverse proxy you choose, you will need to:
 
 1. **Reverse proxy the following routes:**
-   - `/_matrix/` - core Matrix C-S and S-S APIs
-   - `/_tuwunel/` - ad-hoc Tuwunel routes such as `/local_user_count` and `/server_version`
+   - `/_matrix/` - Matrix APIs used by clients and by other Matrix servers (federation).
+   - `/_tuwunel/` - Tuwunel routes, including `/local_user_count` and `/server_version`, plus login routes for the built-in OpenID Connect (OIDC) server and the callback that returns users from an identity provider after login.
 
 2. **Optionally reverse proxy (recommended):**
    - `/_synapse/admin/` if you use administration dashboards such as synapse-admin or moderation bots; see the [Synapse Admin API](../development/compliance/synapse-admin.md) page for the served endpoints. Most require an administrator access token. The exception is the `/_synapse/admin/v1/register` pair, which authenticates by HMAC over `registration_shared_secret` instead of a token and is served only while that secret is configured, so anyone holding it can create accounts. Restrict this path to trusted networks

@@ -12,7 +12,11 @@ use ruma::api::{
 };
 use tower_http::set_header::SetResponseHeaderLayer;
 use tuwunel_api::router::RouterExt;
-use tuwunel_core::{Server, err};
+use tuwunel_core::{
+	Server,
+	config::{LEGACY_SSO_CALLBACK_PATH, SSO_CALLBACK_PATH},
+	err,
+};
 
 use crate::{
 	self as client, State, is_joined_route, put_msc4388_route,
@@ -21,11 +25,18 @@ use crate::{
 
 /// Builds the client endpoint routes.
 ///
-/// Federation and media settings select the configured route variants.
+/// Federation, media and identity provider settings select the configured
+/// route variants.
 pub fn build(server: &Server) -> Router<State> {
 	let config = &server.config;
 	let router = Router::new();
 	let router = register_client_auth_routes(router);
+	let router = if config.mounts_legacy_sso_callback() {
+		router.route(concat!("/", LEGACY_SSO_CALLBACK_PATH, "/{idp_id}"), get(sso_callback_route))
+	} else {
+		router
+	};
+
 	let router = register_client_profile_and_data_routes(router);
 	let router = register_client_keys_and_backup_routes(router);
 	let router = register_client_room_routes(router);
@@ -64,7 +75,7 @@ fn register_client_auth_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::refresh_token_route)
 		.ruma_route(&client::sso_login_route)
 		.ruma_route(&client::sso_login_with_provider_route)
-		.route("/_matrix/client/unstable/login/sso/callback/{idp_id}", get(sso_callback_route))
+		.route(concat!("/", SSO_CALLBACK_PATH, "/{idp_id}"), get(sso_callback_route))
 		.ruma_route(&client::sso_fallback_route)
 		.ruma_route(&client::whoami_route)
 		.ruma_route(&client::logout_route)

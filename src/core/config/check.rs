@@ -957,6 +957,36 @@ fn check_identity_providers(config: &Config) -> Result {
 			});
 	}
 
+	config
+		.identity_provider
+		.values()
+		.filter_map(|provider| Some((provider.id(), provider.moved_callback_url()?)))
+		.for_each(|(provider, callback_url)| {
+			warn!(
+				provider,
+				%callback_url,
+				"This identity provider's `callback_url` uses the legacy path under \
+				 `/_matrix/client/unstable/`, which is served only until 3.0. Register the \
+				 `callback_url` shown here as a redirect URI at the provider, then set it in the \
+				 configuration and restart."
+			);
+		});
+
+	config
+		.identity_provider
+		.values()
+		.filter(|provider| config.uses_registered_callback(provider))
+		.for_each(|provider| {
+			warn!(
+				provider = provider.id(),
+				"This identity provider has no `callback_url` and `well_known.client` is unset, \
+				 so the provider returns users to the redirect URI it has registered, which can \
+				 only be the legacy path under `/_matrix/client/unstable/`. That path is served \
+				 only until 3.0. Register `<server>/_tuwunel/sso/callback/<client_id>` at the \
+				 provider, then set `callback_url` to it and restart."
+			);
+		});
+
 	Ok(())
 }
 
