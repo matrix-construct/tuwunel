@@ -8,8 +8,8 @@ use futures::FutureExt;
 use http::request::Parts;
 use ruma::api::client::{
 	delayed_events::{
-		delayed_message_event::unstable::Response as DelayedMessageResponse,
-		delayed_state_event::unstable::Response as DelayedStateResponse,
+		delayed_message_event::msc4140::Response as DelayedMessageResponse,
+		delayed_state_event::msc4140::Response as DelayedStateResponse,
 	},
 	message::send_message_event,
 	state::send_state_event,

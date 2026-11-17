@@ -87,7 +87,7 @@ fn enabling_e2ee_needs_a_pass() {
 fn request_with_e2ee(enabled: bool) -> Request {
 	let mut request = Request::new();
 
-	request.extensions.e2ee.enabled = Some(enabled);
+	request.extensions.e2ee.enabled = enabled;
 
 	request
 }

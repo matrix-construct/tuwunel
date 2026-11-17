@@ -3,7 +3,7 @@ use ruma::{
 	UserId,
 	api::client::delayed_events::update_delayed_event::{
 		UpdateAction,
-		unstable_v1::{Request as BodyRequest, Response as BodyResponse},
+		msc4140_v1::{Request as BodyRequest, Response as BodyResponse},
 		v1::{Request, Response},
 	},
 };

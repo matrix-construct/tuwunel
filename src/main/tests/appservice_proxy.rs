@@ -25,7 +25,7 @@ use tuwunel_core::{
 		UserId,
 		api::{
 			appservice::{Namespace, Namespaces, Registration, RegistrationInit},
-			federation::authentication::{ServerSignaturesInput, XMatrix},
+			federation::authentication::{XMatrix, XMatrixSigningInput},
 		},
 	},
 };
@@ -484,13 +484,13 @@ async fn federation_post(
 		.uri(&uri)
 		.body(signed)?;
 
-	let input = ServerSignaturesInput::new(
+	let input = XMatrixSigningInput::new(
 		ours.to_owned(),
 		ours.to_owned(),
 		services.server_keys.keypair(),
 	);
 
-	let signature = XMatrix::try_from_http_request(&request, input)
+	let signature = XMatrix::sign_http_request(&request, input)
 		.map_err(|e| err!("signing the request failed: {e}"))?;
 
 	let response = services

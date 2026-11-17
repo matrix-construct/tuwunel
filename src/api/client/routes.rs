@@ -194,6 +194,7 @@ fn register_client_room_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::get_location_for_room_alias_route)
 		.ruma_route(&client::upgrade_room_route)
 		.ruma_route(&client::get_mutual_rooms_route)
+		.ruma_route(&client::get_mutual_rooms_unstable_route)
 		.ruma_route(&client::get_room_summary)
 		.route(
 			"/_matrix/client/unstable/im.nheko.summary/rooms/{room_id_or_alias}/summary",

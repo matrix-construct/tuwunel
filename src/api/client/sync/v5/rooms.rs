@@ -314,6 +314,7 @@ pub(super) async fn handle_room(
 		joined_count,
 		invited_count,
 		unread_notifications,
+		unstable_expanded_timeline: false,
 	};
 
 	Ok((payload, state_read))

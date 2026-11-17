@@ -131,7 +131,7 @@ impl AuthDispatch for AccessToken {
 /// delayed event action names its event by an unguessable `delay_id`, and the
 /// route refuses a missing token on its stable path.
 fn allows_missing_access_token(route: TypeId) -> bool {
-	route == TypeId::of::<transports::v1::Request>()
+	route == TypeId::of::<transports::msc4143::Request>()
 		|| route == TypeId::of::<change_password::v3::Request>()
 		|| route == TypeId::of::<update_delayed_event::v1::Request>()
 }
@@ -252,7 +252,7 @@ fn expired_token() -> Result<Auth> {
 #[cfg(test)]
 mod tests {
 	use ruma::api::client::{
-		delayed_events::update_delayed_event::unstable_v1::Request as UpdateByBodyRequest,
+		delayed_events::update_delayed_event::msc4140_v1::Request as UpdateByBodyRequest,
 		discovery::get_supported_versions,
 	};
 
@@ -260,7 +260,7 @@ mod tests {
 
 	#[test]
 	fn dedicated_routes_bypass_access_token_auth() {
-		assert!(allows_missing_access_token(TypeId::of::<transports::v1::Request>()));
+		assert!(allows_missing_access_token(TypeId::of::<transports::msc4143::Request>()));
 		assert!(allows_missing_access_token(TypeId::of::<change_password::v3::Request>()));
 		assert!(allows_missing_access_token(TypeId::of::<update_delayed_event::v1::Request>()));
 		assert!(!allows_missing_access_token(TypeId::of::<get_supported_versions::Request>()));

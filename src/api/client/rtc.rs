@@ -9,9 +9,9 @@ use crate::Ruma;
 /// Get MatrixRTC transports for MSC4143.
 pub(crate) async fn get_transports_route(
 	State(services): State<crate::State>,
-	_body: Ruma<transports::v1::Request>,
-) -> Result<transports::v1::Response> {
-	Ok(transports::v1::Response {
+	_body: Ruma<transports::msc4143::Request>,
+) -> Result<transports::msc4143::Response> {
+	Ok(transports::msc4143::Response {
 		rtc_transports: services.config.well_known.get_transports()?,
 	})
 }

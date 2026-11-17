@@ -7,7 +7,7 @@ use axum::{
 use bytes::Bytes;
 use ruma::{
 	OwnedTransactionId, TransactionId,
-	api::client::rendezvous::update_rendezvous_session::unstable::Response,
+	api::client::rendezvous::update_rendezvous_session::msc4388::Response,
 };
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, from_slice, from_value};

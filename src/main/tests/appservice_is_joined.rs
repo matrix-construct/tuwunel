@@ -10,7 +10,7 @@ use tuwunel_core::{
 		RoomId, UserId,
 		api::{
 			appservice::{Namespace, Namespaces, Registration, RegistrationInit},
-			federation::authentication::{ServerSignaturesInput, XMatrix},
+			federation::authentication::{XMatrix, XMatrixSigningInput},
 		},
 		events::room::member::MembershipState,
 	},
@@ -192,13 +192,13 @@ async fn federated_to_device(services: &Services, base: &str, owner_id: &UserId)
 		.uri(&uri)
 		.body(body.as_str())?;
 
-	let input = ServerSignaturesInput::new(
+	let input = XMatrixSigningInput::new(
 		ours.to_owned(),
 		ours.to_owned(),
 		services.server_keys.keypair(),
 	);
 
-	let signature = XMatrix::try_from_http_request(&request, input)
+	let signature = XMatrix::sign_http_request(&request, input)
 		.map_err(|e| err!("signing the transaction failed: {e}"))?;
 
 	let response = services

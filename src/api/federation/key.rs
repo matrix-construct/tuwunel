@@ -7,7 +7,7 @@ use axum::{Json, extract::State, response::IntoResponse};
 use ruma::{
 	MilliSecondsSinceUnixEpoch, Signatures,
 	api::{
-		OutgoingResponse,
+		OutgoingResponseExt,
 		federation::discovery::{OldVerifyKey, ServerSigningKeys, get_server_keys},
 	},
 	serde::Raw,

@@ -570,7 +570,7 @@ pub fn own_profile_owed(&self) -> bool {
 #[implement(Connection)]
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn update_cache(&mut self, request: &Request) -> bool {
-	let e2ee_enabled = self.extensions.e2ee.enabled == Some(true);
+	let e2ee_enabled = self.extensions.e2ee.enabled;
 	let lists_changed = Self::update_cache_lists(request, self);
 	let subscriptions_changed = Self::update_cache_subscriptions(request, self);
 
@@ -578,9 +578,7 @@ pub fn update_cache(&mut self, request: &Request) -> bool {
 
 	self.update_cache_profiles_owed(fields_widened);
 
-	lists_changed
-		|| subscriptions_changed
-		|| (!e2ee_enabled && self.extensions.e2ee.enabled == Some(true))
+	lists_changed || subscriptions_changed || (!e2ee_enabled && self.extensions.e2ee.enabled)
 }
 
 #[implement(Connection)]
@@ -723,7 +721,7 @@ fn update_cache_typing(request: &Typing, cached: &mut Typing) {
 
 #[implement(Connection)]
 fn update_cache_to_device(request: &ToDevice, cached: &mut ToDevice) {
-	some_or_sticky(request.enabled.as_ref(), &mut cached.enabled);
+	cached.enabled = request.enabled;
 	cached.since.clone_from(&request.since);
 	cached.limit = request.limit;
 }
@@ -786,9 +784,7 @@ fn fields_widened(
 }
 
 #[implement(Connection)]
-fn update_cache_e2ee(request: &E2EE, cached: &mut E2EE) {
-	some_or_sticky(request.enabled.as_ref(), &mut cached.enabled);
-}
+fn update_cache_e2ee(request: &E2EE, cached: &mut E2EE) { cached.enabled = request.enabled; }
 
 #[implement(Connection)]
 fn update_cache_profiles_owed(&mut self, fields_widened: bool) {

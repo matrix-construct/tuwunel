@@ -13,7 +13,7 @@ use tuwunel_core::{
 		api::{
 			Direction, OutgoingRequest, OutgoingRequestExt,
 			federation::{
-				authentication::{ServerSignatures, ServerSignaturesInput},
+				authentication::{ServerSignatures, XMatrixSigningInput},
 				event::get_event_by_timestamp::v1::Request as TimestampRequest,
 			},
 			path_builder::SinglePath,
@@ -144,7 +144,7 @@ where
 	T: OutgoingRequest<Authentication = ServerSignatures, PathBuilder = SinglePath>,
 {
 	let server_name = services.globals.server_name().to_owned();
-	let auth = ServerSignaturesInput::new(
+	let auth = XMatrixSigningInput::new(
 		server_name.clone(),
 		server_name,
 		services.server_keys.keypair(),

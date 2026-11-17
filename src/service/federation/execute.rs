@@ -11,11 +11,11 @@ use reqwest::{Method, Request, Response, Url};
 use ruma::{
 	ServerName,
 	api::{
-		EndpointError, IncomingResponse, MatrixVersion, OutgoingRequest, OutgoingRequestExt,
+		EndpointError, IncomingResponseExt, MatrixVersion, OutgoingRequest, OutgoingRequestExt,
 		SupportedVersions,
 		auth_scheme::AuthScheme,
 		error::{Error as RumaError, ErrorBody, ErrorKind},
-		federation::authentication::{ServerSignatures, ServerSignaturesInput},
+		federation::authentication::{ServerSignatures, XMatrixSigningInput},
 	},
 };
 use tokio::time::timeout;
@@ -350,7 +350,7 @@ fn raw_request(
 			.body(body)?,
 	};
 
-	let input = ServerSignaturesInput::new(
+	let input = XMatrixSigningInput::new(
 		self.services.server.name.clone(),
 		dest.to_owned(),
 		self.services.server_keys.keypair(),
@@ -359,7 +359,7 @@ fn raw_request(
 	signed(request, input)
 }
 
-fn signed(mut request: RawRequest, input: ServerSignaturesInput<'_>) -> Result<RawRequest> {
+fn signed(mut request: RawRequest, input: XMatrixSigningInput<'_>) -> Result<RawRequest> {
 	ServerSignatures::add_authentication(&mut request, input)
 		.map_err(|e| err!(BadServerResponse("Failed to sign the federation request: {e}")))?;
 
@@ -453,7 +453,9 @@ where
 {
 	let response = into_http_response(dest, actual, method, url, response, limit).await?;
 
-	T::IncomingResponse::try_from_http_response(response)
+	let (parts, body) = response.into_parts();
+
+	T::IncomingResponse::try_from_http_response(http::Response::from_parts(parts, body.as_ref()))
 		.map_err(|e| err!(BadServerResponse("Server returned bad 200 response: {e:?}")))
 }
 
@@ -495,9 +497,11 @@ async fn into_http_response(
 
 	debug!("Got {status:?} for {method} {url}");
 	if !status.is_success() {
+		let (parts, body) = http_response.into_parts();
+
 		return Err(Error::Federation(
 			dest.to_owned(),
-			RumaError::from_http_response(http_response),
+			RumaError::from_http_response(http::Response::from_parts(parts, body.as_ref())),
 		));
 	}
 

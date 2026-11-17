@@ -5,10 +5,11 @@
 
 use std::collections::BTreeMap;
 
+#[expect(deprecated)]
 use ruma::api::{
 	client::{
 		discovery::discover_support::Contact,
-		rtc::RtcTransport,
+		rtc::{LegacyLiveKitRtcTransport, RtcTransport},
 		uiaa::{LoginTermsParams, PolicyDefinition, PolicyTranslation},
 	},
 	identity_service::tos::get_terms_of_service::v2::{LocalizedPolicy, Policies},
@@ -117,11 +118,10 @@ pub fn get_transports(&self) -> Result<Vec<RtcTransport>> {
 		})
 	});
 
-	let livekit_url = self
-		.livekit_url
-		.iter()
-		.cloned()
-		.map(|url| Ok(RtcTransport::livekit(url)));
+	#[expect(deprecated)]
+	let livekit_url = self.livekit_url.iter().cloned().map(|url| {
+		Ok(RtcTransport::LegacyLiveKit(LegacyLiveKitRtcTransport::with_service_url(url)))
+	});
 
 	custom
 		.chain(livekit_url)

@@ -4,7 +4,7 @@ use bytes::BytesMut;
 use http::Response as HttpResponse;
 use reqwest::{Error as ReqwestError, Response};
 use ruma::api::{
-	IncomingResponse, OutgoingRequest, OutgoingRequestExt, auth_scheme::AuthScheme,
+	IncomingResponseExt, OutgoingRequest, OutgoingRequestExt, auth_scheme::AuthScheme,
 	path_builder::PathBuilder,
 };
 use tuwunel_core::{
@@ -142,7 +142,7 @@ where
 
 	let response = T::IncomingResponse::try_from_http_response(
 		http_response_builder
-			.body(body)
+			.body(body.as_ref())
 			.expect("reqwest body is valid http body"),
 	);
 

@@ -1,5 +1,5 @@
 use axum::extract::State;
-use ruma::api::client::rendezvous::delete_rendezvous_session::unstable::{Request, Response};
+use ruma::api::client::rendezvous::delete_rendezvous_session::msc4388::{Request, Response};
 use tuwunel_core::err;
 
 use super::{Result, ensure_available};

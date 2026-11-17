@@ -17,7 +17,7 @@ use ruma::{
 	api::{
 		SupportedVersions,
 		auth_scheme::{AuthScheme, NoAccessToken, NoAuthentication, SendAccessToken},
-		federation::authentication::{ServerSignatures, ServerSignaturesInput},
+		federation::authentication::{ServerSignatures, XMatrixSigningInput},
 		path_builder::{PathBuilder, SinglePath, VersionHistory},
 	},
 	signatures::Ed25519KeyPair,
@@ -53,8 +53,8 @@ impl FedAuth for ServerSignatures {
 		origin: OwnedServerName,
 		dest: OwnedServerName,
 		keypair: &Ed25519KeyPair,
-	) -> ServerSignaturesInput<'_> {
-		ServerSignaturesInput::new(origin, dest, keypair)
+	) -> XMatrixSigningInput<'_> {
+		XMatrixSigningInput::new(origin, dest, keypair)
 	}
 }
 

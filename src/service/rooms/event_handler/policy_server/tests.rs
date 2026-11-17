@@ -3,7 +3,7 @@ use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, Int, OwnedEventId, OwnedServerName,
 	RoomVersionId, ServerName, UserId,
 	api::{
-		EndpointError, OutgoingResponse, client::uiaa::UiaaResponse, error::Error as RumaError,
+		EndpointError, OutgoingResponseExt, client::uiaa::UiaaResponse, error::Error as RumaError,
 	},
 	event_id,
 	events::room::{member::MembershipState, policy::RoomPolicyEventContent},
@@ -601,7 +601,7 @@ fn remote(status: u16, body: &Value) -> RumaError {
 	let body = to_vec(body).expect("the error body serializes");
 	let response = Response::builder()
 		.status(status)
-		.body(body)
+		.body(body.as_slice())
 		.expect("the response builds");
 
 	RumaError::from_http_response(response)
@@ -614,7 +614,7 @@ fn federation_error(status: u16, body: &Value) -> Error {
 fn federation_error_not_json(status: u16) -> Error {
 	let response = Response::builder()
 		.status(status)
-		.body(b"<html>Bad gateway</html>".to_vec())
+		.body(b"<html>Bad gateway</html>".as_slice())
 		.expect("the response builds");
 
 	Error::Federation(

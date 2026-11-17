@@ -794,9 +794,9 @@ dependencies = [
 
 [[package]]
 name = "const-oid"
-version = "0.9.6"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
+checksum = "be95d4a884358a21a199689323c29e9256b4a1b315e22f183d155422041d3a9a"
 
 [[package]]
 name = "const-str"
@@ -1132,14 +1132,14 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek"
-version = "4.1.3"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
+checksum = "b5eed333089e2e1c1ac8c6c0398e5e2497b4c9926ca6d0365ed1e099afa5bc23"
 dependencies = [
  "cfg-if",
- "cpufeatures 0.2.17",
+ "cpufeatures 0.3.1",
  "curve25519-dalek-derive",
- "digest 0.10.7",
+ "digest 0.11.3",
  "fiat-crypto",
  "rustc_version",
  "subtle",
@@ -1187,9 +1187,9 @@ dependencies = [
 
 [[package]]
 name = "der"
-version = "0.7.10"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
+checksum = "6a996a108feb8b427a6e12fcf6af4aa83409b79d72c15337d7741368131ee004"
 dependencies = [
  "const-oid",
  "zeroize",
@@ -1256,6 +1256,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.1",
+ "const-oid",
  "crypto-common 0.2.2",
  "ctutils",
 ]
@@ -1307,24 +1308,25 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "ed25519"
-version = "2.2.3"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
+checksum = "29fcf32e6c73d1079f83ab4d782de2d81620346a5f38c6237a86a22f8368980a"
 dependencies = [
  "pkcs8",
- "signature",
+ "signature 3.0.0",
 ]
 
 [[package]]
 name = "ed25519-dalek"
-version = "2.2.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
+checksum = "6ebaa1a2bf1290ab3bfe5a7b771d050ebffab2711c19a81691c683a5144a25de"
 dependencies = [
  "curve25519-dalek",
  "ed25519",
  "serde",
- "sha2",
+ "sha2 0.11.1",
+ "signature 3.0.0",
  "subtle",
  "zeroize",
 ]
@@ -1426,9 +1428,9 @@ dependencies = [
 
 [[package]]
 name = "fiat-crypto"
-version = "0.2.9"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
+checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
 
 [[package]]
 name = "figment"
@@ -2373,7 +2375,7 @@ dependencies = [
  "pem",
  "serde",
  "serde_json",
- "signature",
+ "signature 2.2.0",
  "simple_asn1",
  "zeroize",
 ]
@@ -3399,9 +3401,9 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pkcs8"
-version = "0.10.2"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
+checksum = "451913da69c775a56034ea8d9003d27ee8948e12443eae7c038ba100a4f21cb7"
 dependencies = [
  "der",
  "spki",
@@ -3828,8 +3830,8 @@ dependencies = [
 
 [[package]]
 name = "ruma"
-version = "0.16.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=f80eca864344a4960ac05c8f7f776f33fb03a10e#f80eca864344a4960ac05c8f7f776f33fb03a10e"
+version = "0.18.0"
+source = "git+https://github.com/matrix-construct/ruma?rev=bfffcf752801584db43b2b8d883d8b3ac4042454#bfffcf752801584db43b2b8d883d8b3ac4042454"
 dependencies = [
  "assign",
  "js_int",
@@ -3848,9 +3850,10 @@ dependencies = [
 
 [[package]]
 name = "ruma-appservice-api"
-version = "0.16.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=f80eca864344a4960ac05c8f7f776f33fb03a10e#f80eca864344a4960ac05c8f7f776f33fb03a10e"
+version = "0.18.0"
+source = "git+https://github.com/matrix-construct/ruma?rev=bfffcf752801584db43b2b8d883d8b3ac4042454#bfffcf752801584db43b2b8d883d8b3ac4042454"
 dependencies = [
+ "http",
  "js_int",
  "ruma-common",
  "ruma-events",
@@ -3860,8 +3863,8 @@ dependencies = [
 
 [[package]]
 name = "ruma-client-api"
-version = "0.24.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=f80eca864344a4960ac05c8f7f776f33fb03a10e#f80eca864344a4960ac05c8f7f776f33fb03a10e"
+version = "0.26.0"
+source = "git+https://github.com/matrix-construct/ruma?rev=bfffcf752801584db43b2b8d883d8b3ac4042454#bfffcf752801584db43b2b8d883d8b3ac4042454"
 dependencies = [
  "as_variant",
  "assign",
@@ -3885,11 +3888,11 @@ dependencies = [
 
 [[package]]
 name = "ruma-common"
-version = "0.19.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=f80eca864344a4960ac05c8f7f776f33fb03a10e#f80eca864344a4960ac05c8f7f776f33fb03a10e"
+version = "0.21.0"
+source = "git+https://github.com/matrix-construct/ruma?rev=bfffcf752801584db43b2b8d883d8b3ac4042454#bfffcf752801584db43b2b8d883d8b3ac4042454"
 dependencies = [
  "as_variant",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "date_header",
  "form_urlencoded",
@@ -3920,8 +3923,8 @@ dependencies = [
 
 [[package]]
 name = "ruma-events"
-version = "0.34.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=f80eca864344a4960ac05c8f7f776f33fb03a10e#f80eca864344a4960ac05c8f7f776f33fb03a10e"
+version = "0.36.0"
+source = "git+https://github.com/matrix-construct/ruma?rev=bfffcf752801584db43b2b8d883d8b3ac4042454#bfffcf752801584db43b2b8d883d8b3ac4042454"
 dependencies = [
  "as_variant",
  "indexmap",
@@ -3943,8 +3946,8 @@ dependencies = [
 
 [[package]]
 name = "ruma-federation-api"
-version = "0.15.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=f80eca864344a4960ac05c8f7f776f33fb03a10e#f80eca864344a4960ac05c8f7f776f33fb03a10e"
+version = "0.17.0"
+source = "git+https://github.com/matrix-construct/ruma?rev=bfffcf752801584db43b2b8d883d8b3ac4042454#bfffcf752801584db43b2b8d883d8b3ac4042454"
 dependencies = [
  "bytes",
  "headers",
@@ -3967,8 +3970,8 @@ dependencies = [
 
 [[package]]
 name = "ruma-identifiers-validation"
-version = "0.12.1"
-source = "git+https://github.com/matrix-construct/ruma?rev=f80eca864344a4960ac05c8f7f776f33fb03a10e#f80eca864344a4960ac05c8f7f776f33fb03a10e"
+version = "0.14.1"
+source = "git+https://github.com/matrix-construct/ruma?rev=bfffcf752801584db43b2b8d883d8b3ac4042454#bfffcf752801584db43b2b8d883d8b3ac4042454"
 dependencies = [
  "js_int",
  "thiserror",
@@ -3976,9 +3979,10 @@ dependencies = [
 
 [[package]]
 name = "ruma-identity-service-api"
-version = "0.15.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=f80eca864344a4960ac05c8f7f776f33fb03a10e#f80eca864344a4960ac05c8f7f776f33fb03a10e"
+version = "0.17.0"
+source = "git+https://github.com/matrix-construct/ruma?rev=bfffcf752801584db43b2b8d883d8b3ac4042454#bfffcf752801584db43b2b8d883d8b3ac4042454"
 dependencies = [
+ "http",
  "js_int",
  "ruma-common",
  "ruma-events",
@@ -3987,8 +3991,8 @@ dependencies = [
 
 [[package]]
 name = "ruma-macros"
-version = "0.19.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=f80eca864344a4960ac05c8f7f776f33fb03a10e#f80eca864344a4960ac05c8f7f776f33fb03a10e"
+version = "0.20.3"
+source = "git+https://github.com/matrix-construct/ruma?rev=bfffcf752801584db43b2b8d883d8b3ac4042454#bfffcf752801584db43b2b8d883d8b3ac4042454"
 dependencies = [
  "as_variant",
  "cfg-if",
@@ -3997,14 +4001,14 @@ dependencies = [
  "quote",
  "ruma-identifiers-validation",
  "serde",
- "syn 2.0.119",
+ "syn 3.0.10",
  "toml",
 ]
 
 [[package]]
 name = "ruma-push-gateway-api"
-version = "0.15.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=f80eca864344a4960ac05c8f7f776f33fb03a10e#f80eca864344a4960ac05c8f7f776f33fb03a10e"
+version = "0.17.0"
+source = "git+https://github.com/matrix-construct/ruma?rev=bfffcf752801584db43b2b8d883d8b3ac4042454#bfffcf752801584db43b2b8d883d8b3ac4042454"
 dependencies = [
  "js_int",
  "ruma-common",
@@ -4015,10 +4019,10 @@ dependencies = [
 
 [[package]]
 name = "ruma-signatures"
-version = "0.21.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=f80eca864344a4960ac05c8f7f776f33fb03a10e#f80eca864344a4960ac05c8f7f776f33fb03a10e"
+version = "0.23.0"
+source = "git+https://github.com/matrix-construct/ruma?rev=bfffcf752801584db43b2b8d883d8b3ac4042454#bfffcf752801584db43b2b8d883d8b3ac4042454"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "ed25519-dalek",
  "memchr",
  "pkcs8",
@@ -4026,7 +4030,7 @@ dependencies = [
  "ruma-common",
  "ruma-events",
  "serde_json",
- "sha2",
+ "sha2 0.11.1",
  "thiserror",
 ]
 
@@ -4563,6 +4567,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha2"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.1",
+ "digest 0.11.3",
+]
+
+[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4622,6 +4637,12 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "rand_core 0.6.4",
 ]
+
+[[package]]
+name = "signature"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
 
 [[package]]
 name = "simd-adler32"
@@ -4721,9 +4742,9 @@ checksum = "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3"
 
 [[package]]
 name = "spki"
-version = "0.7.3"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
+checksum = "7ef958a98b9d5da290cfc78946e9f3e61e1e62a18db0d92cac0b83cc161491a9"
 dependencies = [
  "base64ct",
  "der",
@@ -4797,7 +4818,7 @@ dependencies = [
 [[package]]
 name = "synapse-admin-api"
 version = "0.11.0"
-source = "git+https://github.com/matrix-construct/synapse-admin-api?rev=ad6dd5b14cd944dbd43d61ec53f395521d1ac6d5#ad6dd5b14cd944dbd43d61ec53f395521d1ac6d5"
+source = "git+https://github.com/matrix-construct/synapse-admin-api?rev=8ea103cf3298f0d85b3fade5348f75c0bebe44a4#8ea103cf3298f0d85b3fade5348f75c0bebe44a4"
 dependencies = [
  "ruma",
  "serde",
@@ -5770,7 +5791,7 @@ dependencies = [
  "serde_html_form",
  "serde_json",
  "serde_yaml",
- "sha2",
+ "sha2 0.10.9",
  "termimad",
  "tokio",
  "tracing",

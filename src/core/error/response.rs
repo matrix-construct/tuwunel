@@ -4,7 +4,7 @@ use http_body_util::Full;
 use ruma::{
 	ServerName,
 	api::{
-		OutgoingResponse,
+		OutgoingResponseExt,
 		client::uiaa::UiaaResponse,
 		error::{Error as RumaError, ErrorBody, ErrorKind, StandardErrorBody},
 	},

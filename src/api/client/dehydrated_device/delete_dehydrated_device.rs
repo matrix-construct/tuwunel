@@ -1,5 +1,5 @@
 use axum::extract::State;
-use ruma::api::client::dehydrated_device::delete_dehydrated_device::unstable::{
+use ruma::api::client::dehydrated_device::delete_dehydrated_device::msc3814::{
 	Request, Response,
 };
 use tuwunel_core::Result;

@@ -995,7 +995,7 @@ fn authorizes(&self, method: Method, uri: Uri, headers: &HeaderMap, body: &[u8])
 	xmatrix.origin == self.origin
 		&& xmatrix.destination.as_ref().eq(&Some(&self.name))
 		&& xmatrix
-			.verify_request(&request, &self.name, &self.origin_keys)
+			.verify_http_request(&request, &self.name, &self.origin_keys)
 			.is_ok()
 }
 

@@ -8,7 +8,7 @@ use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, DeviceId, OwnedDeviceId, OwnedServerName,
 	OwnedUserId, ServerName, UserId,
 	api::{
-		IncomingRequest,
+		IncomingRequest, IncomingRequestExt,
 		client::{
 			appservice::fed_proxy::unstable::Request as FedProxyRequest,
 			media::{
@@ -21,7 +21,9 @@ use ruma::{
 	},
 };
 use serde_json::{Value as JsonValue, from_slice};
-use tuwunel_core::{Err, Error, Result, err, implement, utils::string::EMPTY};
+use tuwunel_core::{
+	Err, Error, Result, err, implement, smallvec::SmallVec, utils::string::EMPTY,
+};
 use tuwunel_service::{Services, appservice::RegistrationInfo};
 
 use super::{
@@ -30,6 +32,8 @@ use super::{
 	request::{Request, from as request_from},
 };
 use crate::State;
+
+type PathArgs<'a> = SmallVec<[&'a str; 8]>;
 
 /// Extracts a typed Ruma request and its authentication context.
 ///
@@ -284,9 +288,10 @@ where
 		.map_or(request.body, serialize_body);
 
 	let rate_limit_ip = rate_limit_ip(&request.parts).map_err(|(_, message)| message);
-	let http_request = HttpRequest::from_parts(request.parts, body);
-	let body = T::try_from_http_request(http_request, &request.path)
-		.map_err(|e| parse_error(route, &e))?;
+	let path: PathArgs<'_> = request.path.iter().map(AsRef::as_ref).collect();
+	let http_request = HttpRequest::from_parts(request.parts, body.as_ref());
+	let body =
+		T::try_from_http_request(http_request, &path).map_err(|e| parse_error(route, &e))?;
 
 	Ok(Args {
 		body,

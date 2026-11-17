@@ -31,9 +31,7 @@ pub(in crate::sync::v5) async fn acknowledge(
 	sender_device: Option<&DeviceId>,
 	conn: &Connection,
 ) -> Result {
-	let Some(sender_device) =
-		sender_device.filter(|_| conn.extensions.to_device.enabled.unwrap_or(false))
-	else {
+	let Some(sender_device) = sender_device.filter(|_| conn.extensions.to_device.enabled) else {
 		return Ok(());
 	};
 
@@ -101,9 +99,7 @@ pub(in crate::sync::v5) async fn pending(
 	sender_device: Option<&DeviceId>,
 	conn: &Connection,
 ) -> Result<bool> {
-	let Some(sender_device) =
-		sender_device.filter(|_| conn.extensions.to_device.enabled.unwrap_or(false))
-	else {
+	let Some(sender_device) = sender_device.filter(|_| conn.extensions.to_device.enabled) else {
 		return Ok(false);
 	};
 

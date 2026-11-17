@@ -6,7 +6,7 @@ use ruma::{
 	MilliSecondsSinceUnixEpoch, UInt,
 	api::client::delayed_events::{
 		DelayedEventData,
-		get_all_delayed_events::unstable::{Request, Response},
+		get_all_delayed_events::msc4140::{Request, Response},
 	},
 	serde::Raw,
 };

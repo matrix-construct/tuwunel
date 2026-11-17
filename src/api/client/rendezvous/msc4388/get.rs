@@ -1,6 +1,6 @@
 use axum::extract::State;
 use http::HeaderMap;
-use ruma::api::client::rendezvous::get_rendezvous_session::unstable::{Request, Response};
+use ruma::api::client::rendezvous::get_rendezvous_session::msc4388::{Request, Response};
 use tuwunel_core::Err;
 use tuwunel_service::rendezvous::Get;
 

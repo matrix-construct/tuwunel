@@ -367,7 +367,7 @@ features = [
 
 [workspace.dependencies.ruma]
 git = "https://github.com/matrix-construct/ruma"
-rev = "f80eca864344a4960ac05c8f7f776f33fb03a10e"
+rev = "bfffcf752801584db43b2b8d883d8b3ac4042454"
 features = [
     "__compat",
     "appservice-api-c",
@@ -382,7 +382,6 @@ features = [
     "ring-compat",
     "unstable-extensible-events",
     "unstable-msc2448",
-    "unstable-msc2666",
     "unstable-msc2815",
     "unstable-msc3026",
     "unstable-msc3202", # encrypted appservice transaction extensions
@@ -419,7 +418,7 @@ features = [
 
 [workspace.dependencies.synapse-admin-api]
 git = "https://github.com/matrix-construct/synapse-admin-api"
-rev = "ad6dd5b14cd944dbd43d61ec53f395521d1ac6d5"
+rev = "8ea103cf3298f0d85b3fade5348f75c0bebe44a4"
 features = ["server"]
 
 [workspace.dependencies.rustls]

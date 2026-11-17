@@ -75,14 +75,12 @@ pub(super) async fn handle(
 		.extensions
 		.to_device
 		.enabled
-		.unwrap_or(false)
 		.then_async(|| to_device::collect(sync_info, conn));
 
 	let e2ee = conn
 		.extensions
 		.e2ee
 		.enabled
-		.unwrap_or(false)
 		.then_async(|| e2ee::collect(sync_info, conn));
 
 	let (account_data, typing, to_device, e2ee) = join4(account_data, typing, to_device, e2ee)

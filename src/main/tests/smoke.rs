@@ -9,7 +9,7 @@ use tuwunel::{Args, Runtime, Server};
 use tuwunel_core::{
 	Result,
 	http::{HeaderValue, Request as HttpRequest, header::AUTHORIZATION},
-	ruma::api::federation::authentication::{ServerSignaturesInput, XMatrix},
+	ruma::api::federation::authentication::{XMatrix, XMatrixSigningInput},
 };
 use tuwunel_service::Services;
 
@@ -151,14 +151,14 @@ fn content_less_signature_cannot_carry_a_body() -> Result {
 			.uri(&uri)
 			.body("")?;
 
-		let input = ServerSignaturesInput::new(
+		let input = XMatrixSigningInput::new(
 			server_name.clone(),
 			server_name.clone(),
 			services.server_keys.keypair(),
 		);
 
 		let signature =
-			XMatrix::try_from_http_request(&request, input).expect("sign the empty request");
+			XMatrix::sign_http_request(&request, input).expect("sign the empty request");
 
 		let body = format!(
 			r#"{{"origin":"{server_name}","origin_server_ts":1,"pdus":[],"edus":[],"x":0.5}}"#

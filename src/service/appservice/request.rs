@@ -3,10 +3,8 @@ use std::{fmt::Debug, mem};
 use bytes::{Bytes, BytesMut};
 use reqwest::Request;
 use ruma::api::{
-	IncomingResponse, OutgoingRequest, OutgoingRequestExt,
-	appservice::Registration,
-	auth_scheme::{AuthScheme, SendAccessToken},
-	path_builder::PathBuilder,
+	IncomingResponseExt, OutgoingRequest, OutgoingRequestExt, appservice::Registration,
+	auth_scheme::AuthScheme, path_builder::PathBuilder,
 };
 use tuwunel_core::{
 	Err, Result, debug_error, err, implement, trace, utils::string_from_bytes, warn,
@@ -27,7 +25,7 @@ pub async fn send_request<T>(
 ) -> Result<Option<T::IncomingResponse>>
 where
 	T: OutgoingRequest + Debug + Send,
-	for<'a> T::Authentication: AuthScheme<Input<'a> = SendAccessToken<'a>>,
+	for<'a> T::Authentication: AuthScheme<Input<'a> = &'a str>,
 	for<'a> T::PathBuilder: PathBuilder<Input<'a> = ()>,
 {
 	let Some(dest) = destination(&registration) else {
@@ -39,7 +37,7 @@ where
 	let (base, client) = self.transport(dest)?;
 	let hs_token = registration.hs_token.as_str();
 	let mut http_request = request
-		.try_into_http_request::<BytesMut>(base, SendAccessToken::IfRequired(hs_token), ())
+		.try_into_http_request::<BytesMut>(base, hs_token, ())
 		.map_err(|e| {
 			err!(BadServerResponse(
 				warn!(appservice = %registration.id, "Failed to find destination {dest}: {e:?}")
@@ -104,7 +102,7 @@ where
 
 	let response = T::IncomingResponse::try_from_http_response(
 		http_response_builder
-			.body(body)
+			.body(body.as_ref())
 			.expect("reqwest body is valid http body"),
 	);
 

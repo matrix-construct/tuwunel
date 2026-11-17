@@ -1,5 +1,5 @@
 use axum::extract::State;
-use ruma::api::client::dehydrated_device::put_dehydrated_device::unstable::{Request, Response};
+use ruma::api::client::dehydrated_device::put_dehydrated_device::msc3814::{Request, Response};
 use tuwunel_core::Result;
 
 use crate::{ClientIp, Ruma};

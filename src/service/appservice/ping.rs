@@ -3,7 +3,6 @@ use reqwest::Request;
 use ruma::api::{
 	OutgoingRequestExt,
 	appservice::{Registration, ping::send_ping},
-	auth_scheme::SendAccessToken,
 	error::{BadStatusErrorData, ErrorKind},
 };
 use tuwunel_core::{
@@ -33,7 +32,7 @@ pub async fn ping(
 	let (base, client) = self.transport(&dest)?;
 	let hs_token = registration.hs_token.as_str();
 	let mut http_request = request
-		.try_into_http_request::<BytesMut>(base, SendAccessToken::IfRequired(hs_token), ())
+		.try_into_http_request::<BytesMut>(base, hs_token, ())
 		.map_err(|e| {
 			err!(Request(ConnectionFailed(warn!(
 				appservice = %registration.id,

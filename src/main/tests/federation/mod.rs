@@ -12,7 +12,7 @@ use tuwunel_core::{
 		EventId, OwnedEventId, OwnedRoomId, RoomId, ServerName, UserId,
 		api::{
 			OutgoingRequest, OutgoingRequestExt,
-			federation::authentication::{ServerSignatures, ServerSignaturesInput},
+			federation::authentication::{ServerSignatures, XMatrixSigningInput},
 			path_builder::SinglePath,
 		},
 		events::room::member::{MembershipState, RoomMemberEventContent},
@@ -86,7 +86,7 @@ where
 	T: OutgoingRequest<Authentication = ServerSignatures, PathBuilder = SinglePath>,
 {
 	let destination = services.globals.server_name().to_owned();
-	let auth = ServerSignaturesInput::new(origin.to_owned(), destination, key_pair);
+	let auth = XMatrixSigningInput::new(origin.to_owned(), destination, key_pair);
 	let request = request.try_into_http_request::<Vec<u8>>(base, auth, ())?;
 	let response = services
 		.client

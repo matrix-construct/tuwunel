@@ -1,8 +1,6 @@
 use axum::extract::State;
 use bytes::Bytes;
-use ruma::api::client::rendezvous::create_rendezvous_session::unstable_msc4388::{
-	Request, Response,
-};
+use ruma::api::client::rendezvous::create_rendezvous_session::msc4388::{Request, Response};
 
 use super::{Result, ensure_available, ensure_create_available, ensure_data_size};
 use crate::{ClientIp, Ruma};

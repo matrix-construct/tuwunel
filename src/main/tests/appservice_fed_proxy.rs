@@ -23,7 +23,7 @@ use tuwunel_core::{
 		ServerName,
 		api::{
 			appservice::{Namespaces, Registration, RegistrationInit},
-			federation::authentication::{ServerSignaturesInput, XMatrix},
+			federation::authentication::{XMatrix, XMatrixSigningInput},
 		},
 	},
 };
@@ -364,13 +364,13 @@ fn signature(services: &Services, peer: &ServerName, seen: &Seen) -> Result<Head
 		.uri(&seen.path_and_query)
 		.body(seen.body.as_ref())?;
 
-	let input = ServerSignaturesInput::new(
+	let input = XMatrixSigningInput::new(
 		ours.to_owned(),
 		peer.to_owned(),
 		services.server_keys.keypair(),
 	);
 
-	let signature = XMatrix::try_from_http_request(&request, input)
+	let signature = XMatrix::sign_http_request(&request, input)
 		.map_err(|e| err!("signing the received request failed: {e}"))?;
 
 	Ok(HeaderValue::from(&signature))

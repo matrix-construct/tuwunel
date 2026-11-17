@@ -1,5 +1,5 @@
 use axum::extract::State;
-use ruma::api::client::rendezvous::discover_rendezvous::unstable::{Request, Response};
+use ruma::api::client::rendezvous::discover_rendezvous::msc4388::{Request, Response};
 
 use super::{Result, create_permitted, ensure_available};
 use crate::{ClientIp, Ruma};
