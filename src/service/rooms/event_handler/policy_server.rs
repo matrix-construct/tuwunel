@@ -65,9 +65,14 @@ pub enum PolicyCheck {
 	/// either fetch one from the policy server or soft-fail.
 	Missing,
 
-	/// The policy server signature failed verification, or no valid one could
-	/// be obtained. Soft-fail.
+	/// The policy server signature failed verification, or the policy server
+	/// refused the event. Soft-fail.
 	Invalid,
+
+	/// No valid signature could be obtained and the policy server gave no
+	/// verdict, which `fail_open` does not tolerate. Soft-fail an event received
+	/// live; backfill defers one until it is offered again.
+	NoVerdict,
 }
 
 /// Outcome of a `/sign` round-trip to the policy server.
@@ -747,8 +752,8 @@ where
 /// MSC4284: fetch a missing or invalid inbound policy server signature.
 ///
 /// A valid signature is folded into `pdu_json` so it persists and federates
-/// onward. A refusal maps to `Invalid`, and so does a missing verdict unless
-/// `fail_open` is set.
+/// onward. A refusal maps to `Invalid`, and a missing verdict to `NoVerdict`
+/// unless `fail_open` is set.
 #[implement(super::Service)]
 #[tracing::instrument(name = "policy_fetch_inbound", level = "debug", skip_all)]
 async fn fetch_inbound_policy_signature<E>(
@@ -857,20 +862,22 @@ fn settle_signature(
 
 /// Maps the policy server's outcome on an incoming event to its check.
 ///
-/// A missing verdict soft-fails the event unless `fail_open` is set.
+/// A missing verdict passes only when `fail_open` is set.
 fn inbound_check(outcome: &FetchOutcome, fail_open: bool) -> PolicyCheck {
-	let passes = match outcome {
-		| FetchOutcome::Signed(_) => true,
-		| FetchOutcome::Refused(_) => false,
-		| FetchOutcome::NoVerdict(_) => fail_open,
-	};
-
-	if passes {
-		PolicyCheck::Pass
-	} else {
-		PolicyCheck::Invalid
+	match outcome {
+		| FetchOutcome::Signed(_) => PolicyCheck::Pass,
+		| FetchOutcome::Refused(_) => PolicyCheck::Invalid,
+		| FetchOutcome::NoVerdict(_) if fail_open => PolicyCheck::Pass,
+		| FetchOutcome::NoVerdict(_) => PolicyCheck::NoVerdict,
 	}
 }
+
+/// Whether an event received live is soft-failed on this check.
+///
+/// Backfill tells a refusal from a missing verdict instead, deferring the
+/// latter until the event is offered again.
+#[implement(PolicyCheck)]
+pub(super) fn soft_fails(self) -> bool { matches!(self, Self::Invalid | Self::NoVerdict) }
 
 /// MSC4284: verify the policy server signature on an inbound PDU. Returns
 /// `NotApplicable` for rooms without a configured policy server (the gate is

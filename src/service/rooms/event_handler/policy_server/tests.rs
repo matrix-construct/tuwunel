@@ -141,6 +141,7 @@ fn a_refusal_rejects_whatever_the_leniency() {
 
 	for outcome in [&answered, &unsigned] {
 		assert!(matches!(inbound_check(outcome, true), PolicyCheck::Invalid));
+		assert!(inbound_check(outcome, true).soft_fails());
 	}
 
 	let generic = json!({
@@ -544,17 +545,19 @@ fn treats_old_policy_states_as_absent() {
 
 /// Checks a no-verdict outcome under both leniencies.
 ///
-/// Unlenient, a local event is rejected with `status` and `body` and an
-/// incoming one soft-fails; lenient, the first goes out unsigned and the second
-/// passes.
+/// Unlenient, a local event is rejected with `status` and `body`, and an
+/// incoming one has no verdict, which soft-fails it when received live;
+/// lenient, the first goes out unsigned and the second passes.
 fn assert_no_verdict_dispositions<F>(outcome: F, status: u16, body: &Value)
 where
 	F: Fn() -> FetchOutcome,
 {
 	let via = server_name!("policy.example.org");
 
-	assert!(matches!(inbound_check(&outcome(), false), PolicyCheck::Invalid));
+	assert!(matches!(inbound_check(&outcome(), false), PolicyCheck::NoVerdict));
+	assert!(inbound_check(&outcome(), false).soft_fails());
 	assert!(matches!(inbound_check(&outcome(), true), PolicyCheck::Pass));
+	assert!(!inbound_check(&outcome(), true).soft_fails());
 	assert_eq!(rejection(outcome(), false), (status, body.clone()));
 	assert_eq!(outbound_signature(outcome(), true, via).expect("a lenient send goes out"), None);
 }

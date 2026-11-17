@@ -1,20 +1,24 @@
 use futures::StreamExt;
-use serde_json::{Value, value::to_raw_value};
+use serde_json::{Value, json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result, async_noinline, at, err,
 	itertools::Itertools,
 	ruma::{
 		CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, RoomId, UserId,
 		api::federation::backfill::get_backfill::v1::Request as BackfillRequest,
-		events::room::{
-			history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
-			member::MembershipState,
+		events::{
+			TimelineEventType,
+			room::{
+				history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
+				member::MembershipState,
+			},
 		},
 	},
-	utils::result::NotFound,
+	utils::{result::NotFound, time::now_secs},
 };
+use tuwunel_database::Cbor;
 use tuwunel_matrix::pdu::{PduBuilder, into_outgoing_federation};
-use tuwunel_service::Services;
+use tuwunel_service::{Services, rooms::timeline::Backfilled};
 
 use super::{
 	client::register,
@@ -71,6 +75,17 @@ const SEEDS_STORED: &str = "accepted backfilled message over a missing predecess
 const SEEDS_SCANNED: &str = "backfilled message over the predecessor no candidate supplies";
 const SEEDS_WITHHELD: &str = "soft-failed message over the accepted backfilled message";
 const SEEDS_FIRST: &str = "backfilled message over the soft-failed message";
+const REFUSED: &str = "backfilled message the policy server refuses";
+const DEFERRED: &str = "backfilled message the policy server gives no verdict on";
+const UNSEEN: &str = "backfilled message after the deferred one";
+const OLDER: &str = "older message of a response sent oldest first";
+const NEWER: &str = "newer message of a response sent oldest first";
+
+// An Ed25519 key of zero bytes; no signature is ever checked against it here.
+const POLICY_KEY: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+// Long enough to outlast the step.
+const HOLD_SECS: u64 = 3600;
 
 // Enough to reach the room's create event from any request below.
 const WHOLE_ROOM: u32 = 50;
@@ -300,16 +315,15 @@ pub(super) async fn soft_failed_stays_out_of_backfill<'a>(
 
 	assert_soft_failed(services, withheld).await;
 
-	let prepended = ingest(services, room_id, message_json.clone()).await?;
+	let outcome = ingest(services, room_id, message_json.clone()).await?;
 
-	assert!(!prepended, "backfill prepended a soft-failed event");
+	assert_eq!(outcome, Backfilled::Skipped, "backfill did not skip a soft-failed event");
 
 	assert_soft_failed(services, withheld).await;
 
-	let prepended =
-		ingest(services, room_id, with_foreign_signature(message_json.clone())).await?;
+	let outcome = ingest(services, room_id, with_foreign_signature(message_json.clone())).await?;
 
-	assert!(!prepended, "backfill prepended a copy of a soft-failed event");
+	assert_eq!(outcome, Backfilled::Skipped, "backfill did not skip a soft-failed copy");
 
 	let replaced = services
 		.timeline
@@ -324,9 +338,9 @@ pub(super) async fn soft_failed_stays_out_of_backfill<'a>(
 	let (outlier, outlier_json) =
 		sign_outlier_message(services, user_id, room_id, PROMOTED).await?;
 
-	let prepended = ingest(services, room_id, outlier_json).await?;
+	let outcome = ingest(services, room_id, outlier_json).await?;
 
-	assert!(prepended, "backfill withheld a plain outlier");
+	assert_eq!(outcome, Backfilled::Prepended, "backfill withheld a plain outlier");
 
 	services
 		.timeline
@@ -349,6 +363,174 @@ pub(super) async fn soft_failed_stays_out_of_backfill<'a>(
 		.is_ok();
 
 	assert!(!promoted, "an unreadable soft-failed event reached the timeline");
+
+	Ok(())
+}
+
+/// Backfill marks an event the room's policy server refuses, and defers one it
+/// gives no verdict on.
+///
+/// The policy server is this server's own name, backed off so nothing is asked:
+/// a cached refusal answers for one event, and the backoff leaves the next
+/// without a verdict, which stops its batch. The deferred event stays an
+/// unmarked outlier, and once the room unsets its policy server the next offer
+/// prepends it.
+// size firewall
+#[async_noinline]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn backfill_follows_the_policy_verdict<'a>(
+	services: &'a Services,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
+) -> Result {
+	let via = services.globals.server_name();
+	let (refused, refused_json) = sign_message(services, user_id, room_id, REFUSED).await?;
+	let (deferred, deferred_json) = sign_message(services, user_id, room_id, DEFERRED).await?;
+	let (unseen, unseen_json) = sign_message(services, user_id, room_id, UNSEEN).await?;
+	let (refused, deferred, unseen): (&EventId, &EventId, &EventId) =
+		(refused.event_id.as_ref(), deferred.event_id.as_ref(), unseen.event_id.as_ref());
+
+	let policy = json!({ "via": via, "public_keys": { "ed25519": POLICY_KEY } });
+
+	set_policy(services, user_id, room_id, policy).await?;
+	cache_refusal(services, refused)?;
+
+	services
+		.federation
+		.record_retry_after(via, now_secs().saturating_add(HOLD_SECS));
+
+	let outcome = ingest(services, room_id, refused_json.clone()).await?;
+
+	assert_eq!(outcome, Backfilled::Skipped, "backfill did not withhold a refused event");
+
+	let marked = withheld_marked(services, refused).await?;
+
+	assert!(marked, "the refused event lacks its soft-fail marker");
+
+	let ingested = offer(services, room_id, vec![deferred_json.clone(), unseen_json]).await?;
+
+	assert_eq!(ingested, Err(0), "backfill did not stop at an event without a verdict");
+
+	let marked = withheld_marked(services, deferred).await?;
+
+	assert!(!marked, "backfill marked an event without a verdict");
+
+	let reached = services
+		.timeline
+		.get_outlier_pdu_json(unseen)
+		.await
+		.is_ok();
+
+	assert!(!reached, "backfill went on past the deferred event");
+
+	set_policy(services, user_id, room_id, json!({})).await?;
+	services.federation.record_success(via).await;
+
+	let outcome = ingest(services, room_id, deferred_json).await?;
+
+	assert_eq!(outcome, Backfilled::Prepended, "unsetting the policy server kept the deferral");
+
+	let outcome = ingest(services, room_id, refused_json).await?;
+
+	assert_eq!(outcome, Backfilled::Skipped, "the refused event reached backfilled history");
+
+	Ok(())
+}
+
+/// Sets the content of the room's policy state event.
+///
+/// An empty object unsets the room's policy server.
+// size firewall
+#[async_noinline]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn set_policy<'a>(
+	services: &'a Services,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
+	content: Value,
+) -> Result<OwnedEventId> {
+	let builder = PduBuilder {
+		event_type: TimelineEventType::RoomPolicy,
+		content: to_raw_value(&content)?.into(),
+		state_key: Some("".into()),
+		..Default::default()
+	};
+
+	let state_lock = services.state.mutex.lock(room_id).await;
+
+	services
+		.timeline
+		.build_and_append_pdu(builder, user_id, room_id, &state_lock)
+		.await
+}
+
+/// Stores a refusal of an event the way the policy module caches one.
+///
+/// No public entry point caches a refusal, and no policy server answers here.
+fn cache_refusal(services: &Services, event_id: &EventId) -> Result {
+	let refusal = json!({ "Refused": { "until_secs": now_secs().saturating_add(HOLD_SECS) } });
+
+	services
+		.db
+		.get("eventid_policysigstate")?
+		.raw_put(event_id.as_str(), Cbor(&refusal));
+
+	Ok(())
+}
+
+/// Whether an event backfill withheld carries a soft-fail marker.
+///
+/// The event must still be an outlier, absent from the timeline.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn withheld_marked(services: &Services, event_id: &EventId) -> Result<bool> {
+	let absent = services
+		.timeline
+		.non_outlier_pdu_exists(event_id)
+		.await
+		.is_not_found();
+
+	assert!(absent, "backfill prepended an event its policy server did not recommend");
+
+	services
+		.timeline
+		.get_outlier_pdu_json(event_id)
+		.await?;
+
+	let marked = services
+		.pdu_metadata
+		.is_event_soft_failed(event_id)
+		.await;
+
+	Ok(marked)
+}
+
+/// Backfill ingests a response newest first, whatever order the origin sent.
+///
+/// The older event, sent first, is prepended last, so it becomes the room's
+/// first event.
+// size firewall
+#[async_noinline]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn backfill_ingests_newest_first<'a>(
+	services: &'a Services,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
+) -> Result {
+	let (older, older_json) = sign_outlier_message(services, user_id, room_id, OLDER).await?;
+
+	set_forward_extremities(services, room_id, [&older.event_id]).await;
+
+	let (_, newer_json) = sign_message(services, user_id, room_id, NEWER).await?;
+	let ingested = offer(services, room_id, vec![older_json, newer_json]).await?;
+
+	assert_eq!(ingested, Ok(2), "backfill did not prepend both events");
+
+	let (_, first) = services
+		.timeline
+		.first_item_in_room(room_id)
+		.await?;
+
+	assert_eq!(first.event_id, older.event_id, "backfill prepended the older event first");
 
 	Ok(())
 }
@@ -473,9 +655,13 @@ pub(super) async fn backfill_edges_rise_past_stored_history<'a>(
 
 	assert_eq!(found, [beyond, deep], "the scan did not rise to the events missing history");
 
-	let prepended = ingest(services, room_id, gap_json).await?;
+	let outcome = ingest(services, room_id, gap_json).await?;
 
-	assert!(prepended, "backfill withheld the plain outlier under the scan");
+	assert_eq!(
+		outcome,
+		Backfilled::Prepended,
+		"backfill withheld the plain outlier under the scan"
+	);
 
 	let found = edges(services, room_id).await;
 
@@ -590,9 +776,9 @@ async fn backfilled_over<'a, const N: usize>(
 	set_forward_extremities(services, room_id, prev_events).await;
 	let (pdu, json) = sign_message(services, user_id, room_id, body).await?;
 
-	let prepended = ingest(services, room_id, json).await?;
+	let outcome = ingest(services, room_id, json).await?;
 
-	assert!(prepended, "backfill did not prepend {body:?}");
+	assert_eq!(outcome, Backfilled::Prepended, "backfill did not prepend {body:?}");
 
 	Ok(pdu.event_id)
 }
@@ -680,7 +866,7 @@ async fn ingest(
 	services: &Services,
 	room_id: &RoomId,
 	json: CanonicalJsonObject,
-) -> Result<bool> {
+) -> Result<Backfilled> {
 	let room_version = services.state.get_room_version(room_id).await?;
 	let json = into_outgoing_federation(json, &room_version);
 
@@ -688,6 +874,26 @@ async fn ingest(
 		.timeline
 		.backfill_pdu(room_id, services.globals.server_name(), to_raw_value(&json)?)
 		.await
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn offer(
+	services: &Services,
+	room_id: &RoomId,
+	jsons: Vec<CanonicalJsonObject>,
+) -> Result<Result<usize, usize>> {
+	let room_version = services.state.get_room_version(room_id).await?;
+	let pdus = jsons
+		.into_iter()
+		.map(|json| to_raw_value(&into_outgoing_federation(json, &room_version)))
+		.collect::<Result<_, _>>()?;
+
+	let ingested = services
+		.timeline
+		.backfill_pdus(room_id, services.globals.server_name(), pdus)
+		.await;
+
+	Ok(ingested)
 }
 
 fn with_foreign_signature(mut json: CanonicalJsonObject) -> CanonicalJsonObject {

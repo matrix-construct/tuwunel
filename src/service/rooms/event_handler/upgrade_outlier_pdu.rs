@@ -23,7 +23,6 @@ use tuwunel_matrix::{
 use super::{
 	backoff::{Context, Disposition, UPGRADE_RETRY},
 	handle_prev_pdu::PrevUpgrade,
-	policy_server::PolicyCheck,
 	state_local_build::WalkMode,
 };
 use crate::rooms::{
@@ -517,13 +516,15 @@ async fn compute_soft_fail(
 				.await?,
 	};
 
-	// MSC4284: soft-fail when the policy server rejects the event.
-	Ok(soft_fail_redact
-		|| matches!(
-			self.verify_or_fetch_inbound_policy_signature(pdu_json, incoming_pdu)
-				.await,
-			PolicyCheck::Invalid,
-		))
+	// MSC4284: soft-fail when the policy server refuses the event or gives no
+	// verdict on it.
+	let soft_fail = soft_fail_redact
+		|| self
+			.verify_or_fetch_inbound_policy_signature(pdu_json, incoming_pdu)
+			.await
+			.soft_fails();
+
+	Ok(soft_fail)
 }
 
 #[implement(super::Service)]

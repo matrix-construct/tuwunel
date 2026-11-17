@@ -4,11 +4,13 @@
 //! and a frontier seed is asked of every candidate. Every branch of a withheld
 //! fork is asked before the call ends while the budget allows, and a frontier
 //! seed that cannot progress hands the call back to the oldest event's
-//! candidates first.
+//! candidates first. A deferred event ends both its batch and the call, and a
+//! response is ingested newest first with the create event last.
 
 use ruma::{EventId, OwnedEventId, ServerName, event_id, server_name};
+use serde_json::{Value, json, value::to_raw_value};
 
-use super::{Attempt, Batch, Candidates, Seed, retry, walks};
+use super::{Attempt, Backfilled, Batch, Candidates, Seed, ingestion_order, retry, tally, walks};
 
 #[test]
 fn the_first_move_off_the_oldest_event_is_not_counted() {
@@ -187,6 +189,74 @@ fn the_walk_runs_only_while_a_request_can_follow() {
 	assert!(walks(&attempt(branch(seed), &[], &[seed], 2), &Batch::Prepended));
 	assert!(!walks(&attempt(branch(seed), &[], &[seed], 1), &Batch::Unanswered));
 	assert!(!walks(&attempt(Seed::Fallback, &[origin], &[seed], 1), &empty(origin)));
+}
+
+#[test]
+fn a_deferred_event_ends_the_call() {
+	let (origin, other) = (server_name!("origin.example"), server_name!("other.example"));
+	let (oldest, seed, sibling) =
+		(event_id!("$oldest"), event_id!("$withheld"), event_id!("$sibling"));
+
+	let fork = frontier(&[oldest, seed, sibling]);
+
+	for (before, prepended) in [
+		(attempt(Seed::Oldest, &[origin, other], &[], 3), false),
+		(attempt(Seed::Oldest, &[origin, other], &[], 3), true),
+		(attempt(branch(seed), &[other], &[seed], 3), true),
+		(attempt(Seed::Fallback, &[origin, other], &[seed], 3), false),
+	] {
+		let deferred = Batch::Deferred { prepended };
+
+		assert!(!walks(&before, &deferred), "walked after {before:?}");
+		assert_eq!(retry(before, &deferred, oldest, &fork), None);
+	}
+}
+
+#[test]
+fn ingestion_stops_at_the_first_deferred_event() {
+	let (prepended, skipped, deferred) =
+		(Backfilled::Prepended, Backfilled::Skipped, Backfilled::Deferred);
+
+	let ingested = |outcomes: &[Backfilled]| outcomes.iter().copied().try_fold(0, tally);
+
+	assert_eq!(ingested(&[prepended, skipped, prepended]), Ok(2));
+	assert_eq!(ingested(&[prepended, skipped, deferred, prepended]), Err(1));
+	assert_eq!(ingested(&[deferred, prepended]), Err(0));
+}
+
+#[test]
+fn a_response_is_ingested_newest_first_with_the_create_event_last() {
+	let pdu = |id: &str, kind: &str, depth: u64| json!({ "event_id": id, "type": kind, "depth": depth });
+	let message = |id: &str, depth| pdu(id, "m.room.message", depth);
+	let create = pdu("$create", "m.room.create", 1);
+
+	let skeptic = [message("$oldest", 5), create.clone(), message("$deferred", 3)];
+	let fallback = [message("$deferred", 3), create.clone()];
+	let low_claim = [create, message("$low", 0)];
+	let unreadable = [message("$tie", 3), message("$second", 3), json!({ "event_id": "$bad" })];
+
+	assert_eq!(order_of(&skeptic), ["$oldest", "$deferred", "$create"]);
+	assert_eq!(order_of(&fallback), ["$deferred", "$create"]);
+	assert_eq!(order_of(&low_claim), ["$low", "$create"]);
+	assert_eq!(order_of(&unreadable), ["$bad", "$tie", "$second"]);
+}
+
+fn order_of(pdus: &[Value]) -> Vec<String> {
+	let pdus = pdus
+		.iter()
+		.map(|pdu| to_raw_value(pdu).expect("a test event serializes"))
+		.collect();
+
+	ingestion_order(pdus)
+		.map(|pdu| {
+			let pdu: Value = serde_json::from_str(pdu.get()).expect("a test event parses");
+
+			pdu["event_id"]
+				.as_str()
+				.unwrap_or_default()
+				.to_owned()
+		})
+		.collect()
 }
 
 fn attempt(seed: Seed, anchor: &[&ServerName], asked: &[&EventId], remaining: usize) -> Attempt {

@@ -12,7 +12,8 @@ use tuwunel_service::{
 
 use super::{
 	backfill::{
-		backfill_edges_rise_past_stored_history, backfill_seeds_keep_the_first_frontier,
+		backfill_edges_rise_past_stored_history, backfill_follows_the_policy_verdict,
+		backfill_ingests_newest_first, backfill_seeds_keep_the_first_frontier,
 		soft_failed_served_when_referenced, soft_failed_stays_out_of_backfill,
 		withheld_frontier_seeds_backfill,
 	},
@@ -100,6 +101,24 @@ pub(super) async fn enabled_baseline(
 		.map_err(step(label))?;
 
 	soft_failed_stays_out_of_backfill(services, user_id, &withheld_room)
+		.await
+		.map_err(step(label))?;
+
+	let label = "policy verdict on backfill";
+	let verdict_room = create_room(services, base, token)
+		.await
+		.map_err(step(label))?;
+
+	backfill_follows_the_policy_verdict(services, user_id, &verdict_room)
+		.await
+		.map_err(step(label))?;
+
+	let label = "backfill ingestion order";
+	let order_room = create_room(services, base, token)
+		.await
+		.map_err(step(label))?;
+
+	backfill_ingests_newest_first(services, user_id, &order_room)
 		.await
 		.map_err(step(label))?;
 

@@ -27,7 +27,7 @@ use tuwunel_core::{
 	},
 };
 use tuwunel_matrix::pdu::PduBuilder;
-use tuwunel_service::{Services, membership::Join};
+use tuwunel_service::{Services, membership::Join, rooms::timeline::Backfilled};
 
 use self::{
 	client::{Client, register},
@@ -167,7 +167,7 @@ async fn backfill_reaches_a_left_room(accounts: &Accounts<'_>) -> Result {
 		.backfill_pdu(&room_id, services.globals.server_name(), pdu)
 		.await?;
 
-	assert!(backfilled, "backfill turned the event away");
+	assert_eq!(backfilled, Backfilled::Prepended, "backfill turned the event away");
 	assert!(accounts.is_timeline(&event_id).await, "the backfilled event was not stored");
 
 	Ok(())

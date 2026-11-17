@@ -50,7 +50,6 @@ use tuwunel_matrix::{
 	room::state::resolution::FetchEvent,
 };
 
-pub use self::build::Collision;
 /// Re-exports the standard timeline item and count-key transformation.
 ///
 /// Timeline consumers use these alongside the service's directional streams.
@@ -60,6 +59,7 @@ pub(crate) use self::{
 	checked::{Mapped, Position},
 	redact::Restoration,
 };
+pub use self::{backfill::Backfilled, build::Collision};
 use crate::rooms::{
 	short::{ShortRoomId, ShortStateHash},
 	threads::RedactedRoot,

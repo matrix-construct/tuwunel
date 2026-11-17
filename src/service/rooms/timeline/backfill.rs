@@ -5,6 +5,7 @@
 //! events receive negative stream counts so they sort before normal history.
 
 use std::{
+	cmp::Reverse,
 	collections::{BTreeSet, HashSet, VecDeque},
 	convert::identity,
 	iter::once,
@@ -14,21 +15,22 @@ use std::{
 
 use futures::{
 	FutureExt, Stream, StreamExt, TryFutureExt,
-	future::{join, try_join, try_join4},
+	future::{join, try_join, try_join3},
 	stream::unfold,
 };
 use rand::seq::SliceRandom;
 use ruma::{
 	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedServerName,
-	RoomId, ServerName, api::Direction, events::TimelineEventType,
+	RoomId, ServerName, UInt, api::Direction, events::TimelineEventType,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{
 	Err, Result, at, debug, debug_warn, implement, is_false,
+	itertools::Itertools,
 	smallvec::SmallVec,
 	utils::{
-		BoolExt, IterStream, ReadyExt,
+		BoolExt, IterStream, ReadyExt, TryReadyExt,
 		future::{BoolExt as FutureBoolExt, TryExtExt},
 		result::NotFound,
 	},
@@ -45,7 +47,7 @@ use super::{ExtractBody, bias_count};
 use crate::{
 	federation::Candidates,
 	fetcher::{Op, Opts},
-	rooms::state_accessor::plain_text_topic,
+	rooms::{event_handler::PolicyCheck, state_accessor::plain_text_topic},
 };
 
 #[cfg(test)]
@@ -58,12 +60,41 @@ const BACKFILL_ATTEMPT_LIMIT: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 
 const BACKFILL_BATCH_ATTEMPTS: usize = 3;
 
+/// What backfill did with one remotely supplied event.
+///
+/// A deferred event ends ingestion of its batch and the backfill call, so
+/// nothing older is prepended past it; a skipped one does not.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Backfilled {
+	/// The event joined the room's history.
+	Prepended,
+
+	/// The event was left out, as one accepted already or withheld as
+	/// soft-failed.
+	Skipped,
+
+	/// The room's policy server gave no verdict on the event, which stays an
+	/// unmarked outlier until backfill offers it again.
+	Deferred,
+}
+
 /// The `event_id` and timestamp parsed back out of an [`Op::TimestampToEvent`]
 /// fetch outcome.
 #[derive(Deserialize)]
 struct TimestampHit {
 	event_id: OwnedEventId,
 	origin_server_ts: MilliSecondsSinceUnixEpoch,
+}
+
+/// The fields of a backfilled event that place it in the ingestion order.
+///
+/// Only these two are read, so the rest of the event is skipped over.
+#[derive(Deserialize)]
+struct Placement {
+	#[serde(rename = "type")]
+	kind: TimelineEventType,
+
+	depth: UInt,
 }
 
 /// One backfill request.
@@ -107,8 +138,8 @@ type Unheld = SmallVec<[OwnedEventId; 1]>;
 
 /// The outcome of one backfill request.
 ///
-/// From the first request `Empty` and `Prepended` can lead to another; from any
-/// later one, every outcome can.
+/// From the first request `Empty` and `Prepended` can lead to another, and from
+/// any later one every outcome but `Deferred` can.
 enum Batch {
 	/// No candidate answered.
 	Unanswered,
@@ -118,6 +149,13 @@ enum Batch {
 
 	/// The origin answered, and nothing was prepended.
 	Empty(OwnedServerName),
+
+	/// An event was deferred, so the rest of the batch and the call wait for a
+	/// later request.
+	Deferred {
+		/// Whether events ahead of it were prepended.
+		prepended: bool,
+	},
 }
 
 /// Attempts federation backfill when a request reaches local history's edge.
@@ -130,9 +168,10 @@ enum Batch {
 /// one, and its events are asked in turn while requests are left, every branch
 /// of a withheld fork even after a prepend. A first batch that prepends nothing
 /// is otherwise asked again of the remaining candidates, and a seed that cannot
-/// progress returns to the oldest event first. No candidate, a remote fetch
-/// failure, or an empty accepted chunk is treated as a successful best-effort
-/// outcome.
+/// progress returns to the oldest event first. An event the room's policy
+/// server gives no verdict on ends the call, so nothing older is prepended past
+/// it. No candidate, a remote fetch failure, or an empty accepted chunk is
+/// treated as a successful best-effort outcome.
 #[implement(super::Service)]
 #[tracing::instrument(name = "backfill", level = "debug", skip(self))]
 pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Result {
@@ -224,7 +263,10 @@ pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Re
 
 	let (prepended, last) = attempts
 		.ready_fold((false, None), |(prepended, _), batch| {
-			(prepended || matches!(batch, Ok(Batch::Prepended)), Some(batch))
+			let prepends =
+				matches!(batch, Ok(Batch::Prepended | Batch::Deferred { prepended: true }));
+
+			(prepended || prepends, Some(batch))
 		})
 		.await;
 
@@ -322,7 +364,7 @@ async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 ///
 /// A fetch no candidate answers is `Unanswered` and an unparsable response is
 /// an error, while each event's own ingestion failure only leaves it out of the
-/// count.
+/// count. Ingestion stops at the first deferred event.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self, eligible), level = "debug")]
 async fn backfill_batch(
@@ -343,19 +385,11 @@ async fn backfill_batch(
 
 	let pdus: Vec<Box<RawJsonValue>> = serde_json::from_slice(&outcome.bytes)?;
 	let batch_size = pdus.len();
-	let prepended = pdus
-		.into_iter()
-		.stream()
-		.fold(0_usize, async |prepended, pdu| {
-			let inserted = self
-				.backfill_pdu(room_id, &outcome.origin, pdu)
-				.await
-				.inspect_err(|e| debug_warn!(%room_id, %e, "Failed to add backfilled pdu"))
-				.unwrap_or(false);
-
-			prepended.saturating_add(usize::from(inserted))
-		})
+	let counted = self
+		.backfill_pdus(room_id, &outcome.origin, pdus)
 		.await;
+
+	let prepended = counted.unwrap_or_else(identity);
 
 	debug!(
 		%room_id,
@@ -363,15 +397,73 @@ async fn backfill_batch(
 		origin = %outcome.origin,
 		batch_size,
 		prepended,
+		deferred = counted.is_err(),
 		"Processed backfill response",
 	);
 
-	let batch = match prepended {
-		| 0 => Batch::Empty(outcome.origin.clone()),
-		| _ => Batch::Prepended,
+	let batch = match counted {
+		| Err(_) => Batch::Deferred { prepended: prepended > 0 },
+		| Ok(0) => Batch::Empty(outcome.origin.clone()),
+		| Ok(_) => Batch::Prepended,
 	};
 
 	Ok(batch)
+}
+
+/// Ingests a backfill response, stopping at the first deferred event.
+///
+/// The events are taken in `ingestion_order`, so nothing older is prepended
+/// past a deferred event. The count of prepended events comes back, as the
+/// error when a deferred event stopped ingestion; each event's own ingestion
+/// failure only leaves it out of the count.
+#[implement(super::Service)]
+#[tracing::instrument(skip(self, pdus), level = "debug")]
+pub async fn backfill_pdus(
+	&self,
+	room_id: &RoomId,
+	origin: &ServerName,
+	pdus: Vec<Box<RawJsonValue>>,
+) -> Result<usize, usize> {
+	ingestion_order(pdus)
+		.stream()
+		.then(|pdu| {
+			self.backfill_pdu(room_id, origin, pdu)
+				.inspect_err(|e| debug_warn!(%room_id, %e, "Failed to add backfilled pdu"))
+				.unwrap_or(Backfilled::Skipped)
+		})
+		.map(Ok)
+		.ready_try_fold(0_usize, tally)
+		.await
+}
+
+/// Orders a backfill response for ingestion: newest first by depth, and the
+/// create event last whatever depth it claims.
+///
+/// An event's ancestors all have a smaller depth, so nothing ingested ahead of
+/// a deferred event is among them, and the create event, whose prepend ends
+/// backfill for the room, comes after every other event. An event whose type
+/// or depth cannot be read goes first, for ingestion to reject.
+fn ingestion_order(pdus: Vec<Box<RawJsonValue>>) -> impl Iterator<Item = Box<RawJsonValue>> {
+	pdus.into_iter()
+		.sorted_by_cached_key(|pdu| placement(pdu))
+}
+
+fn placement(pdu: &RawJsonValue) -> Option<(bool, Reverse<UInt>)> {
+	serde_json::from_str(pdu.get())
+		.ok()
+		.map(|Placement { kind, depth }| (kind == TimelineEventType::RoomCreate, Reverse(depth)))
+}
+
+/// Counts a batch's prepended events, ending at the first deferred one.
+///
+/// The count so far comes back as the error, so nothing after a deferred event
+/// is ingested.
+fn tally(prepended: usize, outcome: Backfilled) -> Result<usize, usize> {
+	match outcome {
+		| Backfilled::Skipped => Ok(prepended),
+		| Backfilled::Prepended => Ok(prepended.saturating_add(1)),
+		| Backfilled::Deferred => Err(prepended),
+	}
 }
 
 /// Finds the events, oldest first, below which history is still missing.
@@ -495,11 +587,13 @@ fn enqueue(
 /// Whether a request can follow `batch`, so the walk is worth running.
 ///
 /// It holds whenever `retry` can answer one: the first request leads on unless
-/// no candidate answered it, and every later one is counted.
+/// no candidate answered it, and every later one is counted. A deferred event
+/// ends the call.
 fn walks(attempt: &Attempt, batch: &Batch) -> bool {
-	match attempt.seed {
-		| Seed::Oldest => !matches!(batch, Batch::Unanswered),
-		| Seed::Frontier(_) | Seed::Fallback => attempt.remaining > 1,
+	match (&attempt.seed, batch) {
+		| (_, Batch::Deferred { .. }) => false,
+		| (Seed::Oldest, _) => !matches!(batch, Batch::Unanswered),
+		| (Seed::Frontier(_) | Seed::Fallback, _) => attempt.remaining > 1,
 	}
 }
 
@@ -514,13 +608,18 @@ fn walks(attempt: &Attempt, batch: &Batch) -> bool {
 /// call to the oldest event's remaining candidates first. Once the seeds are
 /// spent, the oldest event is asked again of those candidates if it is itself
 /// on the frontier. The request the walk first moves after is not counted, so a
-/// walk resumed over stored withheld events keeps the whole budget.
+/// walk resumed over stored withheld events keeps the whole budget. A deferred
+/// event ends the call, so no other origin or seed is asked past it.
 fn retry(
 	attempt: Attempt,
 	batch: &Batch,
 	oldest: &EventId,
 	frontier: &[OwnedEventId],
 ) -> Option<Attempt> {
+	if matches!(batch, Batch::Deferred { .. }) {
+		return None;
+	}
+
 	let Attempt { seed, anchor, asked, remaining } = attempt;
 	let charged = remaining.saturating_sub(1);
 	let anchor: Candidates = match (&seed, batch) {
@@ -689,44 +788,29 @@ async fn backfill_event(
 
 	let pdus: Vec<Box<RawJsonValue>> = serde_json::from_slice(&outcome.bytes)?;
 
-	let ingestion = pdus
-		.into_iter()
-		.stream()
-		.fold(Ok(()), async |prior, pdu| {
-			let current = self
-				.backfill_pdu(room_id, &outcome.origin, pdu)
-				.map_ok(|_| ())
-				.inspect_err(
-					|e| debug_warn!(%room_id, error = ?e, "Failed to add backfilled pdu"),
-				)
-				.await;
+	// The target counts only once prepended, whatever else the batch held.
+	self.backfill_pdus(room_id, &outcome.origin, pdus)
+		.await
+		.ok();
 
-			prior.and(current)
-		})
-		.await;
+	self.get_pdu_count(event_id).await?;
 
-	match self.get_pdu_count(event_id).await {
-		| Err(error) => ingestion.and(Err(error)),
-		| Ok(_) => {
-			let pdu = self.get_pdu(event_id).await?;
+	let pdu = self.get_pdu(event_id).await?;
 
-			if pdu.room_id() != room_id {
-				return Err!(Request(NotFound(
-					"Timestamp fallback target belongs to another room."
-				)));
-			}
-
-			Ok(pdu)
-		},
+	if pdu.room_id() != room_id {
+		return Err!(Request(NotFound("Timestamp fallback target belongs to another room.")));
 	}
+
+	Ok(pdu)
 }
 
 /// Fetches one remote event and persists it through the backfill path.
 ///
 /// Fetcher checks are disabled only for retrieval; `backfill_pdu`
 /// performs signature, hash, and authorization validation. An event already
-/// accepted, or a soft-failed one, completes successfully without insertion,
-/// while any other stored outlier is still validated and promoted.
+/// accepted, a soft-failed one, or one the room's policy server does not
+/// recommend completes successfully without insertion, while any other stored
+/// outlier is still validated and promoted.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn fetch_remote_event(&self, room_id: &RoomId, event_id: &EventId) -> Result {
@@ -746,11 +830,12 @@ pub async fn fetch_remote_event(&self, room_id: &RoomId, event_id: &EventId) -> 
 
 /// Validates and inserts one remotely supplied event as backfilled history.
 ///
-/// An already accepted duplicate returns `false` without insertion, as does a
-/// soft-failed event, which stays the outlier it was stored as. Any other new
-/// event or stored outlier receives a negative backfill count, moves to
-/// accepted storage, updates its timestamp and ID indexes, and adds searchable
-/// message or topic content.
+/// An already accepted duplicate is skipped without insertion, as is a
+/// soft-failed event, which stays the outlier it was stored as, and one the
+/// room's policy server refuses, which is marked soft-failed. One it gives no
+/// verdict on is deferred. Any other new event or stored outlier receives a
+/// negative backfill count, moves to accepted storage, updates its timestamp
+/// and ID indexes, and adds searchable message or topic content.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self, pdu), level = "debug")]
 pub async fn backfill_pdu(
@@ -758,7 +843,7 @@ pub async fn backfill_pdu(
 	room_id: &RoomId,
 	origin: &ServerName,
 	pdu: Box<RawJsonValue>,
-) -> Result<bool> {
+) -> Result<Backfilled> {
 	let parsed = self
 		.services
 		.event_handler
@@ -786,7 +871,7 @@ pub async fn backfill_pdu(
 	// failed read errs rather than letting the copy in.
 	if soft_failed {
 		debug!(%event_id, "Soft-failed event stays out of backfilled history");
-		return Ok(false);
+		return Ok(Backfilled::Skipped);
 	}
 
 	let existed = self
@@ -799,7 +884,7 @@ pub async fn backfill_pdu(
 
 	// Bail if the PDU already exists; a duplicate insertion is not good.
 	if existed {
-		return Ok(false);
+		return Ok(Backfilled::Skipped);
 	}
 
 	let pdu = self.get_pdu(&event_id);
@@ -808,10 +893,16 @@ pub async fn backfill_pdu(
 
 	let shortroomid = self.services.short.get_shortroomid(room_id);
 
-	let insert_lock = self.mutex_insert.lock(room_id).map(Ok);
+	let (pdu, value, shortroomid) = try_join3(pdu, value, shortroomid).await?;
 
-	let (pdu, value, shortroomid, insert_lock) =
-		try_join4(pdu, value, shortroomid, insert_lock).await?;
+	// Asked before the insert lock, so no `/sign` round trip ever holds it.
+	let (check, value) = self.policy_check(&pdu, value).await;
+
+	if let Some(withheld) = self.withhold(&pdu, check).await {
+		return Ok(withheld);
+	}
+
+	let insert_lock = self.mutex_insert.lock(room_id).await;
 
 	// A pdu_id is not returned from handle_incoming_pdu() when accepting a new
 	// event on this codepath. The pdu_id is instead created here in ℤ−
@@ -853,7 +944,70 @@ pub async fn backfill_pdu(
 	drop(mutex_lock);
 
 	debug!("Prepended backfill pdu");
-	Ok(true)
+	Ok(Backfilled::Prepended)
+}
+
+#[implement(super::Service)]
+#[tracing::instrument(skip_all, level = "debug")]
+async fn policy_check(
+	&self,
+	pdu: &PduEvent,
+	mut json: CanonicalJsonObject,
+) -> (PolicyCheck, CanonicalJsonObject) {
+	let check = self
+		.services
+		.event_handler
+		.verify_or_fetch_inbound_policy_signature(&mut json, pdu)
+		.await;
+
+	(check, json)
+}
+
+/// Withholds a backfilled event its room's policy server does not recommend.
+///
+/// A refused event is marked soft-failed, as the live path marks one, so later
+/// offers skip it. One without a verdict stays an unmarked outlier and is asked
+/// about again when backfill offers it next.
+#[implement(super::Service)]
+async fn withhold(&self, pdu: &PduEvent, check: PolicyCheck) -> Option<Backfilled> {
+	let (event_id, room_id) = (pdu.event_id(), pdu.room_id());
+
+	match check {
+		| PolicyCheck::NotApplicable | PolicyCheck::Pass | PolicyCheck::Missing => None,
+		| PolicyCheck::Invalid => {
+			self.mark_refused(room_id, event_id).await;
+			debug_warn!(%event_id, %room_id, "Policy server refused a backfilled event");
+			Some(Backfilled::Skipped)
+		},
+		| PolicyCheck::NoVerdict => {
+			debug_warn!(%event_id, %room_id, "No policy server verdict; deferring backfill");
+			Some(Backfilled::Deferred)
+		},
+	}
+}
+
+/// Marks a refused event soft-failed while its room still exists.
+///
+/// The room's state lock orders the write against a room deletion, whose sweep
+/// clears the room's markers, as it orders the live path's marker; a room
+/// deleted while the policy server was asked gets no marker.
+#[implement(super::Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+async fn mark_refused(&self, room_id: &RoomId, event_id: &EventId) {
+	let _state_lock = self.services.state.mutex.lock(room_id).await;
+
+	let exists = self
+		.services
+		.short
+		.get_shortroomid(room_id)
+		.is_ok()
+		.await;
+
+	if exists {
+		self.services
+			.pdu_metadata
+			.mark_event_soft_failed(event_id);
+	}
 }
 
 #[implement(super::Service)]
