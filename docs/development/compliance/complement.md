@@ -4,14 +4,14 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 224. Passing: **86.6%**
-  - ✅ `pass`: 194
+- Test groups: 225. Passing: **86.7%**
+  - ✅ `pass`: 195
   - 🟨 `some`: 9
   - 🟥 `fail`: 21
   - ⬛ `skip`: 0
 
-- Subtests: 627. Passing: **83.7%**
-  - ✅ `pass`: 525
+- Subtests: 633. Passing: **83.9%**
+  - ✅ `pass`: 531
   - 🟥 `fail`: 94
   - ⬛ `skip`: 8
 
@@ -125,6 +125,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | 🟥 | – | `MSC4242JoinPublicRoomWithRejectedStateDAGEvents` |
 | 🟥 | – | `MSC4242RejectionCascadesOnRejoin` |
 | 🟥 | – | `MSC4242RejoinMergesOldAndNewStateDAGBranches` |
+| ✅ | 6/0/0 | `MSC4284PolicyServer` |
 | ✅ | 11/0/0 | `MSC4289PrivilegedRoomCreators` |
 | ✅ | – | `MSC4289PrivilegedRoomCreators_Additional` |
 | ✅ | – | `MSC4289PrivilegedRoomCreators_AdditionalCreatorsAndInvited` |

@@ -334,6 +334,13 @@
 {"Action":"fail","Test":"TestMSC4242JoinPublicRoomWithRejectedStateDAGEvents"}
 {"Action":"fail","Test":"TestMSC4242RejectionCascadesOnRejoin"}
 {"Action":"fail","Test":"TestMSC4242RejoinMergesOldAndNewStateDAGBranches"}
+{"Action":"pass","Test":"TestMSC4284PolicyServer"}
+{"Action":"pass","Test":"TestMSC4284PolicyServer/inbound_bad_signature_refetched"}
+{"Action":"pass","Test":"TestMSC4284PolicyServer/inbound_missing_refused_on_fetch"}
+{"Action":"pass","Test":"TestMSC4284PolicyServer/inbound_missing_signed_on_fetch"}
+{"Action":"pass","Test":"TestMSC4284PolicyServer/inbound_valid"}
+{"Action":"pass","Test":"TestMSC4284PolicyServer/outbound_refused"}
+{"Action":"pass","Test":"TestMSC4284PolicyServer/outbound_signed"}
 {"Action":"pass","Test":"TestMSC4289PrivilegedRoomCreators"}
 {"Action":"pass","Test":"TestMSC4289PrivilegedRoomCreators/PL_event_is_missing_creator_in_users_map"}
 {"Action":"pass","Test":"TestMSC4289PrivilegedRoomCreators/admin_with_>PL100_cannot_kick_creator"}
