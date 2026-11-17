@@ -73,6 +73,14 @@ use crate::rooms::{
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
+	/// Serializes client message sends in a room as the outermost per-room
+	/// operation.
+	///
+	/// Only the client send route takes it, through `lock_send`, before the
+	/// state mutex. Never acquire it while holding any other mutex for the same
+	/// room.
+	mutex_send: RoomMutexMap,
+
 	/// Serializes timeline insertion as the leaf per-room operation.
 	///
 	/// Acquire it after any federation or state mutex held for the same room.
@@ -120,6 +128,13 @@ type RoomMutexMap = MutexMap<OwnedRoomId, ()>;
 /// never acquire either outer guard while retaining it.
 pub type RoomMutexGuard = MutexMapGuard<OwnedRoomId, ()>;
 
+/// Proof that a client message send holds its room's send order.
+///
+/// Only `lock_send` makes one, so a state guard cannot stand in for it.
+pub struct SendGuard {
+	_guard: RoomMutexGuard,
+}
+
 #[async_trait]
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
@@ -132,11 +147,16 @@ impl crate::Service for Service {
 				roomid_tscount_pducount: args.db["roomid_tscount_pducount"].clone(),
 				db: args.db.clone(),
 			},
+			mutex_send: RoomMutexMap::new(),
 			mutex_insert: RoomMutexMap::new(),
 		}))
 	}
 
 	async fn memory_usage(&self, out: &mut (dyn Write + Send)) -> Result {
+		let mutex_send = self.mutex_send.len();
+
+		writeln!(out, "- send_mutex: {mutex_send}")?;
+
 		let mutex_insert = self.mutex_insert.len();
 		writeln!(out, "- insert_mutex: {mutex_insert}")?;
 
@@ -144,6 +164,18 @@ impl crate::Service for Service {
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+}
+
+/// Takes a room's send order for one client message send.
+///
+/// Take it before the room's state guard and keep it for the whole request, so
+/// sends in the room find each other's transactions and keep their arrival
+/// order while the state guard is released for a policy server.
+#[implement(Service)]
+pub async fn lock_send(&self, room_id: &RoomId) -> SendGuard {
+	SendGuard {
+		_guard: self.mutex_send.lock(room_id).await,
+	}
 }
 
 /// Replaces the stored JSON of an accepted PDU without changing its ID.

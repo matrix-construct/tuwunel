@@ -194,7 +194,9 @@ typing work.
 > would have refused them.
 
 Local sends wait for the policy server before being sent to other servers.
-Other local sends to the same room wait behind that request.
+Messages sent to the same room wait behind that request. A state change,
+membership change or redaction also holds back everything else in the room,
+incoming events included, until its own request is answered.
 `request_timeout` limits this wait. A small `request_timeout` together with
 `fail_open = true` sends after a short wait when the policy server is slow
 or down.

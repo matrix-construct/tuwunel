@@ -51,6 +51,7 @@ pub(crate) async fn send_message_event_route(
 	let redacts_id =
 		check_send_policy(&services, sender_user, &body.event_type, &body.body.body).await?;
 
+	let send_lock = services.timeline.lock_send(&body.room_id).await;
 	let state_lock = services.state.mutex.lock(&body.room_id).await;
 	let event_type = body.event_type.to_cow_str();
 	let txn = RoomTxn {
@@ -89,7 +90,7 @@ pub(crate) async fn send_message_event_route(
 
 	let event_id = services
 		.timeline
-		.build_and_append_pdu(pdu, sender_user, &body.room_id, &state_lock)
+		.build_and_append_message(pdu, sender_user, &body.room_id, state_lock, &send_lock)
 		.await?;
 
 	services.transaction_ids.add_room_txnid(
@@ -98,7 +99,7 @@ pub(crate) async fn send_message_event_route(
 		event_id.as_bytes(),
 	);
 
-	drop(state_lock);
+	drop(send_lock);
 
 	Ok(SendMessageResponse { event_id })
 }

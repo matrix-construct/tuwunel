@@ -5188,8 +5188,10 @@
 #   slow or down.
 # - A local user's leave, a kick or a ban is sent even when the policy
 #   server gives no verdict, so an outage never traps users in a room.
-# - Each request can take up to `request_timeout`, and other local sends
-#   to the same room wait behind it.
+# - Each request can take up to `request_timeout`. Messages sent to one
+#   room wait behind each other's requests, and a state change, membership
+#   change or redaction holds back everything else in the room until its own
+#   request is answered.
 # - `advisory_room_versions`, `fail_open` and `request_timeout` have no
 #   effect while `enable = false`.
 #
@@ -5238,8 +5240,8 @@
 # [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284).
 #
 # This applies to outbound `/sign` calls and inbound signature fetches. A
-# local send waits up to this long for its signature, and other local
-# sends to the same room wait behind it.
+# local send waits up to this long for its signature, and later messages
+# sent to the same room wait behind it.
 #
 # reloadable: yes
 #

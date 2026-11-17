@@ -14,7 +14,7 @@ use super::{Content, StateKey};
 /// The timeline service supplies event graph fields, sender data, and hashes
 /// after this value is created. Constructors serialize typed Ruma event
 /// content.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Builder {
 	/// Matrix event type for the new PDU.
 	///

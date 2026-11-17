@@ -527,8 +527,13 @@ async fn compute_soft_fail(
 	Ok(soft_fail)
 }
 
+/// The room's forward extremities that stay beside an event appended now: those
+/// it does not cite and no stored event references.
+///
+/// An event received over federation and a client message signed outside the
+/// room's lock both store their leaves this way.
 #[implement(super::Service)]
-async fn compute_remaining_extremities(
+pub(crate) async fn compute_remaining_extremities(
 	&self,
 	room_id: &RoomId,
 	incoming_pdu: &PduEvent,

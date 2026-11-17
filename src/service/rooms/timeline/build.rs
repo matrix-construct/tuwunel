@@ -4,7 +4,7 @@
 //! insertion are coordinated under the caller's room state guard. Successfully
 //! persisted events are then queued for federation to participating servers.
 
-use std::{iter::once, time::Duration};
+use std::{borrow::Borrow, iter::once, time::Duration};
 
 use futures::{FutureExt, StreamExt};
 use ruma::{
@@ -27,7 +27,7 @@ use tuwunel_matrix::{
 	pdu::{PduBuilder, PduEvent, RawPduId},
 };
 
-use super::RoomMutexGuard;
+use super::{RoomMutexGuard, SendGuard};
 
 const NONCE_KEY: &str = "uwu.woof";
 
@@ -97,17 +97,8 @@ pub async fn build_and_store_pdu(
 	room_id: &RoomId,
 	state_lock: &RoomMutexGuard,
 ) -> Result<(OwnedEventId, Result)> {
-	let pdu_builder = if pdu_builder.event_type == TimelineEventType::RoomMember {
-		self.sanitize_member_authorisation(pdu_builder, room_id)
-			.boxed() // size firewall
-			.await?
-	} else {
-		pdu_builder
-	};
-
 	let (pdu, pdu_json) = self
-		.create_hash_and_sign_event(pdu_builder, sender, room_id, state_lock)
-		.boxed() // query-depth firewall
+		.build_pdu(pdu_builder, sender, room_id, state_lock)
 		.await?;
 
 	let event_id = pdu.event_id().to_owned();
@@ -124,6 +115,139 @@ pub async fn build_and_store_pdu(
 		| Ok(()) => Ok((event_id, Err(error))),
 		| Err(_) => Err(error),
 	}
+}
+
+/// Builds and appends a client's message event, leaving the room unlocked while
+/// its policy server signs it.
+///
+/// Without a policy server, and for a redaction, this is `build_and_append_pdu`
+/// under one continuous hold. Otherwise the event is built under the state
+/// guard, which is released for the signing round trip and taken again to store
+/// the event beside whatever landed meanwhile. A change of room state or of its
+/// policy server in that window discards the event, which is built and signed
+/// again under the new guard; the send guard keeps the room's message sends in
+/// order across it.
+#[implement(super::Service)]
+#[tracing::instrument(
+	name = "append_message",
+	level = "debug",
+	skip_all,
+	fields(%room_id),
+)]
+pub async fn build_and_append_message(
+	&self,
+	pdu_builder: PduBuilder,
+	sender: &UserId,
+	room_id: &RoomId,
+	state_lock: RoomMutexGuard,
+	_send_lock: &SendGuard,
+) -> Result<OwnedEventId> {
+	// Whether the sender may redact depends on the redacted event, not only on
+	// room state.
+	let outgoing = self
+		.services
+		.event_handler
+		.outgoing_policy(room_id, &pdu_builder.event_type, pdu_builder.state_key.as_deref())
+		.map(|outgoing| {
+			outgoing.filter(|_| pdu_builder.event_type != TimelineEventType::RoomRedaction)
+		})
+		.await;
+
+	let Some(outgoing) = outgoing else {
+		return self
+			.build_and_append_pdu(pdu_builder, sender, room_id, &state_lock)
+			.await;
+	};
+
+	let rebuild = pdu_builder.clone();
+	let (pdu, pdu_json) = self
+		.build_pdu(pdu_builder, sender, room_id, &state_lock)
+		.await?;
+
+	self.check_signed_pdu(&pdu, sender).await?;
+
+	let built = self
+		.services
+		.state
+		.get_room_shortstatehash(room_id)
+		.await?;
+
+	drop(state_lock);
+
+	let pdu_json = self
+		.services
+		.event_handler
+		.sign_outgoing_with(&outgoing, pdu_json, &pdu)
+		.boxed() // size firewall
+		.await?;
+
+	let state_lock = self.services.state.mutex.lock(room_id).await;
+
+	// A server holding the event, its policy server among them, relayed it back.
+	if let Some(pdu_id) = self.get_pdu_id(pdu.event_id()).await.optional()? {
+		self.enqueue_federation(&pdu, &pdu_id).await?;
+
+		return Ok(pdu.event_id().to_owned());
+	}
+
+	let current = self
+		.services
+		.state
+		.get_room_shortstatehash(room_id)
+		.await?;
+
+	// Redacting the policy event changes the room's policy server, not its state.
+	let moved = current != built
+		|| self
+			.services
+			.event_handler
+			.outgoing_policy(room_id, pdu.kind(), pdu.state_key())
+			.map(|policy| policy.is_none_or(|policy| policy != outgoing))
+			.await;
+
+	if moved {
+		return self
+			.build_and_append_pdu(rebuild, sender, room_id, &state_lock)
+			.boxed() // size firewall
+			.await;
+	}
+
+	// Leaves that landed meanwhile stay beside the event, as on the receive path.
+	let remaining = self
+		.services
+		.event_handler
+		.compute_remaining_extremities(room_id, &pdu)
+		.await;
+
+	let leaves = remaining
+		.iter()
+		.map(Borrow::borrow)
+		.chain(once(pdu.event_id()));
+
+	self.store_signed_pdu(&pdu, pdu_json, leaves, &state_lock)
+		.boxed() // size firewall
+		.await
+}
+
+#[implement(super::Service)]
+async fn build_pdu(
+	&self,
+	pdu_builder: PduBuilder,
+	sender: &UserId,
+	room_id: &RoomId,
+	state_lock: &RoomMutexGuard,
+) -> Result<(PduEvent, CanonicalJsonObject)> {
+	let pdu_builder = if pdu_builder.event_type == TimelineEventType::RoomMember {
+		self.sanitize_member_authorisation(pdu_builder, room_id)
+			.boxed() // size firewall
+			.await?
+	} else {
+		pdu_builder
+	};
+
+	self.create_hash_and_sign_event(pdu_builder, sender, room_id, state_lock)
+		.boxed() // query-depth firewall
+		.await
 }
 
 /// Builds, signs, and persists a room's create event under the placeholder

@@ -93,7 +93,8 @@ pub struct Service {
 	///
 	/// Acquire it after federation and before timeline insertion when those
 	/// mutexes share a room. Never acquire the federation mutex while holding
-	/// this guard.
+	/// this guard. A client message send acquires it after the room's send
+	/// mutex.
 	pub mutex: RoomMutexMap,
 	services: Arc<OnceServices>,
 	db: Data,

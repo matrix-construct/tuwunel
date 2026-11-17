@@ -79,7 +79,8 @@ pub enum PolicyCheck {
 /// version.
 ///
 /// Only `outgoing_policy` makes one, once the event passes the gates deciding
-/// whether a policy server applies to it.
+/// whether a policy server applies to it. Two are equal when they name the same
+/// policy server and keys in the same room version.
 #[derive(Debug)]
 pub struct OutgoingPolicy {
 	policy: RoomPolicyEventContent,
@@ -180,6 +181,14 @@ fn into_stable(
 	let ed25519 = public_keys.remove(&SigningKeyAlgorithm::Ed25519)?;
 
 	Some(RoomPolicyEventContent::new(via, ed25519))
+}
+
+impl PartialEq for OutgoingPolicy {
+	fn eq(&self, other: &Self) -> bool {
+		self.policy.via == other.policy.via
+			&& self.policy.public_keys == other.policy.public_keys
+			&& self.room_version == other.room_version
+	}
 }
 
 /// Clears the cached policy server decision for an event.
