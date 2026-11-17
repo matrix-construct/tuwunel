@@ -13,7 +13,7 @@ use ruma::{
 	},
 	canonical_json::redact,
 	events::{
-		StateEventType,
+		StateEventType, TimelineEventType,
 		room::{
 			member::MembershipState,
 			policy::{POLICY_SERVER_ED25519_SIGNING_KEY_ID, RoomPolicyEventContent},
@@ -73,6 +73,17 @@ pub enum PolicyCheck {
 	/// verdict, which `fail_open` does not tolerate. Soft-fail an event received
 	/// live; backfill defers one until it is offered again.
 	NoVerdict,
+}
+
+/// The policy server that signs a room's local events, with the room's
+/// version.
+///
+/// Only `outgoing_policy` makes one, once the event passes the gates deciding
+/// whether a policy server applies to it.
+#[derive(Debug)]
+pub struct OutgoingPolicy {
+	policy: RoomPolicyEventContent,
+	room_version: RoomVersionId,
 }
 
 /// Outcome of a `/sign` round-trip to the policy server.
@@ -243,6 +254,64 @@ pub async fn lookup_policy_server(&self, room_id: &RoomId) -> Option<RoomPolicyE
 
 /// MSC4284: ask the room's policy server to sign an outgoing event.
 ///
+/// An event no policy server applies to goes out unsigned; any other is signed
+/// as `sign_outgoing_with` does.
+#[implement(super::Service)]
+#[tracing::instrument(name = "policy_sign_outgoing", level = "debug", skip_all)]
+pub async fn sign_outgoing_pdu<E>(
+	&self,
+	pdu_json: CanonicalJsonObject,
+	pdu: &E,
+) -> Result<CanonicalJsonObject>
+where
+	E: Event,
+{
+	let Some(outgoing) = self
+		.outgoing_policy(pdu.room_id(), pdu.kind(), pdu.state_key())
+		.await
+	else {
+		return Ok(pdu_json);
+	};
+
+	self.sign_outgoing_with(&outgoing, pdu_json, pdu)
+		.await
+}
+
+/// The room's policy server, when it signs a local event of this type.
+///
+/// There is none when this server takes no part in policy servers, the event
+/// is the policy state event itself, or the room has no usable policy server.
+/// Only the type and state key are asked for, so a caller can decide before it
+/// builds the event.
+#[implement(super::Service)]
+#[tracing::instrument(level = "trace", skip(self))]
+pub async fn outgoing_policy(
+	&self,
+	room_id: &RoomId,
+	kind: &TimelineEventType,
+	state_key: Option<&str>,
+) -> Option<OutgoingPolicy> {
+	if self.policy_servers_apply().is_false() || is_policy_state_event(kind, state_key) {
+		return None;
+	}
+
+	let Some(policy) = self.lookup_policy_server(room_id).await else {
+		trace!(%room_id, "no policy server configured");
+		return None;
+	};
+
+	let room_version = self
+		.services
+		.state
+		.get_room_version(room_id)
+		.await
+		.ok()?;
+
+	Some(OutgoingPolicy { policy, room_version })
+}
+
+/// MSC4284: ask a room's policy server to sign an outgoing event.
+///
 /// A valid signature is folded into `pdu_json["signatures"]` so it persists
 /// with the event and federates to the other servers in the room. A refusal
 /// fails the request with the policy server's own error. When the policy server
@@ -250,28 +319,43 @@ pub async fn lookup_policy_server(&self, room_id: &RoomId) -> Option<RoomPolicyE
 /// event is a leave, a kick or a ban.
 #[implement(super::Service)]
 #[tracing::instrument(name = "policy_sign", level = "debug", skip_all)]
-pub async fn sign_outgoing_pdu<E>(&self, pdu_json: &mut CanonicalJsonObject, pdu: &E) -> Result
+pub async fn sign_outgoing_with<E>(
+	&self,
+	outgoing: &OutgoingPolicy,
+	pdu_json: CanonicalJsonObject,
+	pdu: &E,
+) -> Result<CanonicalJsonObject>
 where
 	E: Event,
 {
-	if self.policy_servers_apply().is_false() || is_policy_state_event(pdu) {
-		return Ok(());
-	}
+	let signature = self
+		.outbound_verdict(outgoing, &pdu_json, pdu)
+		.await?;
 
-	let Some(policy) = self.lookup_policy_server(pdu.room_id()).await else {
-		trace!(room_id = %pdu.room_id(), "no policy server configured");
-		return Ok(());
-	};
+	let pdu_json = signature
+		.into_iter()
+		.fold(pdu_json, |pdu_json, signature| {
+			folded(pdu_json, &outgoing.policy.via, signature)
+		});
 
-	let Ok(room_version) = self
-		.services
-		.state
-		.get_room_version(pdu.room_id())
-		.await
-	else {
-		return Ok(());
-	};
+	Ok(pdu_json)
+}
 
+/// The policy server's signature to fold into a local event, or `None` to send
+/// it without one.
+///
+/// A refusal, and a missing verdict the event may not go out without, are the
+/// error failing the client's request.
+#[implement(super::Service)]
+async fn outbound_verdict<E>(
+	&self,
+	OutgoingPolicy { policy, room_version }: &OutgoingPolicy,
+	pdu_json: &CanonicalJsonObject,
+	pdu: &E,
+) -> Result<Option<String>>
+where
+	E: Event,
+{
 	let event_id = pdu.event_id();
 
 	if self.refusal_cached(event_id).await {
@@ -279,7 +363,7 @@ where
 	}
 
 	let outcome = self
-		.fetch_policy_signature(&policy, pdu_json, &room_version)
+		.fetch_policy_signature(policy, pdu_json, room_version)
 		.await;
 
 	if let FetchOutcome::Refused(remote) = &outcome {
@@ -299,13 +383,21 @@ where
 
 	let Some(signature) = outbound_signature(outcome, tolerated, &policy.via)? else {
 		debug!(via = %policy.via, %event_id, "sending without a policy server signature");
-		return Ok(());
+		return Ok(None);
 	};
 
-	insert_policy_signature(pdu_json, &policy.via, signature);
-	debug!(via = %policy.via, %event_id, "folded policy server signature");
+	debug!(via = %policy.via, %event_id, "folding policy server signature");
 
-	Ok(())
+	Ok(Some(signature))
+}
+
+fn folded(
+	mut pdu_json: CanonicalJsonObject,
+	via: &ServerName,
+	signature: String,
+) -> CanonicalJsonObject {
+	insert_policy_signature(&mut pdu_json, via, signature);
+	pdu_json
 }
 
 #[implement(super::Service)]
@@ -894,7 +986,9 @@ pub async fn check_inbound_policy_signature<E>(
 where
 	E: Event,
 {
-	if self.policy_servers_apply().is_false() || is_policy_state_event(pdu) {
+	if self.policy_servers_apply().is_false()
+		|| is_policy_state_event(pdu.kind(), pdu.state_key())
+	{
 		return PolicyCheck::NotApplicable;
 	}
 
@@ -943,12 +1037,12 @@ fn check_policy_signature(
 	}
 }
 
-fn is_policy_state_event<E: Event>(pdu: &E) -> bool {
-	if pdu.state_key() != Some("") {
+fn is_policy_state_event(kind: &TimelineEventType, state_key: Option<&str>) -> bool {
+	if state_key != Some("") {
 		return false;
 	}
 
-	let kind = pdu.kind().to_cow_str();
+	let kind = kind.to_cow_str();
 
 	kind == "m.room.policy" || kind == UNSTABLE_POLICY_TYPE
 }

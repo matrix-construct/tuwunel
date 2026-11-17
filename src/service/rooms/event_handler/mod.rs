@@ -37,7 +37,7 @@ use self::{
 };
 pub use self::{
 	backoff::{BackoffMetrics, Verdicts},
-	policy_server::PolicyCheck,
+	policy_server::{OutgoingPolicy, PolicyCheck},
 	prev_walk::{
 		InFlightWalk, Outcome as PrevWalkOutcome, PrevWalkMetrics, PrevWalkPass, PrevWalkRoom,
 		Walk,

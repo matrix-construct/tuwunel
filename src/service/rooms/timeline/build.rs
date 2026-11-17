@@ -4,12 +4,12 @@
 //! insertion are coordinated under the caller's room state guard. Successfully
 //! persisted events are then queued for federation to participating servers.
 
-use std::{collections::HashSet, iter::once, time::Duration};
+use std::{iter::once, time::Duration};
 
 use futures::{FutureExt, StreamExt};
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, MilliSecondsSinceUnixEpoch, OwnedEventId,
-	OwnedServerName, RoomId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId,
+	OwnedServerName, RoomId, ServerName, UserId,
 	events::{
 		TimelineEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
@@ -19,12 +19,12 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, err, implement,
-	utils::{BoolExt, IterStream, random_string, result::NotFound, time::now},
+	utils::{BoolExt, IterStream, ReadyExt, random_string, result::NotFound, time::now},
 };
 use tuwunel_matrix::{
 	StateKey,
 	event::Event,
-	pdu::{PduBuilder, PduEvent},
+	pdu::{PduBuilder, PduEvent, RawPduId},
 };
 
 use super::RoomMutexGuard;
@@ -274,25 +274,60 @@ async fn append_signed_pdu(
 	sender: &UserId,
 	state_lock: &RoomMutexGuard,
 ) -> Result<OwnedEventId> {
+	self.check_signed_pdu(&pdu, sender).await?;
+
+	let pdu_json = self.with_policy_signature(pdu_json, &pdu).await?;
+
+	// The event cites the room's forward extremities and takes their place.
+	self.store_signed_pdu(&pdu, pdu_json, once(pdu.event_id()), state_lock)
+		.await
+}
+
+/// Refuses a local event this server never lets out: a forbidden change to
+/// the admins room, or a redaction its sender may not make.
+///
+/// Both checks read room state, so they run under the state guard the event
+/// was built under.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn check_signed_pdu(&self, pdu: &PduEvent, sender: &UserId) -> Result {
 	if self
 		.services
 		.admin
 		.is_admin_room(pdu.room_id())
 		.await
 	{
-		self.check_pdu_for_admin_room(&pdu, sender)
+		self.check_pdu_for_admin_room(pdu, sender)
 			.boxed() // cold arm: admin room
 			.await?;
 	}
 
 	if *pdu.kind() == TimelineEventType::RoomRedaction {
-		self.check_redaction_authorized(&pdu)
+		self.check_redaction_authorized(pdu)
 			.boxed() // query-depth firewall
 			.await?;
 	}
 
-	let pdu_json = self.with_policy_signature(pdu_json, &pdu).await?;
+	Ok(())
+}
 
+/// Stores a checked and signed event under the room's state guard, then queues
+/// it for federation.
+///
+/// `leaves` replace the room's forward extremities. A queueing failure is
+/// returned for an event already in the room.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn store_signed_pdu<'a, Leaves>(
+	&'a self,
+	pdu: &'a PduEvent,
+	pdu_json: CanonicalJsonObject,
+	leaves: Leaves,
+	state_lock: &'a RoomMutexGuard,
+) -> Result<OwnedEventId>
+where
+	Leaves: Iterator<Item = &'a EventId> + Send + 'a,
+{
 	//TODO: Use proper room version here
 	if *pdu.kind() == TimelineEventType::RoomCreate && pdu.room_id().server_name().is_none() {
 		self.reserve_room_id(pdu.room_id()).await?;
@@ -300,50 +335,56 @@ async fn append_signed_pdu(
 
 	// Store the event snapshot first; append_pdu installs current state after
 	// the timeline row exists and before publishing its stream count.
-	let statehashid = self.services.state.append_to_state(&pdu).await?;
+	let statehashid = self.services.state.append_to_state(pdu).await?;
 
 	let pdu_id = self
-		.append_pdu(
-			&pdu,
-			pdu_json,
-			// Since this PDU references all pdu_leaves we can update the leaves
-			// of the room
-			once(pdu.event_id()),
-			Some(statehashid),
-			state_lock,
-		)
+		.append_pdu(pdu, pdu_json, leaves, Some(statehashid), state_lock)
 		.boxed() // size firewall
 		.await?;
 
-	let mut servers: HashSet<OwnedServerName> = self
+	self.enqueue_federation(pdu, &pdu_id).await?;
+
+	Ok(pdu.event_id().to_owned())
+}
+
+/// Queues a stored event for the other servers in its room.
+///
+/// A member event's target server is included, so the server of a kicked or
+/// banned member learns of it.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn enqueue_federation(&self, pdu: &PduEvent, pdu_id: &RawPduId) -> Result {
+	let ours = self.services.globals.server_name();
+	let servers: Vec<OwnedServerName> = self
 		.services
 		.state_cache
 		.room_servers(pdu.room_id())
+		.chain(member_target_server(pdu).into_iter().stream())
+		.ready_filter(|&server| server != ours)
 		.map(ToOwned::to_owned)
 		.collect()
 		.await;
 
-	// In case we are kicking or banning a user, we need to inform their server of
-	// the change
-	if *pdu.kind() == TimelineEventType::RoomMember
-		&& let Some(state_key_uid) = &pdu
-			.state_key
-			.as_ref()
-			.and_then(|state_key| UserId::parse(state_key.as_str()).ok())
-	{
-		servers.insert(state_key_uid.server_name().to_owned());
-	}
-
-	// Remove our server from the server list since it will be added to it by
-	// room_servers() and/or the if statement above
-	servers.remove(self.services.globals.server_name());
+	// The member's target server may also be in the room.
+	let servers = sorted_unique(servers);
 
 	self.services
 		.sending
-		.send_pdu_servers(servers.iter().map(AsRef::as_ref).stream(), &pdu_id)
-		.await?;
+		.send_pdu_servers(servers.iter().map(AsRef::as_ref).stream(), pdu_id)
+		.await
+}
 
-	Ok(pdu.event_id().to_owned())
+fn sorted_unique(mut servers: Vec<OwnedServerName>) -> Vec<OwnedServerName> {
+	servers.sort_unstable();
+	servers.dedup();
+	servers
+}
+
+fn member_target_server(pdu: &PduEvent) -> Option<&ServerName> {
+	pdu.state_key()
+		.filter(|_| *pdu.kind() == TimelineEventType::RoomMember)
+		.and_then(|key| <&UserId>::try_from(key).ok())
+		.map(UserId::server_name)
 }
 
 /// Has the room's policy server, if any, sign an event before it is federated.
@@ -355,16 +396,14 @@ async fn append_signed_pdu(
 #[tracing::instrument(skip_all, level = "debug")]
 async fn with_policy_signature(
 	&self,
-	mut pdu_json: CanonicalJsonObject,
+	pdu_json: CanonicalJsonObject,
 	pdu: &PduEvent,
 ) -> Result<CanonicalJsonObject> {
 	self.services
 		.event_handler
-		.sign_outgoing_pdu(&mut pdu_json, pdu)
+		.sign_outgoing_pdu(pdu_json, pdu)
 		.boxed() // size firewall
-		.await?;
-
-	Ok(pdu_json)
+		.await
 }
 
 /// Allocates the short ID of a room named by its create event's hash.
