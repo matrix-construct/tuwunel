@@ -1,10 +1,14 @@
 #![cfg(test)]
 
+use std::array::from_fn;
+
+use futures::{StreamExt, stream::try_unfold};
 use reqwest::{Method, Response, StatusCode};
 use serde_json::{Value, json};
 use tuwunel_core::{
 	Result, err, implement,
 	ruma::{EventId, OwnedEventId, OwnedRoomId, RoomId, UserId},
+	utils::stream::TryReadyExt,
 };
 use tuwunel_service::Services;
 
@@ -79,6 +83,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	relations_view(&reader, &ignored, &visible).await?;
+	relations_recursion(&visible).await?;
 	thread_views(&reader, &reader_id, &ignored, &visible).await?;
 	former_member_view(&reader, &leaver, &leaver_id, &visible).await?;
 	thread_roots(&visible).await?;
@@ -225,6 +230,211 @@ async fn relations_view(
 	assert!(!control.contains(&redacted.as_str()), "a redacted reaction was served");
 
 	Ok(())
+}
+
+/// MSC3981: recursion respects filters, event order, paging, and its depth bound.
+///
+/// Filters stop the walk; both directions preserve event order and page without
+/// loss. The recursion depth bound is reported even when the chunk is empty.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn relations_recursion(visible: &Client<'_>) -> Result {
+	let room = visible
+		.create_room(&json!({ "preset": "public_chat" }))
+		.await?;
+
+	let root = visible
+		.send_text(&room, "recursion-root", "recursion root")
+		.await?;
+
+	let thread_a1 = visible
+		.reply(&room, "recursion-a1", &root)
+		.await?;
+
+	let reaction_b = visible
+		.react(&room, "recursion-b", &thread_a1, "b")
+		.await?;
+
+	let thread_a2 = visible
+		.reply(&room, "recursion-a2", &root)
+		.await?;
+
+	let ref_f = reference(visible, &room, "recursion-f", &root).await?;
+	let ref_g = reference(visible, &room, "recursion-g", &ref_f).await?;
+	let ref_e = reference(visible, &room, "recursion-e", &thread_a1).await?;
+	let ref_h = reference(visible, &room, "recursion-h", &ref_g).await?;
+
+	reference(visible, &room, "recursion-i", &ref_h).await?;
+
+	let content = json!({
+		"m.relates_to": { "rel_type": "m.reference", "event_id": root },
+	});
+
+	let custom_k = visible
+		.put_event(&format!("rooms/{room}/send/org.example.reference/recursion-k"), &content)
+		.await?;
+
+	let ref_j = reference(visible, &room, "recursion-j", &custom_k).await?;
+	let filtered = visible
+		.relations(&room, &root, "/m.reference?recurse=true&dir=f")
+		.await?;
+
+	assert_eq!(
+		chunk_ids(&filtered)?,
+		[&ref_f, &ref_g, &ref_h, &custom_k, &ref_j].map(|id| id.as_str()),
+		"reference recursion crossed filtered thread A1 to E or violated the three-level depth \
+		 bound",
+	);
+
+	let forward = [
+		&thread_a1,
+		&reaction_b,
+		&thread_a2,
+		&ref_f,
+		&ref_g,
+		&ref_e,
+		&ref_h,
+		&custom_k,
+		&ref_j,
+	]
+	.map(|id| id.as_str());
+
+	let backward = from_fn::<_, 9, _>(|index| forward[8_usize.saturating_sub(index)]);
+
+	for (dir, expected) in [("f", forward), ("b", backward)] {
+		let response = visible
+			.relations(&room, &root, &format!("?recurse=true&dir={dir}"))
+			.await?;
+
+		assert_eq!(
+			chunk_ids(&response)?,
+			expected,
+			"recursive event order regressed in dir={dir}"
+		);
+
+		let paged = recursion_pages(visible, &room, &root, dir, &expected).await?;
+
+		assert_eq!(paged, expected.len(), "recursive paging lost events in dir={dir}");
+	}
+
+	let recursed = visible
+		.relations(&room, &root, "?recurse=true")
+		.await?;
+
+	assert_eq!(
+		recursed.get("recursion_depth"),
+		Some(&json!(3)),
+		"root recursion depth regressed"
+	);
+
+	let empty = visible
+		.relations(&room, &thread_a2, "?recurse=true")
+		.await?;
+
+	assert!(chunk_ids(&empty)?.is_empty(), "a childless reply gained recursive relations");
+	assert_eq!(
+		empty.get("recursion_depth"),
+		Some(&json!(3)),
+		"empty recursion lost its depth bound"
+	);
+
+	let direct = visible.relations(&room, &root, "").await?;
+
+	assert!(
+		direct.get("recursion_depth").is_none(),
+		"non-recursive relations gained recursion_depth"
+	);
+
+	let messages = visible
+		.relations(&room, &root, "/m.reference/m.room.message?recurse=true&dir=f")
+		.await?;
+
+	assert_eq!(
+		chunk_ids(&messages)?,
+		[ref_f.as_str(), ref_g.as_str(), ref_h.as_str()],
+		"event-type recursion crossed K to J, a filtered thread, or the depth bound",
+	);
+
+	let first = visible
+		.relations(&room, &root, "?dir=f&limit=1")
+		.await?;
+
+	let token = field(&first, "next_batch")?;
+	let bounded = visible
+		.relations(&room, &root, &format!("?recurse=true&dir=b&to={token}"))
+		.await?;
+
+	assert_eq!(
+		chunk_ids(&bounded)?,
+		&backward[..8],
+		"recursive to boundary lost A1's children B and E or included A1",
+	);
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn reference(
+	client: &Client<'_>,
+	room: &RoomId,
+	txn: &str,
+	target: &EventId,
+) -> Result<OwnedEventId> {
+	let content = json!({
+		"msgtype": "m.text",
+		"body": "reference",
+		"m.relates_to": { "rel_type": "m.reference", "event_id": target },
+	});
+
+	let path = format!("rooms/{room}/send/m.room.message/{txn}");
+
+	client.put_event(&path, &content).await
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn recursion_pages(
+	client: &Client<'_>,
+	room: &RoomId,
+	root: &EventId,
+	dir: &str,
+	expected: &[&str],
+) -> Result<usize> {
+	let query = format!("?recurse=true&dir={dir}&limit=1");
+
+	try_unfold(Some(query.clone()), async |next| {
+		let Some(next) = next else { return Ok(None) };
+		let response = client.relations(room, root, &next).await?;
+		let chunk = response["chunk"]
+			.as_array()
+			.ok_or_else(|| err!("relations response omitted its chunk"))?;
+
+		let next = response["next_batch"]
+			.as_str()
+			.filter(|_| !chunk.is_empty())
+			.map(|token| format!("{query}&from={token}"));
+
+		Ok(Some((response, next)))
+	})
+	.take(11)
+	.ready_try_fold(0_usize, |offset, response| {
+		let chunk = response["chunk"]
+			.as_array()
+			.ok_or_else(|| err!("relations response omitted its chunk"))?;
+
+		let end = offset.saturating_add(chunk.len());
+
+		assert!(
+			expected.get(offset..end).is_some_and(|expected| {
+				chunk
+					.iter()
+					.map(|event| event["event_id"].as_str())
+					.eq(expected.iter().copied().map(Some))
+			}),
+			"recursive paging lost or reordered events in dir={dir}: {response}",
+		);
+
+		Ok(end)
+	})
+	.await
 }
 
 /// MSC3440: every folded path serves a requester who ignores the latest

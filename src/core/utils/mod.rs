@@ -109,6 +109,14 @@ pub const fn assert_unwind_safe<T: std::panic::UnwindSafe>() {}
 /// runtime work.
 pub const fn assert_ref_unwind_safe<T: std::panic::RefUnwindSafe>() {}
 
+/// Appends an optional item to an owned vector.
+///
+/// Returns the vector unchanged when the item is absent, preserving its storage.
+pub fn extended<T>(mut items: Vec<T>, item: Option<T>) -> Vec<T> {
+	items.extend(item);
+	items
+}
+
 /// Extracts the payload from any listed tuple variant into an `Option`.
 ///
 /// The expression is matched once, and a listed variant returns
