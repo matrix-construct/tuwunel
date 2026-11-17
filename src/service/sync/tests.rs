@@ -17,7 +17,9 @@ use ruma::{
 	room_id, user_id,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::from_str;
 use tuwunel_core::{Err, Result, config::Figment};
+use tuwunel_database::{Cbor, deserialize_from_slice};
 
 use super::{
 	Connection, ConnectionId, ConnectionKey, Lists, RequiredState, Room, RoomUpdate,
@@ -70,6 +72,59 @@ struct ConnectionV1 {
 	extensions: request::Extensions,
 	subscriptions: Subscriptions,
 	rooms: BTreeMap<OwnedRoomId, RoomV1>,
+}
+
+// Encoded with serialize_val(Cbor(&conn)) at f66e18dd7c, before the bool flags.
+const OLD_CONNECTION: &[u8] = b"\xa8\x6b\x67\x6c\x6f\x62\x61\x6c\x73\x69\x6e\x63\x65\x18\x29\x6a\
+	\x6e\x65\x78\x74\x5f\x62\x61\x74\x63\x68\x18\x49\x65\x6c\x69\x73\
+	\x74\x73\xa1\x64\x6d\x61\x69\x6e\xbf\x66\x72\x61\x6e\x67\x65\x73\
+	\x80\x6e\x74\x69\x6d\x65\x6c\x69\x6e\x65\x5f\x6c\x69\x6d\x69\x74\
+	\x00\xff\x6a\x65\x78\x74\x65\x6e\x73\x69\x6f\x6e\x73\xbf\x69\x74\
+	\x6f\x5f\x64\x65\x76\x69\x63\x65\xa2\x67\x65\x6e\x61\x62\x6c\x65\
+	\x64\xf5\x65\x73\x69\x6e\x63\x65\x62\x33\x37\x64\x65\x32\x65\x65\
+	\xa1\x67\x65\x6e\x61\x62\x6c\x65\x64\xf5\x6c\x61\x63\x63\x6f\x75\
+	\x6e\x74\x5f\x64\x61\x74\x61\xa1\x67\x65\x6e\x61\x62\x6c\x65\x64\
+	\xf5\xff\x6d\x73\x75\x62\x73\x63\x72\x69\x70\x74\x69\x6f\x6e\x73\
+	\xa0\x65\x72\x6f\x6f\x6d\x73\xa0\x71\x6f\x77\x6e\x5f\x70\x72\x6f\
+	\x66\x69\x6c\x65\x5f\x73\x69\x6e\x63\x65\x00\x77\x70\x72\x6f\x66\
+	\x69\x6c\x65\x73\x5f\x66\x69\x65\x6c\x64\x73\x5f\x77\x69\x64\x65\
+	\x6e\x65\x64\xf4";
+#[test]
+fn old_connection_decodes_with_bool_flags() -> Result {
+	let Cbor(conn) = deserialize_from_slice::<Cbor<Connection>>(OLD_CONNECTION)?;
+
+	assert!(conn.extensions.e2ee.enabled);
+	assert!(conn.extensions.to_device.enabled);
+	assert_eq!(conn.extensions.to_device.since.as_deref(), Some("37"));
+	assert_eq!(conn.extensions.account_data.enabled, Some(true));
+	assert_eq!((conn.globalsince, conn.next_batch), (41, 73));
+	assert!(conn.lists.contains_key(LIST_ID));
+	Ok(())
+}
+
+#[test]
+fn omitted_bool_flags_disable_while_optional_flags_stick() -> Result {
+	let mut conn = Connection::default();
+	let enabled = Request {
+		extensions: from_str(
+			r#"{
+			"e2ee": {"enabled": true},
+			"to_device": {"enabled": true},
+			"account_data": {"enabled": true}
+	}"#,
+		)?,
+		..Request::new()
+	};
+
+	conn.update_cache(&enabled);
+	assert!(conn.extensions.e2ee.enabled);
+	assert!(conn.extensions.to_device.enabled);
+	assert_eq!(conn.extensions.account_data.enabled, Some(true));
+	conn.update_cache(&Request::new());
+	assert!(!conn.extensions.e2ee.enabled);
+	assert!(!conn.extensions.to_device.enabled);
+	assert_eq!(conn.extensions.account_data.enabled, Some(true));
+	Ok(())
 }
 
 #[test]
