@@ -5,7 +5,7 @@
 # and the published packages end to end.
 FROM input AS apt-repo-install
 ARG DEBIAN_FRONTEND=noninteractive
-ARG apt_repo_url="https://apt.f.dog"
+ARG apt_repo_url="https://apt.tuwunel.chat"
 
 ENV DEBIAN_FRONTEND="${DEBIAN_FRONTEND}"
 RUN <<EOF
