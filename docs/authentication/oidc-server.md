@@ -29,7 +29,7 @@ underlying OAuth behavior.
 |---|---|
 | MSC3861 | Next-generation auth for Matrix, the umbrella proposal |
 | MSC2964 | OAuth 2.0 authorization-code and refresh-token grants |
-| MSC2965 | Authorization server metadata discovery and the `auth_issuer` endpoint |
+| MSC2965 | Authorization server metadata discovery (`auth_metadata`) |
 | MSC2966 | Dynamic client registration |
 | MSC2967 | OAuth 2.0 API and device scopes for Matrix |
 | MSC3824 | OIDC-aware client hint (`oidc_aware_preferred`) |
@@ -76,8 +76,8 @@ OIDC server (Next-gen auth) requires `well_known.client` to be configured.
 For an interactive (browser) client, the authorization-code grant runs like
 this:
 
-1. The client discovers the issuer via `/_matrix/client/v1/auth_issuer`, then
-   fetches the metadata document to learn every endpoint URL.
+1. The client fetches the metadata document from
+   `/_matrix/client/v1/auth_metadata` to learn the issuer and every endpoint URL.
 2. The client (registering itself first if needed, see
    [Dynamic client registration](#dynamic-client-registration)) sends the user
    to `GET /_tuwunel/oidc/authorize` with a PKCE `code_challenge`.
@@ -109,8 +109,7 @@ See [Native authentication](#native-authentication).
 | Endpoint | Description |
 |---|---|
 | `GET /.well-known/openid-configuration` | OIDC discovery document (RFC 8414) |
-| `GET /_matrix/client/v1/auth_issuer` | Matrix auth issuer discovery (MSC2965) |
-| `GET /_matrix/client/v1/auth_metadata` | Authorization server metadata |
+| `GET /_matrix/client/v1/auth_metadata` | Authorization server metadata (MSC2965) |
 | `GET /_matrix/client/unstable/org.matrix.msc2965/auth_issuer` | Unstable issuer endpoint |
 | `GET /_matrix/client/unstable/org.matrix.msc2965/auth_metadata` | Unstable metadata endpoint |
 

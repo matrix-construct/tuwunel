@@ -8,6 +8,7 @@ mod client;
 
 mod fixture;
 
+use reqwest::StatusCode;
 use serde_json::Value;
 use tuwunel_core::Result;
 use tuwunel_service::Services;
@@ -86,6 +87,18 @@ async fn check_features(services: &Services, base: &str, enabled: bool) -> Resul
 		.await?;
 
 	assert_eq!(metadata.status().is_success(), enabled, "{metadata:?}");
+
+	// MSC2965 discarded the stable `auth_issuer` path; only the unstable one is served.
+	let issuer = client
+		.get(format!("{base}/_matrix/client/v1/auth_issuer"))
+		.send()
+		.await?;
+
+	assert_eq!(issuer.status(), StatusCode::NOT_FOUND, "{issuer:?}");
+
+	let error: Value = issuer.json().await?;
+
+	assert_eq!(error["errcode"], "M_UNRECOGNIZED", "{error}");
 
 	Ok(())
 }

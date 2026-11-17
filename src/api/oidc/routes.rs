@@ -45,7 +45,6 @@ fn register_oidc_routes(router: Router<State>) -> Router<State> {
 			get(oidc::get_account_callback_route).post(oidc::post_account_callback_route),
 		)
 		.route("/_tuwunel/oidc/account", get(oidc::get_account_route))
-		.route("/_matrix/client/v1/auth_issuer", get(oidc::auth_issuer_route))
 		.route("/_matrix/client/v1/auth_metadata", get(oidc::openid_configuration_route))
 		.route(
 			"/_matrix/client/unstable/org.matrix.msc2965/auth_issuer",
