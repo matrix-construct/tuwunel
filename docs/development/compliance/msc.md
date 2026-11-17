@@ -29,13 +29,13 @@
 
 | ✅ `yes` | 🟨 `part` | 🟥 `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 292 | 61 | 445 | 312 | 1110 |
+| 293 | 60 | 445 | 312 | 1110 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
-| merged | 189 | 22 | 13 | 57 | 281 |
+| merged | 190 | 21 | 13 | 57 | 281 |
 | open | 67 | 24 | 346 | 181 | 618 |
 | closed | 36 | 15 | 86 | 74 | 211 |
 
@@ -73,7 +73,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4291 | ✅ ● | 100/100 | Room IDs as hashes of the create event | v12 upgrade create event omits deprecated predecessor.event_id |
 | MSC4289 | ✅ ● | 100/100 | Explicitly privilege room creators | Room v12 creator privilege; complement 22 pass, 0 fail across six named tests |
 | MSC4287 | ✅ ● | 100/100 | Sharing key backup preference between clients | global account-data passthrough (2026-06-22 ruling); m.key_backup round-trips |
-| MSC4284 | 🟨 ● | 70/90 | Policy Servers | outbound /sign, inbound verify, fetch-on-missing, reversible soft-fail |
+| MSC4284 | ✅ ● | 90/90 | Policy Servers | on by default: /sign, verify, refetch, soft-fail; remote invites skip /sign |
 | MSC4278 | ✅ ● | 100/100 | Media preview controls | global+room passthrough ok; seeded-value mutability met; no content validation |
 | MSC4277 | ✅ ● | 100/100 | Harmonizing the reporting endpoints | all 3 wired; score removed; user report 200 regardless to deter enumeration |
 | MSC4267 | ✅ ● | 90/100 | Automatically forgetting rooms on leave | auto-forget on Leave/Ban; stable + unstable capability advertised |
@@ -285,7 +285,6 @@ for spec compliance.
 | MSC3925 | 🟨 ● | 70/70 | 1.7 | m.replace aggregation with full event | Full m.replace fold; off by default (bundle_edit_relations); backfill unindexed |
 | MSC3970 | 🟨 ◐ | 70/80 | 1.7 | Scope transaction IDs to devices | txn key is user, device, txn with no path; redact untracked; echo user scoped |
 | MSC4143 | 🟨 ◐ | 70/90 | next | MatrixRTC | Discovery, upgrade slot copy, delayed leave; no sticky member or transport auth |
-| MSC4284 | 🟨 ● | 70/90 | 1.18 | Policy Servers | outbound /sign, inbound verify, fetch-on-missing, reversible soft-fail |
 | MSC4543 | 🟨 ◐ | 70/90 | next | Sliding Sync Extensions: End-to-end encryption | No-pos and count rules met; left misses departures, bans; claim race; flag held |
 | MSC4548 | 🟨 ◐ | 70/90 | next | Sliding Sync Extensions: Account data | Client caching excluded; first-enable and independent room-scope gaps |
 | MSC2290 | 🟨 ● | 65/55 | 1.0 | Separate Endpoints for Binding Threepids | add endpoint (UIA+dupe) + HS email validation; IS-bind half out of scope |
