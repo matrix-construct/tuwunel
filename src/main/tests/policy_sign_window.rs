@@ -2,21 +2,34 @@
 #![allow(clippy::expect_used)]
 
 use std::{
+	io,
 	net::TcpListener,
 	path::PathBuf,
 	pin::pin,
-	sync::{Arc, Mutex},
-	time::Duration,
+	sync::{
+		Arc, Mutex,
+		atomic::{AtomicUsize, Ordering},
+	},
+	time::{Duration, Instant},
 };
 
-use axum::{Json, Router, body::Bytes, extract::State, http::StatusCode, routing::post};
+use axum::{
+	Json, Router,
+	body::Bytes,
+	extract::State,
+	http::{HeaderMap, Request, StatusCode, Uri, header::AUTHORIZATION},
+	routing::{get, post},
+};
 use axum_server::{from_tcp_rustls, tls_rustls::RustlsConfig};
 use futures::{
 	StreamExt, TryStreamExt,
-	future::{Either, ready, select},
+	future::{Either, pending, ready, select},
 };
 use reqwest::Method;
-use serde_json::{Value, from_value, json};
+use serde_json::{
+	Value, from_str, from_value, json,
+	value::{RawValue as RawJsonValue, to_raw_value},
+};
 use tokio::{
 	sync::Notify,
 	task::JoinSet,
@@ -26,8 +39,13 @@ use tuwunel_core::{
 	Err, Result, err, implement,
 	itertools::Itertools,
 	ruma::{
-		CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedRoomId,
-		OwnedServerName, RoomId, RoomVersionId, ServerName, UserId,
+		CanonicalJsonObject, CanonicalJsonValue, EventId, MilliSecondsSinceUnixEpoch,
+		OwnedEventId, OwnedRoomId, OwnedServerName, OwnedUserId, RoomId, RoomVersionId,
+		ServerName, TransactionId, UserId,
+		api::federation::{
+			authentication::XMatrix,
+			transactions::send_transaction_message::v1::Request as TransactionRequest,
+		},
 		canonical_json::redact,
 		events::{
 			StateEventType,
@@ -40,19 +58,29 @@ use tuwunel_core::{
 			},
 		},
 		serde::{Base64, Raw},
-		signatures::{Ed25519KeyPair, KeyPair, to_canonical_json_string_for_signing},
+		signatures::{
+			Ed25519KeyPair, KeyPair, PublicKeyMap, sign_json,
+			to_canonical_json_string_for_signing,
+		},
 	},
+	utils::time::timepoint_from_now,
 };
 use tuwunel_matrix::{Event, event::gen_event_id, pdu::PduBuilder, room_version::rules};
-use tuwunel_service::Services;
+use tuwunel_service::{
+	Services,
+	resolver::{cache::CachedDest, fed::FedDest},
+};
 
 use self::{
 	client::{Client, register},
+	federation::send_as,
 	fixture::boot,
 	state_cache::membership_update,
 };
 
 mod client;
+#[expect(dead_code)] // Membership routes are not driven here.
+mod federation;
 mod fixture;
 #[path = "fixture/state_cache.rs"]
 mod state_cache;
@@ -60,28 +88,68 @@ mod state_cache;
 const CERTIFICATE: &str = "../../nix/pkgs/complement/certificate.crt";
 const PRIVATE_KEY: &str = "../../nix/pkgs/complement/private_key.key";
 const KEY_ID: &str = "ed25519:policy_server";
+const SERVER_KEY_ID: &str = "ed25519:stub";
 const ALICE_TOKEN: &str = "policy-sign-window-alice-access-token";
 const BOB_TOKEN: &str = "policy-sign-window-bob-access-token";
 const MESSAGE: &str = "m.room.message";
 const UNSTABLE_POLICY: &str = "org.matrix.msc4284.policy";
 
+// The stub's certificate and loopback address pass, its key comes from itself
+// rather than a notary, and the parallel boots fit the tracing thread slots.
+const STUB_OPTIONS: [&str; 4] = [
+	"network.http.allow_invalid_tls_certificates=true",
+	"network.http.ip_range_denylist=[]",
+	"federation.keys.trusted_servers=[]",
+	"database.pool.max_workers=64",
+];
+
 // How long a request must stay pending to count as waiting.
 const WAIT: Duration = Duration::from_secs(2);
+
+// The policy server request timeout of the boot whose policy server stalls.
+const TIMEOUT: Duration = Duration::from_secs(1);
+
+// How long a send to a stalled policy server may take to be refused.
+const STALLED: Duration = Duration::from_secs(10);
+
+// How long the test waits for that send at all. It outlasts every timeout on
+// the path, so a slow refusal fails the elapsed check instead of being dropped
+// while the server still serves it.
+const HANG: Duration = Duration::from_mins(1);
 
 /// A room policy server whose answers the test controls.
 ///
 /// It signs every event it is asked about, except that it parks the next request
 /// about one room until the test releases it and refuses every request about
-/// another. It records each event it is asked about.
+/// another. It records each event it is asked about, and counts the requests
+/// that carry this server's X-Matrix signature.
 struct Policy {
 	name: OwnedServerName,
 	key: Ed25519KeyPair,
+	server_key: Ed25519KeyPair,
+	keys: CanonicalJsonObject,
 	room_version: RoomVersionId,
+	origin: OwnedServerName,
+	origin_keys: PublicKeyMap,
+	mode: Mode,
 	park: Mutex<Option<OwnedRoomId>>,
 	refuse: Mutex<Option<OwnedRoomId>>,
 	arrived: Notify,
 	release: Notify,
 	seen: Mutex<Vec<CanonicalJsonObject>>,
+	authorized: AtomicUsize,
+}
+
+/// Whether the policy server answers signing requests at all.
+///
+/// One that never answers lets a boot reach its policy server request timeout.
+#[derive(Clone, Copy)]
+enum Mode {
+	/// It answers each request as the test steers it.
+	Answer,
+
+	/// It never answers.
+	Stall,
 }
 
 /// Alice, who owns each case's room, and Bob, who joins it.
@@ -93,11 +161,17 @@ struct Harness<'a> {
 	policy: &'a Policy,
 	alice: Client<'a>,
 	bob: Client<'a>,
-	alice_id: &'a UserId,
-	bob_id: &'a UserId,
+	alice_id: OwnedUserId,
+	bob_id: OwnedUserId,
 }
 
 type Sent = (StatusCode, Value);
+
+/// The task serving a policy server.
+///
+/// Dropping the set aborts the task, so the stub stops with the exercise that
+/// holds it.
+type Stub = JoinSet<io::Result<()>>;
 
 /// MSC4284: a client's message leaves its room unlocked while the room's policy
 /// server signs it.
@@ -109,24 +183,125 @@ type Sent = (StatusCode, Value);
 /// twice.
 #[test]
 fn policy_signing_leaves_the_room_unlocked() -> Result {
-	let options = [
-		"network.http.allow_invalid_tls_certificates=true",
-		"network.http.ip_range_denylist=[]",
-		"rooms.policy_server.request_timeout=60",
-	];
+	let options = STUB_OPTIONS
+		.into_iter()
+		.chain(["rooms.policy_server.request_timeout=60"]);
 
 	boot("policy-sign-window", options, exercise)
 }
 
+/// MSC4284: a policy server that never answers is given up on at the timeout.
+///
+/// The client is told the policy server is unavailable, nothing is stored, and
+/// this server backs off from the policy server.
+#[test]
+fn an_unanswered_policy_server_times_out() -> Result {
+	let request_timeout = format!("rooms.policy_server.request_timeout={}", TIMEOUT.as_secs());
+	let options = STUB_OPTIONS
+		.into_iter()
+		.chain(["logging.enable=false", request_timeout.as_str()]);
+
+	boot("policy-sign-timeout", options, stalled)
+}
+
+/// MSC4284: a room's policy server may run under this server's own name.
+///
+/// The signing request goes to the address the name resolves to, and the
+/// stored message keeps both signatures under the one name.
+#[test]
+fn a_policy_server_may_share_the_server_name() -> Result {
+	let options = STUB_OPTIONS
+		.into_iter()
+		.chain(["logging.enable=false"]);
+
+	boot("policy-sign-self", options, shared_name)
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 async fn exercise(services: &Services, base: &str) -> Result {
-	let alice_id = register(services, "alice", ALICE_TOKEN).await?;
-	let bob_id = register(services, "bob", BOB_TOKEN).await?;
-
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
-	let name = format!("127.0.0.1:{}", listener.local_addr()?.port());
-	let key = Ed25519KeyPair::from_der(&Ed25519KeyPair::generate(), "policy_server".into())
-		.map_err(|e| err!("policy server key: {e}"))?;
+	let name = loopback_name(&listener)?;
+	let (policy, _stub) = policy_server(services, listener, name, Mode::Answer).await?;
+	let h = Harness::new(services, base, &policy).await?;
+
+	others_append_during_the_window(&h, &h.room(1).await?).await?;
+	a_state_change_rebuilds_the_message(&h, &h.room(2).await?).await?;
+	a_policy_change_rebuilds_the_message(&h, &h.room(9).await?).await?;
+	a_sender_removed_meanwhile_is_refused(&h, &h.room(3).await?).await?;
+	a_retried_transaction_waits_for_the_first(&h, &h.room(4).await?).await?;
+	messages_keep_their_arrival_order(&h, &h.room(5).await?).await?;
+	a_redaction_keeps_the_room_held(&h, &h.room(6).await?).await?;
+	a_refusal_stores_nothing(&h, &h.room(7).await?).await?;
+	a_relayed_copy_is_stored_once(&h, &h.room(8).await?).await?;
+
+	policy.all_authorized()
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn stalled(services: &Services, base: &str) -> Result {
+	let listener = TcpListener::bind(("127.0.0.1", 0))?;
+	let name = loopback_name(&listener)?;
+	let (policy, _stub) = policy_server(services, listener, name, Mode::Stall).await?;
+	let h = Harness::new(services, base, &policy).await?;
+
+	an_unanswered_request_times_out(&h, &h.room(1).await?).await?;
+
+	policy.all_authorized()
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn shared_name(services: &Services, base: &str) -> Result {
+	let listener = TcpListener::bind(("127.0.0.1", 0))?;
+	let address = listener.local_addr()?;
+	let own = services.globals.server_name();
+	let (policy, _stub) = policy_server(services, listener, own.to_owned(), Mode::Answer).await?;
+	let route = CachedDest {
+		dest: FedDest::Literal(address),
+		host: own.as_str().into(),
+		expire: timepoint_from_now(Duration::from_hours(1))?,
+		srv: false,
+	};
+
+	services
+		.resolver
+		.cache
+		.set_destination(own, &route);
+
+	let h = Harness::new(services, base, &policy).await?;
+	let room_id = h
+		.alice
+		.create_room(&json!({ "preset": "public_chat" }))
+		.await?;
+
+	h.protect(&room_id).await?;
+	a_policy_server_may_share_its_name(&h, &room_id).await?;
+
+	policy.all_authorized()
+}
+
+fn loopback_name(listener: &TcpListener) -> Result<OwnedServerName> {
+	let address = listener.local_addr()?;
+
+	ServerName::parse(address.to_string()).map_err(|e| err!("policy server name: {e}"))
+}
+
+/// Serves a policy server on the listener, answering as `name`.
+///
+/// It holds each signing request to this server's X-Matrix signature, and
+/// serves its own key document so that it can relay events here. Dropping the
+/// returned set stops it.
+async fn policy_server(
+	services: &Services,
+	listener: TcpListener,
+	name: OwnedServerName,
+	mode: Mode,
+) -> Result<(Arc<Policy>, Stub)> {
+	let key = key_pair("policy_server")?;
+	let server_key = key_pair("stub")?;
+	let (key_id, verify_key) = services.server_keys.active_verify_key();
+	let origin = services.globals.server_name().to_owned();
+	let origin_keys: PublicKeyMap =
+		[(origin.to_string(), [(key_id.to_string(), verify_key.key.clone())].into())].into();
 
 	let room_version = services
 		.server
@@ -136,14 +311,20 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.clone();
 
 	let policy = Arc::new(Policy {
-		name: ServerName::parse(&name).map_err(|e| err!("policy server name: {e}"))?,
+		keys: key_document(&name, &server_key)?,
+		name,
 		key,
+		server_key,
 		room_version,
+		origin,
+		origin_keys,
+		mode,
 		park: Mutex::default(),
 		refuse: Mutex::default(),
 		arrived: Notify::new(),
 		release: Notify::new(),
 		seen: Mutex::default(),
+		authorized: AtomicUsize::default(),
 	});
 
 	listener.set_nonblocking(true)?;
@@ -155,32 +336,51 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let app = Router::new()
 		.route("/_matrix/policy/v1/sign", post(sign))
+		.route("/_matrix/key/v2/server", get(server_keys))
 		.fallback(accept)
 		.with_state(policy.clone());
 
 	let remote = from_tcp_rustls(listener, config)?.serve(app.into_make_service());
-	let mut tasks = JoinSet::new(); // The set aborts the stub when the exercise exits.
+	let mut stub = Stub::new(); // The set aborts the stub when the exercise drops it.
 
-	tasks.spawn_on(remote, services.server.runtime());
+	stub.spawn_on(remote, services.server.runtime());
 
-	let h = Harness {
-		services,
-		policy: &policy,
-		alice: Client { services, base, token: ALICE_TOKEN },
-		bob: Client { services, base, token: BOB_TOKEN },
-		alice_id: &alice_id,
-		bob_id: &bob_id,
-	};
+	Ok((policy, stub))
+}
 
-	others_append_during_the_window(&h, &h.room(1).await?).await?;
-	a_state_change_rebuilds_the_message(&h, &h.room(2).await?).await?;
-	a_policy_change_rebuilds_the_message(&h, &h.room(9).await?).await?;
-	a_sender_removed_meanwhile_is_refused(&h, &h.room(3).await?).await?;
-	a_retried_transaction_waits_for_the_first(&h, &h.room(4).await?).await?;
-	messages_keep_their_arrival_order(&h, &h.room(5).await?).await?;
-	a_redaction_keeps_the_room_held(&h, &h.room(6).await?).await?;
-	a_refusal_stores_nothing(&h, &h.room(7).await?).await?;
-	a_relayed_copy_is_stored_once(&h, &h.room(8).await?).await
+/// The policy server's key document, signed with its server key.
+///
+/// The server key is apart from the policy key the room publishes, as MSC4284
+/// recommends, so a signature under one never passes for the other.
+fn key_document(name: &ServerName, key: &Ed25519KeyPair) -> Result<CanonicalJsonObject> {
+	let valid_until = timepoint_from_now(Duration::from_hours(1))?;
+	let valid_until_ts = MilliSecondsSinceUnixEpoch::from_system_time(valid_until)
+		.ok_or_else(|| err!("key document expiry out of range"))?;
+
+	let public_key: Base64 = Base64::new(key.public_key().to_vec());
+	let document = json!({
+		"server_name": name,
+		"valid_until_ts": valid_until_ts,
+		"verify_keys": { SERVER_KEY_ID: { "key": public_key } },
+		"old_verify_keys": {},
+	});
+
+	signed(from_value(document)?, name, key)
+}
+
+fn signed(
+	mut object: CanonicalJsonObject,
+	name: &ServerName,
+	key: &Ed25519KeyPair,
+) -> Result<CanonicalJsonObject> {
+	sign_json(name.as_str(), key, &mut object).map_err(|e| err!("key document: {e}"))?;
+
+	Ok(object)
+}
+
+fn key_pair(version: &str) -> Result<Ed25519KeyPair> {
+	Ed25519KeyPair::from_der(&Ed25519KeyPair::generate(), version.into())
+		.map_err(|e| err!("{version} key: {e}"))
 }
 
 /// Bob's message lands while Alice's waits for its signature.
@@ -192,7 +392,7 @@ async fn others_append_during_the_window(h: &Harness<'_>, room_id: &RoomId) -> R
 	let sent = h.park_and_send(&h.alice, room_id, MESSAGE, "t1", &content);
 	let sent = pin!(sent);
 	let sent = parked(h.policy, sent).await?;
-	let meanwhile = timeout(WAIT, h.append(room_id, h.bob_id, message("meanwhile"))).await;
+	let meanwhile = timeout(WAIT, h.append(room_id, &h.bob_id, message("meanwhile"))).await;
 
 	h.policy.release.notify_one();
 
@@ -221,13 +421,13 @@ async fn a_state_change_rebuilds_the_message(h: &Harness<'_>, room_id: &RoomId) 
 	let sent = pin!(sent);
 	let sent = parked(h.policy, sent).await?;
 	let topic = PduBuilder::state("", &RoomTopicEventContent::new("moved".into()));
-	let topic = timeout(WAIT, h.append(room_id, h.alice_id, topic)).await;
+	let topic = timeout(WAIT, h.append(room_id, &h.alice_id, topic)).await;
 
 	h.policy.release.notify_one();
 
 	let event_id = sent_event(sent.await?)?;
 	let topic = topic.map_err(|_| err!("the room stayed locked in the window"))??;
-	let asked = h.asked(room_id, h.bob_id);
+	let asked = h.asked(room_id, &h.bob_id);
 	let first = h.event_id(&asked[0])?;
 	let state = &h.services.state;
 
@@ -251,9 +451,7 @@ async fn a_state_change_rebuilds_the_message(h: &Harness<'_>, room_id: &RoomId) 
 /// an older policy naming another key, so the message is built again and fails
 /// verification under that key rather than going out.
 async fn a_policy_change_rebuilds_the_message(h: &Harness<'_>, room_id: &RoomId) -> Result {
-	let other = Ed25519KeyPair::from_der(&Ed25519KeyPair::generate(), "other".into())
-		.map_err(|e| err!("other policy key: {e}"))?;
-
+	let other = key_pair("other")?;
 	let public_key: Base64 = Base64::new(other.public_key().to_vec());
 	let older = json!({ "via": h.policy.name, "public_key": public_key });
 	let older = PduBuilder {
@@ -263,7 +461,7 @@ async fn a_policy_change_rebuilds_the_message(h: &Harness<'_>, room_id: &RoomId)
 		..PduBuilder::default()
 	};
 
-	h.append(room_id, h.alice_id, older).await?;
+	h.append(room_id, &h.alice_id, older).await?;
 
 	let policy = h
 		.services
@@ -281,7 +479,7 @@ async fn a_policy_change_rebuilds_the_message(h: &Harness<'_>, room_id: &RoomId)
 		..PduBuilder::timeline(&redaction)
 	};
 
-	let redacted = timeout(WAIT, h.append(room_id, h.alice_id, redaction)).await;
+	let redacted = timeout(WAIT, h.append(room_id, &h.alice_id, redaction)).await;
 
 	h.policy.release.notify_one();
 
@@ -295,7 +493,7 @@ async fn a_policy_change_rebuilds_the_message(h: &Harness<'_>, room_id: &RoomId)
 		"sent under the redacted policy: {body}"
 	);
 
-	assert_eq!(h.asked(room_id, h.bob_id).len(), 2, "the message was not built again");
+	assert_eq!(h.asked(room_id, &h.bob_id).len(), 2, "the message was not built again");
 
 	Ok(())
 }
@@ -311,7 +509,7 @@ async fn a_sender_removed_meanwhile_is_refused(h: &Harness<'_>, room_id: &RoomId
 	let sent = parked(h.policy, sent).await?;
 	let kick = RoomMemberEventContent::new(MembershipState::Leave);
 	let kick = PduBuilder::state(h.bob_id.as_str(), &kick);
-	let kick = timeout(WAIT, h.append(room_id, h.alice_id, kick)).await;
+	let kick = timeout(WAIT, h.append(room_id, &h.alice_id, kick)).await;
 
 	h.policy.release.notify_one();
 
@@ -343,7 +541,7 @@ async fn a_retried_transaction_waits_for_the_first(h: &Harness<'_>, room_id: &Ro
 	let retry = retry.ok_or_else(|| err!("the retry did not wait for the first request"))?;
 
 	assert_eq!(sent_event(retry.await?)?, event_id);
-	assert_eq!(h.asked(room_id, h.alice_id).len(), 1, "the retry was signed too");
+	assert_eq!(h.asked(room_id, &h.alice_id).len(), 1, "the retry was signed too");
 
 	Ok(())
 }
@@ -414,37 +612,38 @@ async fn a_refusal_stores_nothing(h: &Harness<'_>, room_id: &RoomId) -> Result {
 
 	send(&h.alice, room_id, MESSAGE, "t7", &text("no")).await?;
 
-	assert_eq!(h.asked(room_id, h.alice_id).len(), 2, "the retry was answered from a record");
+	assert_eq!(h.asked(room_id, &h.alice_id).len(), 2, "the retry was answered from a record");
 
 	Ok(())
 }
 
 /// A copy of the waiting message relayed back meanwhile is stored only once.
 ///
-/// The receive path stores the copy while the room is unlocked, and the send
-/// answers it rather than storing the message again.
+/// The policy server relays the copy in a transaction, which this server
+/// stores while the room is unlocked, and the send answers it rather than
+/// storing the message again.
 async fn a_relayed_copy_is_stored_once(h: &Harness<'_>, room_id: &RoomId) -> Result {
 	let content = text("relayed");
 	let sent = h.park_and_send(&h.alice, room_id, MESSAGE, "t8", &content);
 	let sent = pin!(sent);
 	let sent = parked(h.policy, sent).await?;
-	let relayed = h.asked(room_id, h.alice_id).remove(0);
+	let relayed = h.asked(room_id, &h.alice_id).remove(0);
 	let event_id = h.event_id(&relayed)?;
-	let ingest = h.services.event_handler.handle_incoming_pdu(
-		&h.policy.name,
-		room_id,
-		&event_id,
-		relayed,
-		true,
-	);
-
-	let ingested = timeout(WAIT, ingest).await;
+	let delivered = timeout(WAIT, h.relay(&relayed)).await;
+	let stored_meanwhile = h
+		.services
+		.timeline
+		.get_pdu_id(&event_id)
+		.await
+		.is_ok();
 
 	h.policy.release.notify_one();
 
 	let answered = sent_event(sent.await?)?;
+	let (status, body) =
+		delivered.map_err(|_| err!("the room stayed locked in the window"))??;
 
-	ingested.map_err(|_| err!("the room stayed locked in the window"))??;
+	let results: Value = from_str(&body)?;
 
 	let rows = h
 		.services
@@ -454,10 +653,101 @@ async fn a_relayed_copy_is_stored_once(h: &Harness<'_>, room_id: &RoomId) -> Res
 		.count()
 		.await;
 
+	assert_eq!(status, 200, "the transaction was refused: {body}");
+	assert_eq!(results["pdus"][event_id.as_str()], json!({}), "the copy was refused: {body}");
+	assert!(stored_meanwhile, "the relayed copy was not stored while the send waited");
 	assert_eq!(answered, event_id);
 	assert_eq!(rows, 1, "the relayed message has more than one timeline row");
 
 	Ok(())
+}
+
+/// A message whose policy server never answers is refused at the timeout.
+///
+/// The client is told the policy server is unavailable and may retry, nothing
+/// is stored, and the policy server is backed off.
+async fn an_unanswered_request_times_out(h: &Harness<'_>, room_id: &RoomId) -> Result {
+	let before = (h.extremities(room_id).await, h.latest(room_id).await?);
+	let content = text("unanswered");
+	let started = Instant::now();
+	let sent = send(&h.alice, room_id, MESSAGE, "t10", &content);
+	let (status, body) = timeout(HANG, sent)
+		.await
+		.map_err(|_| err!("the send to a stalled policy server never finished"))??;
+
+	let elapsed = started.elapsed();
+	let after = (h.extremities(room_id).await, h.latest(room_id).await?);
+	let backoff = h
+		.services
+		.federation
+		.peer_backoff(&h.policy.name)
+		.await;
+
+	assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+	assert_eq!(body["errcode"], "M_UNKNOWN");
+	assert!(
+		body["error"]
+			.as_str()
+			.is_some_and(|e| e.contains("unavailable")),
+		"{body}"
+	);
+	assert!(
+		(TIMEOUT..STALLED).contains(&elapsed),
+		"refused after {elapsed:?}, not at the timeout"
+	);
+	assert_eq!(after, before);
+	assert_eq!(h.asked(room_id, &h.alice_id).len(), 1, "the policy server was not asked");
+	assert!(backoff.is_some(), "the policy server is not backed off");
+
+	Ok(())
+}
+
+/// A policy server under this server's own name signs beside it.
+///
+/// The stored message carries this server's signature and the policy server's
+/// under the same name, neither replacing the other.
+async fn a_policy_server_may_share_its_name(h: &Harness<'_>, room_id: &RoomId) -> Result {
+	let sent = send(&h.alice, room_id, MESSAGE, "t11", &text("shared")).await?;
+	let event_id = sent_event(sent)?;
+	let pdu = h
+		.services
+		.timeline
+		.get_pdu_json(&event_id)
+		.await?;
+
+	let name = h.services.globals.server_name().as_str();
+	let (key_id, _) = h.services.server_keys.active_verify_key();
+	let signatures = pdu
+		.get("signatures")
+		.and_then(CanonicalJsonValue::as_object)
+		.and_then(|signatures| signatures.get(name))
+		.and_then(CanonicalJsonValue::as_object)
+		.ok_or_else(|| err!("the stored message carries no signature from {name}"))?;
+
+	assert_eq!(h.asked(room_id, &h.alice_id).len(), 1, "the policy server was not asked");
+	assert!(signatures.contains_key(key_id.as_str()), "this server's signature is gone");
+	assert!(signatures.contains_key(KEY_ID), "the policy server's signature is missing");
+	assert_eq!(signatures.len(), 2, "unexpected signatures: {signatures:?}");
+
+	Ok(())
+}
+
+/// Registers Alice and Bob, with the policy server the cases share.
+///
+/// Each boot starts on a fresh database, so the two register anew in each.
+#[implement(Harness, generics = "<'a>", params = "<'a>")]
+async fn new(services: &'a Services, base: &'a str, policy: &'a Policy) -> Result<Self> {
+	let alice_id = register(services, "alice", ALICE_TOKEN).await?;
+	let bob_id = register(services, "bob", BOB_TOKEN).await?;
+
+	Ok(Self {
+		services,
+		policy,
+		alice: Client { services, base, token: ALICE_TOKEN },
+		bob: Client { services, base, token: BOB_TOKEN },
+		alice_id,
+		bob_id,
+	})
 }
 
 /// A public room of Alice's that Bob joined, whose policy server is the stub.
@@ -475,20 +765,33 @@ async fn room(&self, n: usize) -> Result<OwnedRoomId> {
 		.await?;
 
 	let member = UserId::parse(format!("@policy{n}:{}", self.policy.name))?;
-	let count = *self.services.globals.next_count();
+	let count = self.services.globals.next_count();
+	let joined = membership_update(&room_id, &member, MembershipState::Join, *count);
 
 	self.services
 		.state_cache
-		.update_membership(membership_update(&room_id, &member, MembershipState::Join, count))
+		.update_membership(joined)
 		.await?;
 
+	drop(count);
+	self.protect(&room_id).await?;
+
+	Ok(room_id)
+}
+
+/// Names the stub as the room's policy server.
+///
+/// The event publishes the stub's key, which every later message's policy
+/// signature must verify under.
+#[implement(Harness, params = "<'_>")]
+async fn protect(&self, room_id: &RoomId) -> Result {
 	let public_key = Base64::new(self.policy.key.public_key().to_vec());
 	let content = RoomPolicyEventContent::new(self.policy.name.clone(), public_key);
 
-	self.append(&room_id, self.alice_id, PduBuilder::state("", &content))
+	self.append(room_id, &self.alice_id, PduBuilder::state("", &content))
 		.await?;
 
-	Ok(room_id)
+	Ok(())
 }
 
 #[implement(Harness, params = "<'_>")]
@@ -573,6 +876,19 @@ fn event_id(&self, event: &CanonicalJsonObject) -> Result<OwnedEventId> {
 	gen_event_id(event, &self.policy.room_version)
 }
 
+/// Relays an event to this server from the policy server, in a transaction.
+///
+/// The policy server signs the request with its key, which this server fetches
+/// from it.
+#[implement(Harness, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn relay(&self, event: &CanonicalJsonObject) -> Result<(u16, String)> {
+	let origin = &self.policy.name;
+	let request = transaction(origin.clone(), to_raw_value(event)?);
+
+	send_as(self.services, self.alice.base, origin, &self.policy.server_key, request).await
+}
+
 #[implement(Policy)]
 fn park(&self, room_id: &RoomId) {
 	*self.park.lock().expect("parked room") = Some(room_id.to_owned());
@@ -585,8 +901,16 @@ fn refuse(&self, room_id: &RoomId) {
 
 /// Signs the event, unless its room is the one to park or to refuse.
 ///
-/// A parked request waits for the test's release before it is answered.
-async fn sign(State(policy): State<Arc<Policy>>, body: Bytes) -> (StatusCode, Json<Value>) {
+/// A request without this server's X-Matrix signature is refused as
+/// unauthorized, a parked request waits for the test's release before it is
+/// answered, and a stalled policy server never answers.
+async fn sign(
+	State(policy): State<Arc<Policy>>,
+	method: Method,
+	uri: Uri,
+	headers: HeaderMap,
+	body: Bytes,
+) -> (StatusCode, Json<Value>) {
 	let event: CanonicalJsonObject =
 		serde_json::from_slice(&body).expect("the request body is an event");
 
@@ -598,6 +922,18 @@ async fn sign(State(policy): State<Arc<Policy>>, body: Bytes) -> (StatusCode, Js
 		.lock()
 		.expect("seen events")
 		.push(event.clone());
+
+	if !policy.authorizes(method, uri, &headers, &body) {
+		let error = json!({ "errcode": "M_UNAUTHORIZED", "error": "Bad X-Matrix signature." });
+
+		return (StatusCode::UNAUTHORIZED, Json(error));
+	}
+
+	policy.authorized.fetch_add(1, Ordering::Relaxed);
+
+	if matches!(policy.mode, Mode::Stall) {
+		return pending().await;
+	}
 
 	let parked = policy
 		.park
@@ -631,6 +967,59 @@ async fn sign(State(policy): State<Arc<Policy>>, body: Bytes) -> (StatusCode, Js
 	let name = policy.name.as_str();
 
 	(StatusCode::OK, Json(json!({ name: { KEY_ID: signature } })))
+}
+
+/// Whether a request carries this server's X-Matrix signature, addressed to the
+/// policy server.
+///
+/// It stands in for the check a policy server makes before it answers: the
+/// origin must be this server, the destination the policy server, and the
+/// signature must verify under this server's key.
+#[implement(Policy)]
+fn authorizes(&self, method: Method, uri: Uri, headers: &HeaderMap, body: &[u8]) -> bool {
+	let Some(xmatrix) = headers
+		.get(AUTHORIZATION)
+		.and_then(|value| XMatrix::try_from(value).ok())
+	else {
+		return false;
+	};
+
+	let Ok(request) = Request::builder()
+		.method(method)
+		.uri(uri)
+		.body(body)
+	else {
+		return false;
+	};
+
+	xmatrix.origin == self.origin
+		&& xmatrix.destination.as_ref().eq(&Some(&self.name))
+		&& xmatrix
+			.verify_request(&request, &self.name, &self.origin_keys)
+			.is_ok()
+}
+
+/// Fails unless every signing request carried this server's X-Matrix signature.
+///
+/// A request failing the check was refused, so a case that passed anyway
+/// would otherwise hide it.
+#[implement(Policy)]
+fn all_authorized(&self) -> Result {
+	let seen = self.seen.lock().expect("seen events").len();
+	let authorized = self.authorized.load(Ordering::Relaxed);
+
+	if seen == 0 || authorized != seen {
+		return Err!("{authorized} of {seen} signing requests carried this server's signature");
+	}
+
+	Ok(())
+}
+
+/// Serves the policy server's key document.
+///
+/// This server fetches it to check the transactions the policy server relays.
+async fn server_keys(State(policy): State<Arc<Policy>>) -> Json<CanonicalJsonObject> {
+	Json(policy.keys.clone())
 }
 
 /// Accepts every other federation request.
@@ -709,4 +1098,12 @@ where
 	I: IntoIterator<Item = OwnedEventId>,
 {
 	event_ids.into_iter().sorted_unstable().collect()
+}
+
+fn transaction(origin: OwnedServerName, pdu: Box<RawJsonValue>) -> TransactionRequest {
+	let now = MilliSecondsSinceUnixEpoch::now();
+	let mut request = TransactionRequest::new(TransactionId::new(), origin, now); // non_exhaustive
+
+	request.pdus = vec![pdu];
+	request
 }

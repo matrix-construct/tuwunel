@@ -1,20 +1,22 @@
-//! Federation requests signed by the server under test and sent to itself.
+//! Federation requests sent to the server under test, signed by itself or by
+//! a peer the test plays.
 //!
 //! It stands apart from the client harness, so only the test binaries that
-//! declare `mod federation` compile it. The server is each request's origin
-//! and serves it as it would a peer's.
+//! declare `mod federation` compile it. The server serves each request as it
+//! would a peer's.
 
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{
 	Result,
 	ruma::{
-		EventId, OwnedEventId, OwnedRoomId, RoomId, UserId,
+		EventId, OwnedEventId, OwnedRoomId, RoomId, ServerName, UserId,
 		api::{
 			OutgoingRequest, OutgoingRequestExt,
 			federation::authentication::{ServerSignatures, ServerSignaturesInput},
 			path_builder::SinglePath,
 		},
 		events::room::member::{MembershipState, RoomMemberEventContent},
+		signatures::Ed25519KeyPair,
 	},
 };
 use tuwunel_matrix::pdu::PduBuilder;
@@ -61,13 +63,30 @@ pub(crate) async fn send<T>(services: &Services, base: &str, request: T) -> Resu
 where
 	T: OutgoingRequest<Authentication = ServerSignatures, PathBuilder = SinglePath>,
 {
-	let server_name = services.globals.server_name().to_owned();
-	let auth = ServerSignaturesInput::new(
-		server_name.clone(),
-		server_name,
-		services.server_keys.keypair(),
-	);
+	let origin = services.globals.server_name();
+	let key_pair = services.server_keys.keypair();
 
+	send_as(services, base, origin, key_pair, request).await
+}
+
+/// Send a federation request to the server under test from another origin.
+///
+/// The request is signed with the origin's key pair, whose public key the
+/// server must find at the origin; the status and raw body come back as from
+/// `send`.
+#[tracing::instrument(level = "debug", skip_all, fields(%origin))]
+pub(crate) async fn send_as<T>(
+	services: &Services,
+	base: &str,
+	origin: &ServerName,
+	key_pair: &Ed25519KeyPair,
+	request: T,
+) -> Result<(u16, String)>
+where
+	T: OutgoingRequest<Authentication = ServerSignatures, PathBuilder = SinglePath>,
+{
+	let destination = services.globals.server_name().to_owned();
+	let auth = ServerSignaturesInput::new(origin.to_owned(), destination, key_pair);
 	let request = request.try_into_http_request::<Vec<u8>>(base, auth, ())?;
 	let response = services
 		.client
