@@ -17,6 +17,7 @@ use tuwunel_core::{
 	Err, Error, Result,
 	config::{Figment, rooms::PolicyServer},
 	err,
+	itertools::Itertools,
 	utils::time::now_secs,
 };
 use tuwunel_database::{Cbor, deserialize_from_slice, serialize_to_vec};
@@ -356,8 +357,9 @@ fn relays_policy_server_errors_verbatim() {
 
 	assert_eq!(rendered(relayed(remote(401, &unauthorized))), (403, unauthorized.clone()));
 
-	// Only the message survives; no field of the remote body reaches the client.
-	for errcode in [
+	// Only the message survives, whatever the status; no field of the remote body
+	// reaches the client.
+	let sessions = [
 		"M_UNKNOWN_TOKEN",
 		"M_MISSING_TOKEN",
 		"M_USER_DEACTIVATED",
@@ -365,19 +367,28 @@ fn relays_policy_server_errors_verbatim() {
 		"M_USER_SUSPENDED",
 		"M_CONSENT_NOT_GIVEN",
 		"M_RESOURCE_LIMIT_EXCEEDED",
-	] {
-		let session = json!({
-			"errcode": errcode,
-			"error": "Not your session",
-			"soft_logout": true,
-			"consent_uri": "https://policy.example.org/consent",
-			"admin_contact": "mailto:admin@policy.example.org",
+	];
+
+	[400, 401, 403]
+		.into_iter()
+		.cartesian_product(sessions)
+		.for_each(|(status, errcode)| {
+			let session = json!({
+				"errcode": errcode,
+				"error": "Not your session",
+				"soft_logout": true,
+				"consent_uri": "https://policy.example.org/consent",
+				"admin_contact": "mailto:admin@policy.example.org",
+			});
+
+			let neutral = json!({"errcode": "M_FORBIDDEN", "error": "Not your session"});
+
+			assert_eq!(
+				rendered(relayed(remote(status, &session))),
+				(403, neutral),
+				"{status} {errcode}"
+			);
 		});
-
-		let neutral = json!({"errcode": "M_FORBIDDEN", "error": "Not your session"});
-
-		assert_eq!(rendered(relayed(remote(401, &session))), (403, neutral), "{errcode}");
-	}
 }
 
 #[test]
