@@ -178,6 +178,8 @@ jobs:
       complement_interop_run: ${{inputs.complement_interop_run || '.*'}}
       enable_test_mas: ${{fromJSON(inputs.enable_test_mas || 'true')}}
       mas_verbose: ${{fromJSON(inputs.mas_verbose || 'false')}}
+      enable_test_policyserv: ${{fromJSON(inputs.enable_test_policyserv || 'true')}}
+      policyserv_verbose: ${{fromJSON(inputs.policyserv_verbose || 'false')}}
       enable_test_playwright: ${{fromJSON(inputs.enable_test_playwright || env.is_branch || 'false')}}
       playwright_shards: ${{inputs.playwright_shards || vars.PLAYWRIGHT_SHARDS || env.default_playwright_shards}}
       playwright_workers: ${{inputs.playwright_workers || vars.PLAYWRIGHT_WORKERS || env.default_playwright_workers}}
@@ -357,6 +359,8 @@ jobs:
       complement_interop_run: ${{needs.init.outputs.complement_interop_run}}
       enable_mas: ${{needs.init.outputs.enable_test_mas}}
       mas_verbose: ${{needs.init.outputs.mas_verbose}}
+      enable_policyserv: ${{needs.init.outputs.enable_test_policyserv}}
+      policyserv_verbose: ${{needs.init.outputs.policyserv_verbose}}
       enable_playwright: ${{needs.init.outputs.enable_test_playwright}}
       playwright_shards: ${{needs.init.outputs.playwright_shards}}
       playwright_workers: ${{needs.init.outputs.playwright_workers}}

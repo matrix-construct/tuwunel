@@ -1,0 +1,47 @@
+# syntax = docker/dockerfile:1.11-labs
+
+# Tuwunel system-under-test for the policyserv integration test (MSC4284).
+# Mirrors mas-testee: FROM the built `install` image, with a config baked in.
+# Unlike mas-testee it federates over TLS: docker/lib/policyserv-runner.sh
+# mounts a throwaway CA and leaf at /pki and points SSL_CERT_FILE at the CA, so
+# both directions verify certificates. The policy server settings are left at
+# their defaults on purpose; the job tests what ships.
+FROM input AS policyserv-testee
+
+EXPOSE 8008 8448
+RUN mkdir -p /database
+
+# The registration token is a static, well-known test value; the
+# policyserv-runner.sh `REGISTRATION_TOKEN` constant MUST equal it.
+COPY <<EOF /policyserv/tuwunel.toml
+    [global]
+    server_name = "tuwunel"
+    address = "0.0.0.0"
+    port = [8008, 8448]
+    database_path = "/database"
+    allow_registration = true
+    registration_token = "tuwunel-policyserv-registration-token"
+    new_user_displayname_suffix = ""
+    log = "info,tuwunel=debug"
+    log_colors = false
+    log_thread_ids = false
+    log_span_events = "NONE"
+    media_startup_check = false
+    rocksdb_parallelism_threads = 2
+    argon2_m_cost = 64
+    argon2_t_cost = 1
+    startup_netburst = false
+    admin_room_notices = false
+    create_admin_room = false
+    trusted_servers = []
+    query_trusted_key_servers_first = false
+    query_trusted_key_servers_first_on_join = false
+    ip_range_denylist = []
+
+    [global.tls]
+    certs = "/pki/tuwunel.crt"
+    key = "/pki/tuwunel.key"
+    dual_protocol = true
+EOF
+ENV TUWUNEL_CONFIG="/policyserv/tuwunel.toml"
+ENTRYPOINT exec tuwunel

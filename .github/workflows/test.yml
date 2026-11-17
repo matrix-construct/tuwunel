@@ -104,6 +104,12 @@ on:
       mas_verbose:
         type: string
         default: 'false'
+      enable_policyserv:
+        type: string
+        default: 'false'
+      policyserv_verbose:
+        type: string
+        default: 'false'
       enable_playwright:
         type: string
         default: 'false'
@@ -372,6 +378,32 @@ jobs:
       includes: ${{inputs.includes}}
       checkout: ${{inputs.checkout}}
 
+  policyserv:
+    if: >
+      !failure() && !cancelled()
+      && fromJSON(inputs.enable_policyserv)
+      && !contains(inputs.pipeline, '[ci no build]')
+      && contains(fromJSON(inputs.cargo_profiles), fromJSON('["bench"]')[0])
+      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
+      && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v3-linux-gnu"]')[0])
+
+    name: Policyserv
+    uses: ./.github/workflows/bake.yml
+    with:
+      bake_targets: '["policyserv-testee"]'
+      cargo_profiles: '["bench"]'
+      feat_sets: '["logging"]'
+      rust_toolchains: '["nightly"]'
+      sys_names: ${{inputs.sys_names}}
+      sys_versions: ${{inputs.sys_versions}}
+      rust_targets: ${{inputs.rust_targets}}
+      sys_targets: '["x86_64-v3-linux-gnu"]'
+      machines: ${{inputs.machines}}
+      runner: ${{inputs.complement_runner}}
+      excludes: ${{inputs.excludes}}
+      includes: ${{inputs.includes}}
+      checkout: ${{inputs.checkout}}
+
   playwright:
     if: >
       !failure() && !cancelled()
@@ -597,6 +629,46 @@ jobs:
       results_artifact_prefix: mas_results
       output_artifact_prefix: mas_output
       metrics_artifact_prefix: mas_worker_log
+      runtime_history: false
+      cargo_profiles: '["bench"]'
+      feat_sets: '["logging"]'
+      rust_toolchains: '["nightly"]'
+      sys_names: ${{inputs.sys_names}}
+      sys_versions: ${{inputs.sys_versions}}
+      rust_targets: ${{inputs.rust_targets}}
+      sys_targets: '["x86_64-v3-linux-gnu"]'
+      machines: ${{inputs.machines}}
+      excludes: ${{inputs.excludes}}
+      includes: ${{inputs.includes}}
+      checkout: ${{inputs.checkout}}
+
+  moderation:
+    if: >
+      !failure() && !cancelled()
+      && fromJSON(inputs.enable_policyserv)
+      && !contains(inputs.pipeline, '[ci no build]')
+      && inputs.machines
+      && contains(fromJSON(inputs.cargo_profiles), fromJSON('["bench"]')[0])
+      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
+      && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v3-linux-gnu"]')[0])
+
+    name: Moderation (policyserv)
+    needs: [policyserv]
+
+    uses: ./.github/workflows/compliance.yml
+    with:
+      regime: moderation
+      counterparty: policyserv
+      runner: ${{inputs.complement_runner}}
+      script: docker/policyserv.sh
+      summariser: .github/workflows/summarise/policyserv.sh
+      results_path: tests/policyserv/results.jsonl
+      logs_path: tests/policyserv/tuwunel.log
+      runtime_metrics_path: tests/policyserv/policyserv.log
+      verbose: ${{inputs.policyserv_verbose}}
+      results_artifact_prefix: policyserv_results
+      output_artifact_prefix: policyserv_output
+      metrics_artifact_prefix: policyserv_worker_log
       runtime_history: false
       cargo_profiles: '["bench"]'
       feat_sets: '["logging"]'

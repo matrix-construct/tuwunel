@@ -359,6 +359,7 @@ group "tests" {
         "matrix-compliance",
         "mas",
         "playwright",
+        "policyserv",
         "smoke",
         "unit",
     ]
@@ -596,6 +597,36 @@ target "mas-testee" {
     target = "mas-testee"
     output = ["type=docker,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.mas"
+    matrix = cargo_rust_feat_sys
+    inherits = [
+        elem("install", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    ]
+    contexts = {
+        input = elem("target:install", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    }
+}
+
+#
+# Policy server integration test (policyserv joined to a tuwunel room, MSC4284)
+#
+
+group "policyserv" {
+    targets = [
+        "policyserv-testee",
+    ]
+}
+
+# Tuwunel SUT for the policyserv integration test, tagged as mas-testee is; the
+# runner (docker/lib/policyserv-runner.sh) references the long elem name.
+target "policyserv-testee" {
+    name = elem("policyserv-testee", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    tags = [
+        elem_tag("policyserv-testee", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
+        "tuwunel-policyserv-testee:latest",
+    ]
+    target = "policyserv-testee"
+    output = ["type=docker,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
+    dockerfile = "${docker_dir}/Dockerfile.policyserv"
     matrix = cargo_rust_feat_sys
     inherits = [
         elem("install", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
