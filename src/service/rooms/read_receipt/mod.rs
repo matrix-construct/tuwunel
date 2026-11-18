@@ -78,6 +78,36 @@ impl crate::Service for Service {
 }
 
 impl Service {
+	/// Whether a federated receipt is eligible in this user and thread context.
+	/// The position need not be in the timeline yet: a receipt can arrive
+	/// before the event it acknowledges.
+	pub async fn accepts_federated_context(
+		&self,
+		room_id: &RoomId,
+		user_id: &UserId,
+		thread: &ReceiptThread,
+	) -> bool {
+		if !self
+			.services
+			.state_cache
+			.is_joined(user_id, room_id)
+			.await
+		{
+			return false;
+		}
+
+		match thread {
+			| ReceiptThread::Unthreaded | ReceiptThread::Main => true,
+			| ReceiptThread::Thread(root) => self
+				.services
+				.timeline
+				.get_room_pdu_id(room_id, root)
+				.await
+				.is_ok(),
+			| _ => false,
+		}
+	}
+
 	/// Replaces the previous read receipt when the incoming one advances.
 	///
 	/// Returns whether the receipt was stored. A re-posted marker allocates no

@@ -3,16 +3,22 @@
 use std::collections::BTreeMap;
 
 use ruma::{
-	RoomId, UserId,
-	events::{AnySyncEphemeralRoomEvent, receipt::ReceiptType},
+	RoomId, UserId, event_id,
+	events::{
+		AnySyncEphemeralRoomEvent,
+		receipt::{ReceiptThread, ReceiptType},
+	},
 	owned_event_id,
 	serde::Raw,
+	user_id,
 };
 use serde_json::json;
+use tuwunel_core::{Result, config::Figment};
 use tuwunel_database::{Interfix, SEP, serialize_to_vec};
-use tuwunel_matrix::pdu::PduCount;
+use tuwunel_matrix::pdu::{PduCount, PduId, RawPduId};
 
 use super::{data::position_advances, pack_receipts_fallible, thread_kind_to_receipt};
+use crate::test_utils::fixture;
 
 const ROOM: &str = "!room:example.com";
 const USER: &str = "@user:example.com";
@@ -248,4 +254,52 @@ fn packing_keeps_every_user_on_a_shared_event() {
 
 	assert_eq!(readers(ReceiptType::Read), ["@a:example.com", "@b:example.com"]);
 	assert_eq!(readers(ReceiptType::ReadPrivate), ["@c:example.com"]);
+}
+
+#[tokio::test]
+async fn federated_receipts_check_the_reader_and_thread_not_the_position() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+	let services = &fixture.services;
+	let reader = user();
+	let room = room();
+	let receipts = &services.read_receipt;
+	services
+		.state_cache
+		.mark_as_joined(reader, room, PduCount::Normal(1));
+	services
+		.state_cache
+		.update_joined_count(room)
+		.await;
+
+	let accepts = async |user: &UserId, thread: &ReceiptThread| {
+		receipts
+			.accepts_federated_context(room, user, thread)
+			.await
+	};
+	assert!(accepts(reader, &ReceiptThread::Main).await);
+	assert!(accepts(reader, &ReceiptThread::Unthreaded).await);
+	assert!(!accepts(user_id!("@other:example.com"), &ReceiptThread::Main).await);
+	assert!(!accepts(reader, &ReceiptThread::try_from(Some("custom"))?).await);
+	let thread = ReceiptThread::Thread(event_id!("$root").to_owned());
+	assert!(!accepts(reader, &thread).await);
+
+	let root = event_id!("$root");
+	let id: RawPduId = PduId {
+		shortroomid: services
+			.short
+			.get_or_create_shortroomid(room)
+			.await,
+		count: PduCount::Normal(2),
+	}
+	.into();
+	services.db["eventid_pduid"].insert(root.as_bytes(), id.as_bytes());
+	assert!(accepts(reader, &thread).await);
+	assert!(
+		receipts
+			.receipt_advanced(Some(root), event_id!("$later"))
+			.await
+	);
+	Ok(())
 }
