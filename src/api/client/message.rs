@@ -212,7 +212,7 @@ pub async fn get_messages(
 	};
 
 	let events: Vec<_> = it
-		.inspect(|(count, _)| scanned = Some(*count))
+		.inspect(|(count, pdu)| scanned = Some((*count, is_room_create(pdu))))
 		.ready_take_while(|(count, _)| !reached_to(*count))
 		.ready_filter_map(|item| event_filter(item, filter))
 		.wide_filter_map(|item| related_by_filter(services, shortroomid, filter, item))
@@ -258,9 +258,29 @@ pub async fn get_messages(
 
 	// `inspect` records the rejected boundary item, distinguishing a `to` stop
 	// from stream exhaustion.
-	let stopped_at_to = scanned.is_some_and(reached_to);
+	let stopped_at_to = scanned.is_some_and(|(count, _)| reached_to(count));
 	let exhausted = matches!(dir, Direction::Backward) && events.len() < limit && !stopped_at_to;
-	let next_token = if exhausted { scanned } else { events.last().map(at!(0)) };
+	let edge = if exhausted {
+		scanned
+	} else {
+		events
+			.last()
+			.map(|(count, pdu)| (*count, is_room_create(pdu)))
+	};
+
+	// In backfilled history, a later insertion can have a count below
+	// creation's. Confirm the storage boundary before ending pagination.
+	let next_token = match edge {
+		| Some((count, true))
+			if matches!(dir, Direction::Backward)
+				&& services
+					.timeline
+					.first_item_in_room(room_id)
+					.await
+					.is_ok_and(|(first, _)| first == count) =>
+			None,
+		| edge => edge.map(at!(0)),
+	};
 
 	let chunk = events
 		.into_iter()
@@ -274,6 +294,10 @@ pub async fn get_messages(
 		chunk,
 		state,
 	})
+}
+
+fn is_room_create(pdu: &PduEvent) -> bool {
+	*pdu.kind() == RoomCreate && pdu.state_key() == Some("")
 }
 
 pub(crate) async fn lazy_loading_witness<'a, I>(
