@@ -48,8 +48,8 @@ use tuwunel_service::{
 
 use self::{
 	extensions::{
-		acknowledge_to_device, apply_profiles, apply_ranges, check_to_device,
-		handle as handle_extensions, to_device_pending,
+		acknowledge_to_device, apply_profiles, apply_ranges, check_sticky_events,
+		check_to_device, handle as handle_extensions, to_device_pending,
 	},
 	range::collect as collect_ranges,
 	selector::selector,
@@ -127,6 +127,7 @@ pub(crate) async fn sync_events_v5_route(
 	}
 
 	check_to_device(&request.extensions.to_device)?;
+	check_sticky_events(&request.extensions.sticky_events)?;
 
 	let since = request
 		.pos

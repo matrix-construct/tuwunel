@@ -25,10 +25,10 @@ use tuwunel_service::{
 use super::{
 	SyncInfo, Window, WindowRoom,
 	rooms::{
-		Failure as RoomFailure,
+		Delivery, Failure as RoomFailure,
 		Failure::{Payload as PayloadFailure, Timeline as TimelineFailure},
-		RoomDetails, handle_room, membership_allows_required_state, merged_room_details,
-		room_config,
+		RoomDetails, StateRead, StickyEvents, handle_room, membership_allows_required_state,
+		merged_room_details, room_config,
 	},
 };
 use crate::is_empty_account_data_event;
@@ -68,6 +68,7 @@ struct CompleteRange {
 	config: Option<DeliveredConfig>,
 	receipts: Option<Raw<SyncReceiptEvent>>,
 	account_data: Vec<Raw<AnyRoomAccountDataEvent>>,
+	sticky: StickyEvents,
 }
 
 #[derive(Default)]
@@ -102,6 +103,14 @@ pub(super) fn take_receipts(&mut self, room_id: &RoomId) -> Option<Raw<SyncRecei
 	self.ranges
 		.get_mut(room_id)
 		.and_then(|range| range.receipts.take())
+}
+
+#[implement(Results)]
+pub(super) fn take_sticky(&mut self, room_id: &RoomId) -> Option<StickyEvents> {
+	self.ranges
+		.get_mut(room_id)
+		.map(|range| take(&mut range.sticky))
+		.filter(|events| !events.is_empty())
 }
 
 #[implement(Results)]
@@ -181,7 +190,7 @@ async fn collect_room(
 		.map_err(Failure::from);
 
 	if window_room.forgotten {
-		let (payload, state_read) = delivery.map_ok(Option::unzip).await?;
+		let (payload, state_read, sticky) = delivery.map_ok(unzip_delivery).await?;
 		let (shortstatehash, unread_state) = state_read.unwrap_or_default();
 		let shortstatehash = shortstatehash.unwrap_or(room.shortstatehash);
 
@@ -190,6 +199,7 @@ async fn collect_room(
 			empty(),
 			PrivateReadEvents::new(),
 			Vec::new(),
+			sticky,
 			(config_hash, Default::default(), shortstatehash, unread_state),
 		);
 	}
@@ -211,7 +221,7 @@ async fn collect_room(
 		.unwrap_or_default();
 
 	// Without freshly read state, the range keeps the snapshot recorded at its last delivery.
-	let (payload, state_read) = delivery.unzip();
+	let (payload, state_read, sticky) = unzip_delivery(delivery);
 	let (shortstatehash, unread_state) = state_read.unwrap_or_default();
 	let shortstatehash = shortstatehash.unwrap_or(room.shortstatehash);
 
@@ -220,8 +230,17 @@ async fn collect_room(
 		public_receipts,
 		private_receipts,
 		account_data,
+		sticky,
 		(config_hash, required_state, shortstatehash, unread_state),
 	)
+}
+
+fn unzip_delivery(
+	delivery: Option<Delivery>,
+) -> (Option<response::Room>, Option<StateRead>, StickyEvents) {
+	delivery.map_or_else(Default::default, |(payload, state_read, sticky)| {
+		(Some(payload), Some(state_read), sticky)
+	})
 }
 
 async fn public_receipts(
@@ -305,6 +324,7 @@ fn assemble<PublicReceipts>(
 	public_receipts: PublicReceipts,
 	private_receipts: PrivateReadEvents,
 	account_data: Vec<Raw<AnyRoomAccountDataEvent>>,
+	sticky: StickyEvents,
 	config: DeliveredConfig,
 ) -> Result<CompleteRange, Failure>
 where
@@ -320,7 +340,13 @@ where
 
 	let config = payload.as_ref().map(|_| config);
 
-	Ok(CompleteRange { payload, config, receipts, account_data })
+	Ok(CompleteRange {
+		payload,
+		config,
+		receipts,
+		account_data,
+		sticky,
+	})
 }
 
 #[cfg(test)]
@@ -344,6 +370,7 @@ mod tests {
 			vec![malformed].into_iter(),
 			PrivateReadEvents::new(),
 			Vec::new(),
+			Vec::new(),
 			(7, once(11).collect(), 13, Default::default()),
 		);
 
@@ -364,6 +391,7 @@ mod tests {
 			None,
 			Vec::new().into_iter(),
 			PrivateReadEvents::new(),
+			Vec::new(),
 			Vec::new(),
 			(7, once(11).collect(), 13, Default::default()),
 		);
@@ -391,6 +419,7 @@ mod tests {
 			config: None,
 			receipts: Some(receipt),
 			account_data: vec![account_data],
+			sticky: Vec::new(),
 		};
 
 		let ranges = [(room_id.to_owned(), range)].into();

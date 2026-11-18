@@ -29,14 +29,14 @@
 
 | ✅ `yes` | 🟨 `part` | 🟥 `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 295 | 59 | 444 | 312 | 1110 |
+| 295 | 60 | 443 | 312 | 1110 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 192 | 20 | 12 | 57 | 281 |
-| open | 67 | 24 | 346 | 181 | 618 |
+| open | 67 | 25 | 345 | 181 | 618 |
 | closed | 36 | 15 | 86 | 74 | 211 |
 
 ## Merged
@@ -376,7 +376,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4484 | 🟥 ● | 0/0 | Server Administration OAuth Scope | Admin OAuth scope absent; client scope-request and step-up UX excluded |
 | MSC4483 | ✅ ● | 100/100 | Encrypted Account Data | Account-data passthrough; ADK secret and encrypted envelopes stored opaque |
 | MSC4482 | ✅ ● | 100/100 | Ability to bookmark messages | Account-data passthrough; m.bookmarks_room stored, served, synced opaque |
-| MSC4480 | 🟥 ● | 0/0 | MSC4480 Sliding Sync Extension: Sticky Events | Sticky-event delivery absent; client duration and duplicate handling excluded |
+| MSC4480 | 🟨 ● | 70/80 | MSC4480 Sliding Sync Extension: Sticky Events | Extension scoped, deduped, lazy-loaded; no limit paging, mid-connection resend |
 | MSC4476 | ✅ ● | 100/100 | Image pack rooms | Account-data passthrough; m.image_pack.rooms stored, served, synced opaque |
 | MSC4473 | 🟥 ● | 0/0 | Proxied room alias resolution | No federation v2 query/directory; no signing/proxy logic. |
 | MSC4472 | 🟥 ● | 0/0 | Deprecated room version kind | No `deprecated` stability kind in room_versions capability. |

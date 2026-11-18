@@ -24,8 +24,8 @@ use ruma::{
 		},
 	},
 	events::{
-		AnyStrippedStateEvent, AnySyncStateEvent, StateEventType, TimelineEventType,
-		room::member::MembershipState,
+		AnyStrippedStateEvent, AnySyncStateEvent, AnySyncTimelineEvent, StateEventType,
+		TimelineEventType, room::member::MembershipState,
 	},
 	serde::Raw,
 };
@@ -42,6 +42,7 @@ use tuwunel_core::{
 		math::usize_from_ruma_bounded,
 		result::{FlatOk, NotFound},
 		stream::{BroadbandExt, WidebandExt},
+		time::now_millis,
 	},
 	warn,
 };
@@ -61,8 +62,12 @@ use self::{
 	heroes::calculate_heroes,
 };
 use super::{
-	super::{load_timeline_fallible, own_departure, stand_in_leave, strip_state_unsigned},
-	Connection, ListIds, SyncInfo, WindowRoom, departed, stripped_content, stripped_state,
+	super::{
+		load_sticky_events, load_timeline_fallible, own_departure, stand_in_leave,
+		strip_state_unsigned,
+	},
+	Connection, ListIds, SyncInfo, WindowRoom, departed, joined_since, stripped_content,
+	stripped_state,
 };
 use crate::{ignored_filter, with_membership};
 
@@ -87,9 +92,11 @@ type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
 type EventTypeString = SmallString<[u8; 32]>;
 type TimelineMembers<'a> = SmallVec<[&'a str; 2]>;
 pub(super) type RoomDetails = (usize, HashSet<(StateEventType, StateKey)>);
-pub(super) type Delivery = (ResponseRoom, StateRead);
-type StateRead = (Option<ShortStateHash>, UnreadState);
+pub(super) type Delivery = (ResponseRoom, StateRead, StickyEvents);
+pub(super) type StickyEvents = Vec<Raw<AnySyncTimelineEvent>>;
+pub(super) type StateRead = (Option<ShortStateHash>, UnreadState);
 type StateEvent = Raw<AnySyncStateEvent>;
+type TimelineEvents = [(PduCount, Raw<AnySyncTimelineEvent>)];
 type StrippedEvent = Raw<AnyStrippedStateEvent>;
 type Selected = ((StateEventType, StateKey), Option<OwnedEventId>, bool);
 type CollectedState = (Vec<StateEvent>, StateRead);
@@ -111,6 +118,16 @@ struct StateSelection<'a> {
 	changed: bool,
 	delivered: ShortStateHash,
 	unread: &'a [u64],
+}
+
+struct RequiredStateParams<'a> {
+	sync_info: SyncInfo<'a>,
+	room_id: &'a RoomId,
+	selection: StateSelection<'a>,
+	required_state: &'a HashSet<(StateEventType, StateKey)>,
+	timeline_pdus: &'a [(PduCount, PduEvent)],
+	sticky_pdus: &'a [(PduCount, PduEvent)],
+	encrypted: bool,
 }
 
 /// What decides whether a delta sends one requested state event.
@@ -160,7 +177,7 @@ pub(super) async fn handle_room(
 
 	if departed(membership.as_ref()) {
 		return leave_or_ban_response(sync_info, conn, window_room, roomsince)
-			.map_ok(|payload| (payload, (None, room.unread_state.clone())))
+			.map_ok(|payload| (payload, (None, room.unread_state.clone()), Vec::new()))
 			.map_err(Failure::Payload)
 			.await;
 	}
@@ -187,7 +204,10 @@ pub(super) async fn handle_room(
 		.map(Option::transpose)
 		.map_err(Failure::Timeline);
 
-	let (encrypted, timeline) = join(encrypted, timeline).await;
+	// MSC4480: one instant decides both which events are sticky and their TTL.
+	let now = now_millis();
+	let sticky_pdus = sticky_candidates(sync_info, conn, window_room, roomsince, now);
+	let (encrypted, timeline, sticky_pdus) = join3(encrypted, timeline, sticky_pdus).await;
 
 	// A failed load must fail the room, else roomsince advances past unsent events.
 	let (timeline_pdus, limited, last_timeline_count) =
@@ -234,15 +254,15 @@ pub(super) async fn handle_room(
 		.then_some(required_state)
 		.unwrap_or_default();
 
-	let required_state = collect_required_state(
-		services,
-		sender_user,
+	let required_state = collect_required_state(RequiredStateParams {
+		sync_info,
 		room_id,
-		state,
-		&required_state,
-		&timeline_pdus,
+		selection: state,
+		required_state: &required_state,
+		timeline_pdus: &timeline_pdus,
+		sticky_pdus: &sticky_pdus,
 		encrypted,
-	);
+	});
 
 	// TODO: figure out a timestamp we can use for remote invites
 	let stripped_state = stripped_state(services, sender_user, room_id, membership.as_ref());
@@ -292,6 +312,7 @@ pub(super) async fn handle_room(
 	let (initial, num_live) =
 		room_timeline_metadata(roomsince, previous_connection_pos, &timeline);
 
+	let sticky = sticky_events(sync_info, sticky_pdus, &timeline, encrypted, now).await;
 	let timeline = timeline.into_iter().map(at!(1)).collect();
 	let unread_notifications =
 		merge_unread_notifications(highlight_count, notification_count, &thread_counts);
@@ -317,7 +338,66 @@ pub(super) async fn handle_room(
 		unstable_expanded_timeline: false,
 	};
 
-	Ok((payload, state_read))
+	Ok((payload, state_read, sticky))
+}
+
+/// MSC4480: the room's unexpired sticky events this response owes, before its
+/// timeline is known; none unless the extension is enabled and the user is
+/// joined.
+///
+/// A join since `roomsince` owes every unexpired one, as a room new to the
+/// connection is owed.
+#[tracing::instrument(level = "trace", skip_all)]
+async fn sticky_candidates(
+	SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
+	conn: &Connection,
+	WindowRoom { membership, room_id, .. }: &WindowRoom,
+	roomsince: u64,
+	now: u64,
+) -> Vec<(PduCount, PduEvent)> {
+	let owed = conn
+		.extensions
+		.sticky_events
+		.enabled
+		.unwrap_or(false)
+		&& matches!(membership, Some(MembershipState::Join));
+
+	if !owed {
+		return Vec::new();
+	}
+
+	let joined = roomsince > 0 && joined_since(services, room_id, sender_user, roomsince).await;
+	let since = if joined { 0 } else { roomsince };
+
+	load_sticky_events(services, sender_user, room_id, since, conn.next_batch, now).await
+}
+
+/// MSC4480: formats the sticky events this response's timeline does not carry.
+///
+/// The timeline's own copy stands for an event in both.
+#[tracing::instrument(level = "trace", skip_all)]
+async fn sticky_events(
+	SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
+	sticky_pdus: Vec<(PduCount, PduEvent)>,
+	timeline: &TimelineEvents,
+	encrypted: bool,
+	now: u64,
+) -> StickyEvents {
+	let in_timeline = |count: &PduCount| {
+		timeline
+			.iter()
+			.map(at!(0))
+			.any(is_equal_to!(*count))
+	};
+
+	sticky_pdus
+		.into_iter()
+		.filter(|(count, _)| !in_timeline(count))
+		.stream()
+		.wide_then(|(_, pdu)| with_membership(services, pdu, sender_user, encrypted))
+		.map(|pdu| pdu.into_format_at(now))
+		.collect()
+		.await
 }
 
 async fn leave_or_ban_response(
@@ -598,13 +678,15 @@ fn merge_unread_notifications(
 }
 
 async fn collect_required_state(
-	services: &Services,
-	sender_user: &UserId,
-	room_id: &RoomId,
-	selection: StateSelection<'_>,
-	required_state: &HashSet<(StateEventType, StateKey)>,
-	timeline_pdus: &[(PduCount, PduEvent)],
-	encrypted: bool,
+	RequiredStateParams {
+		sync_info: SyncInfo { services, sender_user, .. },
+		room_id,
+		selection,
+		required_state,
+		timeline_pdus,
+		sticky_pdus,
+		encrypted,
+	}: RequiredStateParams<'_>,
 ) -> CollectedState {
 	let StateSelection {
 		mode: state_mode,
@@ -633,8 +715,10 @@ async fn collect_required_state(
 	// Keys skipped as unchanged vouch for no snapshot, so the room keeps its last one.
 	let snapshot = current.filter(|_| !state_unchanged);
 
+	// MSC4480: the senders of sticky events are lazy-loaded as well.
 	let timeline_senders = timeline_pdus
 		.iter()
+		.chain(sticky_pdus)
 		.filter(|_| lazy)
 		.map(ref_at!(1))
 		.map(Event::sender)

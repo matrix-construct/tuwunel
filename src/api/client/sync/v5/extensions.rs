@@ -2,6 +2,7 @@ mod account_data;
 mod e2ee;
 mod profiles;
 mod receipts;
+mod sticky_events;
 mod to_device;
 mod typing;
 
@@ -22,15 +23,20 @@ use ruma::{
 use tuwunel_core::{Result, apply, at, extract_variant, implement, utils::BoolExt};
 use tuwunel_service::sync::Connection;
 
-pub(super) use self::to_device::{
-	acknowledge as acknowledge_to_device, check as check_to_device, pending as to_device_pending,
-};
 use self::{
 	account_data::{
 		collect as collect_account_data, collect_ranges as collect_account_data_ranges,
 	},
 	profiles::collect as collect_profiles,
 	receipts::collect_ranges as collect_receipt_ranges,
+	sticky_events::collect_ranges as collect_sticky_event_ranges,
+};
+pub(super) use self::{
+	sticky_events::check as check_sticky_events,
+	to_device::{
+		acknowledge as acknowledge_to_device, check as check_to_device,
+		pending as to_device_pending,
+	},
 };
 use super::{SyncInfo, Window, WindowRoom, joined_since, range::Results, share_encrypted_room};
 
@@ -89,8 +95,8 @@ pub(super) async fn handle(
 
 	let (e2ee, keys_changed) = e2ee?;
 
-	// Receipt and room account-data payloads only exist as bounded room-range
-	// outputs, applied by `apply_ranges` after the ranges resolve.
+	// Receipt, room account-data and sticky-event payloads only exist as bounded
+	// room-range outputs, applied by `apply_ranges` after the ranges resolve.
 	let response = Extensions {
 		account_data: account_data?,
 		receipts: Default::default(),
@@ -150,6 +156,15 @@ pub(super) fn apply_ranges(
 	{
 		extensions.response.account_data.rooms =
 			collect_account_data_ranges(conn, window, ranges);
+	}
+
+	if conn
+		.extensions
+		.sticky_events
+		.enabled
+		.unwrap_or(false)
+	{
+		extensions.response.sticky_events = collect_sticky_event_ranges(conn, window, ranges);
 	}
 }
 
