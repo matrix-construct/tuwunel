@@ -17,11 +17,7 @@ pub(crate) async fn admin_reset_connection_route(
 		return Err!(Request(NotFound("Unknown destination")));
 	}
 
-	if services
-		.sending
-		.notify_peer_alive(destination)
-		.await
-	{
+	if services.sending.reset_peer(destination).await {
 		return Ok(Response {});
 	}
 

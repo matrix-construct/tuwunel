@@ -411,12 +411,13 @@ pub fn flush_appservice(&self, appservice_id: String) -> Result {
 	self.dispatch_flush(Destination::Appservice(appservice_id))
 }
 
-/// Wake the sender for a federation peer that has proven reachable.
+/// Wake the sender for a federation peer that has proven reachable through
+/// inbound activity.
 ///
-/// Reachability comes from inbound activity or an operator reset. The flush
-/// resumes a waiting sender generation after its notification floor, or
-/// immediately when peer failure rows existed. The return value reports only
-/// whether those peer rows existed.
+/// The flush resumes a waiting sender generation after its notification floor,
+/// or immediately when peer failure rows were cleared. The return value reports
+/// only whether any were; a retry deadline the peer named and still running
+/// stays.
 #[implement(Service)]
 #[tracing::instrument(
 	level = "debug",
@@ -432,6 +433,39 @@ pub async fn notify_peer_alive(&self, server: &ServerName) -> bool {
 		.note_peer_alive(server)
 		.await;
 
+	self.wake_peer(server, sad);
+
+	sad
+}
+
+/// Clear every peer row of a federation destination on an operator's reset,
+/// then wake its sender as [`notify_peer_alive`] does.
+///
+/// Unlike inbound activity, the reset also drops a retry deadline the peer
+/// named and still running. The return value reports whether any row existed.
+#[implement(Service)]
+#[tracing::instrument(
+	level = "debug",
+	skip(self),
+	fields(
+		%server,
+	),
+)]
+pub async fn reset_peer(&self, server: &ServerName) -> bool {
+	let sad = self.services.federation.reset_peer(server).await;
+
+	self.wake_peer(server, sad);
+
+	sad
+}
+
+/// Flushes a peer's queue at once when its rows were cleared, or when a stalled
+/// sender generation has waited past the sending timeout.
+///
+/// The flush only wakes the sender; a failure to dispatch it is logged and
+/// dropped, so the caller's answer never depends on it.
+#[implement(Service)]
+fn wake_peer(&self, server: &ServerName, sad: bool) {
 	let replay = sad
 		|| self
 			.stalled
@@ -450,8 +484,6 @@ pub async fn notify_peer_alive(&self, server: &ServerName) -> bool {
 			.log_err()
 			.ok();
 	}
-
-	sad
 }
 
 /// Clean up queued sending event data.

@@ -4,8 +4,9 @@
 //! failures in one window deliberately coalescing; current row values retain
 //! the classification and exact failure time. A scan derives the latest
 //! anchor and surviving bucket span before applying the retry curve. Successful
-//! outbound or inbound contact clears the server prefix. The bucket width
-//! comes from `sending.timeout`, keeping this gate aligned with sender backoff.
+//! outbound or inbound contact clears the server's failures, but not a retry
+//! deadline it named that is still running. The bucket width comes from
+//! `sending.timeout`, keeping this gate aligned with sender backoff.
 
 use std::{
 	collections::BTreeMap,
@@ -165,20 +166,19 @@ pub struct PeerBackoff {
 	pub delay_secs: u64,
 }
 
-/// Clears all recorded failures after a successful outbound request.
+/// Clears recorded failures after a successful outbound request.
 ///
-/// Removing the peer prefix makes the next attempt immediately eligible.
+/// The next attempt is immediately eligible unless the peer named a retry
+/// deadline that is still running. A request sent before the peer named it can
+/// succeed after it, and the deadline still stands.
 #[implement(super::Service)]
-pub async fn record_success(&self, server: &ServerName) {
-	self.statuses
-		.del_prefix(&(server, Interfix))
-		.await;
-}
+pub async fn record_success(&self, server: &ServerName) { self.clear_failures(server).await; }
 
 /// Clears failure rows after a peer proves reachable through inbound activity.
 ///
-/// The return value reports whether any rows were present, allowing the caller
-/// to flush only after a change. A healthy-peer miss writes no tombstone.
+/// The return value reports whether any were removed, allowing the caller to
+/// flush only after a change. A retry deadline still running is no failure and
+/// stays, and a healthy-peer miss writes no tombstone.
 #[implement(super::Service)]
 #[tracing::instrument(
 	level = "trace",
@@ -188,6 +188,44 @@ pub async fn record_success(&self, server: &ServerName) {
 	),
 )]
 pub async fn note_peer_alive(&self, server: &ServerName) -> bool {
+	self.clear_failures(server).await
+}
+
+/// Removes a peer's failure rows and any retry deadline already past, returning
+/// whether a row went.
+///
+/// A deadline still running stays, since reachability says nothing of when the
+/// peer asked to be retried. Only rows read are removed, so a peer with none
+/// writes nothing.
+#[implement(super::Service)]
+async fn clear_failures(&self, server: &ServerName) -> bool {
+	let now = now_secs();
+	let removed = self
+		.statuses
+		.stream_prefix_raw(&(server, Interfix))
+		.ignore_err()
+		.ready_filter(|&(_, value)| retry_until_secs(value).is_none_or(|until| until <= now))
+		.map(|(key, _)| self.statuses.remove(key))
+		.count()
+		.await;
+
+	removed > 0
+}
+
+/// Clears every row of a peer on an operator's reset, a retry deadline still
+/// running included.
+///
+/// The return value reports whether any row was present, and a peer with none
+/// writes no tombstone.
+#[implement(super::Service)]
+#[tracing::instrument(
+	level = "debug",
+	skip(self),
+	fields(
+		%server,
+	),
+)]
+pub async fn reset_peer(&self, server: &ServerName) -> bool {
 	let sad = self.peer_has_failures(server).await;
 
 	if sad {

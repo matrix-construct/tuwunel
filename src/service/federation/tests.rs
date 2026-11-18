@@ -821,6 +821,41 @@ async fn a_named_retry_deadline_holds_back_the_peer() -> Result {
 }
 
 #[tokio::test]
+async fn reachability_leaves_a_running_retry_deadline() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let federation = &fixture.services.federation;
+	let limited: OwnedServerName = "limited.example".try_into()?;
+	let lapsed: OwnedServerName = "lapsed.example".try_into()?;
+	let held = async |server: &ServerName| {
+		matches!(federation.should_attempt(server).await, ShouldAttempt::No { .. })
+	};
+
+	federation.record_retry_after(&limited, now_secs() + 3_600);
+	federation.record_failure(&limited, Classification::Transient);
+
+	assert!(federation.note_peer_alive(&limited).await, "inbound activity kept the failure");
+	assert!(held(&limited).await, "inbound activity cleared the running deadline");
+	assert!(!federation.note_peer_alive(&limited).await, "a failure row survived");
+
+	federation.record_success(&limited).await;
+
+	assert!(held(&limited).await, "an outbound success cleared the running deadline");
+
+	// The deadline is clamped to now, so it has passed when the success lands.
+	federation.record_retry_after(&lapsed, 0);
+	federation.record_success(&lapsed).await;
+
+	assert!(!federation.peer_has_failures(&lapsed).await, "a passed deadline survived");
+	assert!(federation.reset_peer(&limited).await, "an operator reset found no row");
+	assert!(!held(&limited).await, "an operator reset kept the running deadline");
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn the_allow_self_entry_point_can_ask_this_server() -> Result {
 	let config = Figment::new()
 		.merge(("server_name", "127.0.0.1:2"))
