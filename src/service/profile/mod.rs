@@ -29,6 +29,7 @@ use tuwunel_core::{
 		future::TryExtExt,
 		result::NotFound,
 		stream::{IterStream, TryIgnore, TryReadyExt, automatic_width},
+		string::is_namespaced_id,
 	},
 	warn,
 };
@@ -1103,15 +1104,7 @@ fn check_profile_key(name: &str) -> Result {
 		return Err!(Request(KeyTooLarge("Profile key names cannot be longer than 255 bytes.")));
 	}
 
-	let ok = name
-		.bytes()
-		.next()
-		.is_some_and(|b| b.is_ascii_lowercase())
-		&& name.bytes().all(|b| {
-			b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'.' | b'-')
-		});
-
-	if !ok {
+	if !is_namespaced_id(name) {
 		return Err!(Request(BadJson(
 			"Profile key names must follow the Common Namespaced Identifier Grammar."
 		)));

@@ -3,8 +3,8 @@
 use std::borrow::Cow;
 
 use super::{
-	contains_any, equals_any, is_opaque_id, is_unreserved, is_unreserved_byte, markdown_cell,
-	plural, single_line, truncate_chars,
+	contains_any, equals_any, is_namespaced_id, is_opaque_id, is_unreserved, is_unreserved_byte,
+	markdown_cell, plural, single_line, truncate_chars,
 };
 use crate::{arrayvec::ArrayString, smallstr::SmallString};
 
@@ -317,4 +317,21 @@ fn opaque_id_takes_one_to_255_unreserved_characters() {
 	assert!(!is_opaque_id(&overlong));
 	assert!(!is_opaque_id("a/b"));
 	assert!(!is_opaque_id("a%20b"));
+}
+
+#[test]
+fn namespaced_id_leads_with_a_lowercase_letter() {
+	let longest = "a".repeat(255);
+	let overlong = "a".repeat(256);
+
+	assert!(is_namespaced_id("livekit"));
+	assert!(is_namespaced_id("org.matrix.msc4143-rtc_2"));
+	assert!(is_namespaced_id(&longest));
+	assert!(!is_namespaced_id(""));
+	assert!(!is_namespaced_id(&overlong));
+	assert!(!is_namespaced_id("BadType"));
+	assert!(!is_namespaced_id("1livekit"));
+	assert!(!is_namespaced_id(".livekit"));
+	assert!(!is_namespaced_id("live kit"));
+	assert!(!is_namespaced_id("live~kit"));
 }

@@ -16,6 +16,7 @@ use either::Either;
 use http::HeaderValue;
 use itertools::Itertools;
 use regex::RegexSet;
+use ruma::api::client::rtc::RtcTransport;
 use url::Url;
 
 use super::{
@@ -26,7 +27,7 @@ use crate::{
 	Config, Err, Result, debug, debug_info, err, error,
 	utils::{
 		is_secret_set,
-		string::{equals_any, is_opaque_id},
+		string::{equals_any, is_namespaced_id, is_opaque_id},
 		sys::storage::{Filesystem, filesystem_from_path},
 		time::timepoint_from_now,
 	},
@@ -125,6 +126,7 @@ pub fn check(config: &Config) -> Result {
 	warn_native_auth_without_sign_in(config);
 	check_media_providers(config)?;
 	check_well_known_support_contact_validity(config)?;
+	check_well_known_rtc_transports(config)?;
 	check_email(config)?;
 
 	Ok(())
@@ -1169,6 +1171,26 @@ fn check_well_known_support_contact_validity(config: &Config) -> Result {
 			validate_pgp_key(pgp_key)
 				.map_err(|e| err!("well_known.support_contact.{id}.pgp_key: {e}"))?;
 		}
+	}
+
+	Ok(())
+}
+
+fn check_well_known_rtc_transports(config: &Config) -> Result {
+	let transports = config.well_known.get_transports()?;
+
+	// MSC4143 requires each type to follow the Common Namespaced Identifier Grammar.
+	let invalid = transports
+		.iter()
+		.map(RtcTransport::transport_type)
+		.find(|transport_type| !is_namespaced_id(transport_type));
+
+	if let Some(transport_type) = invalid {
+		return Err!(Config(
+			"well_known.rtc_transports",
+			"Transport type {transport_type:?} must be 1 to 255 characters from [a-z0-9._-], \
+			 starting with a lowercase letter."
+		));
 	}
 
 	Ok(())

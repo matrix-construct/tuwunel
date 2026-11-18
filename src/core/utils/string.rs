@@ -38,6 +38,8 @@ pub const EMPTY: &str = "";
 
 const OPAQUE_ID_LENGTHS: RangeInclusive<usize> = 1..=255;
 
+const NAMESPACED_ID_LENGTHS: RangeInclusive<usize> = 1..=255;
+
 /// Formats arguments into a small string with an inline byte capacity.
 ///
 /// Arguments are forwarded to [`format_small_string`] without an intermediate
@@ -432,4 +434,24 @@ pub fn is_unreserved(value: &str) -> bool { value.bytes().all(is_unreserved_byte
 #[must_use]
 pub const fn is_unreserved_byte(byte: u8) -> bool {
 	byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~')
+}
+
+/// Reports whether a string follows the Common Namespaced Identifier Grammar.
+///
+/// The grammar allows 1 to 255 characters: a lowercase ASCII letter, then only
+/// lowercase letters, digits, `.`, `_` and `-`.
+#[must_use]
+pub fn is_namespaced_id(value: &str) -> bool {
+	NAMESPACED_ID_LENGTHS.contains(&value.len())
+		&& value.starts_with(|c: char| c.is_ascii_lowercase())
+		&& value.bytes().all(is_namespaced_id_byte)
+}
+
+/// Reports whether a byte may appear in a Common Namespaced Identifier.
+///
+/// The set is `[a-z0-9._-]`; the first character is narrower, `[a-z]` alone.
+#[inline]
+#[must_use]
+pub const fn is_namespaced_id_byte(byte: u8) -> bool {
+	byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'.' | b'_')
 }

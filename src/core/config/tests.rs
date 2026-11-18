@@ -1249,6 +1249,40 @@ fn pgp_key_rejects_raw_material_and_bare_fingerprints() {
 }
 
 #[test]
+fn rtc_transports_accept_a_livekit_entry() {
+	check_rtc_transport(
+		r#"{ type = "livekit", livekit_service_url = "https://lk.example.org" }"#,
+	)
+	.expect("a livekit transport should be accepted");
+}
+
+fn check_rtc_transport(entry: &str) -> Result {
+	let toml = format!("[global.well_known]\nrtc_transports = [{entry}]\n");
+
+	check_toml(&toml).0
+}
+
+#[test]
+fn rtc_transports_refuse_malformed_entries() {
+	let err = check_rtc_transport(r#""livekit""#).unwrap_err();
+
+	assert!(err.to_string().contains("not a valid object"), "{err}");
+
+	let err =
+		check_rtc_transport(r#"{ livekit_service_url = "https://lk.example.org" }"#).unwrap_err();
+
+	assert!(
+		err.to_string()
+			.contains("`type` is not a valid string"),
+		"{err}"
+	);
+
+	let err = check_rtc_transport(r#"{ type = "BadType" }"#).unwrap_err();
+
+	assert!(err.to_string().contains(r#""BadType""#), "{err}");
+}
+
+#[test]
 fn default_power_level_content_override_accepts_a_table() {
 	let config = config_from_toml(
 		"[global]
