@@ -17,6 +17,9 @@ use tuwunel_matrix::Event;
 
 use crate::appservice::RegistrationInfo;
 
+/// Largest answer read from the server of a remote alias.
+const MAX_ALIAS_RESPONSE_BYTES: usize = 1024 * 1024;
+
 pub struct Service {
 	db: Data,
 	services: Arc<crate::services::OnceServices>,
@@ -196,6 +199,7 @@ impl Service {
 		&self,
 		room_alias: &RoomAliasId,
 	) -> Result<(OwnedRoomId, Vec<OwnedServerName>)> {
+		let client = &self.services.client.federation;
 		let server = room_alias.server_name();
 
 		let request = Request { room_alias: room_alias.to_owned() };
@@ -203,7 +207,7 @@ impl Service {
 		let response = self
 			.services
 			.federation
-			.execute(server, request)
+			.execute_on(client, server, request, Some(MAX_ALIAS_RESPONSE_BYTES))
 			.await
 			.map_err(|error| gateway_error(server, error))?;
 
