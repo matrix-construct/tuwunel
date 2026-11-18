@@ -25,6 +25,7 @@ use tuwunel_core::{
 		future::{OptionStream, ReadyBoolExt},
 		option::OptionExt,
 		stream::{BroadbandExt, TryBroadbandExt, TryReadyExt},
+		time::now_millis,
 	},
 };
 use tuwunel_matrix::{
@@ -41,8 +42,11 @@ use tuwunel_service::{
 };
 
 use super::{
-	super::joined_since, StateAfter, StateChangeParams, StateChanges, joined::RoomMetadata,
-	left::log_horizon_error, missing_room_state,
+	super::{joined_since, load_sticky_events},
+	StateAfter, StateChangeParams, StateChanges,
+	joined::RoomMetadata,
+	left::log_horizon_error,
+	missing_room_state,
 };
 
 pub(super) struct UserMetadata {
@@ -50,7 +54,20 @@ pub(super) struct UserMetadata {
 	pub(super) last_notification_read: Option<u64>,
 	pub(super) thread_last_reads: BTreeMap<OwnedEventId, u64>,
 	pub(super) last_privateread_update: u64,
-	pub(super) joined_since_last_sync: bool,
+}
+
+pub(super) struct UserMetadataParams<'a> {
+	pub(super) services: &'a Services,
+	pub(super) sender_user: &'a UserId,
+	pub(super) sender_device: Option<&'a DeviceId>,
+	pub(super) room_id: &'a RoomId,
+	pub(super) filter: &'a FilterDefinition,
+	pub(super) timeline_pdus: &'a [(PduCount, PduEvent)],
+	pub(super) sticky_pdus: &'a [(PduCount, PduEvent)],
+	pub(super) receipt_events: &'a [(OwnedUserId, Raw<AnySyncEphemeralRoomEvent>)],
+	pub(super) since: u64,
+	pub(super) initial: bool,
+	pub(super) encrypted_room: Option<bool>,
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -114,6 +131,27 @@ pub(super) async fn gather_room_metadata(
 	let encrypted_room =
 		include_state.then_async(|| services.state_accessor.is_encrypted_room(room_id));
 
+	// MSC4354: a sticky event is a timeline event, so an unchanged timeline holds
+	// none past an initial sync; a fresh join is owed every unexpired one.
+	let now = now_millis();
+	let timeline_changed = last_timeline_count.into_unsigned() > since;
+	let read_sticky = timeline_changed || since == 0;
+	let load_sticky =
+		|since| load_sticky_events(services, sender_user, room_id, since, next_batch, now);
+
+	let sticky = timeline_changed
+		.then_async(|| joined_since(services, room_id, sender_user, since))
+		.map(Option::unwrap_or_default)
+		.then(async |joined| {
+			let sticky_since = if joined { 0 } else { since };
+			let sticky_pdus = read_sticky
+				.then_async(|| load_sticky(sticky_since))
+				.map(Option::unwrap_or_default)
+				.await;
+
+			(joined, sticky_pdus)
+		});
+
 	let receipt_events = services
 		.read_receipt
 		.readreceipts_since(room_id, since, Some(next_batch))
@@ -135,7 +173,8 @@ pub(super) async fn gather_room_metadata(
 		),
 		receipt_events,
 		encrypted_room,
-	) = join3(
+		(joined_since_last_sync, sticky_pdus),
+	) = join4(
 		join4(
 			since_shortstatehash,
 			horizon_shortstatehash,
@@ -144,6 +183,7 @@ pub(super) async fn gather_room_metadata(
 		),
 		receipt_events,
 		encrypted_room,
+		sticky,
 	)
 	.boxed() // erase region
 	.await;
@@ -155,22 +195,26 @@ pub(super) async fn gather_room_metadata(
 		current_shortstatehash: current_shortstatehash.transpose()?,
 		receipt_events,
 		encrypted_room,
+		joined_since_last_sync,
+		sticky_pdus,
+		now,
 	})
 }
 
-#[expect(clippy::too_many_arguments)]
 pub(super) async fn gather_user_metadata(
-	services: &Services,
-	sender_user: &UserId,
-	sender_device: Option<&DeviceId>,
-	room_id: &RoomId,
-	filter: &FilterDefinition,
-	timeline_pdus: &[(PduCount, PduEvent)],
-	receipt_events: &[(OwnedUserId, Raw<AnySyncEphemeralRoomEvent>)],
-	since: u64,
-	initial: bool,
-	timeline_changed: bool,
-	encrypted_room: Option<bool>,
+	UserMetadataParams {
+		services,
+		sender_user,
+		sender_device,
+		room_id,
+		filter,
+		timeline_pdus,
+		sticky_pdus,
+		receipt_events,
+		since,
+		initial,
+		encrypted_room,
+	}: UserMetadataParams<'_>,
 ) -> UserMetadata {
 	let lazy_load_options =
 		[&filter.room.state.lazy_load_options, &filter.room.timeline.lazy_load_options];
@@ -195,8 +239,10 @@ pub(super) async fn gather_user_metadata(
 
 	lazy_load_reset.await;
 	let witness = lazy_loading_enabled.then_async(|| {
+		// MSC4354: the senders of sticky events are lazy-loaded as well.
 		let witness: Witness = timeline_pdus
 			.iter()
+			.chain(sticky_pdus)
 			.map(ref_at!(1))
 			.map(Event::sender)
 			.map(Into::into)
@@ -207,9 +253,6 @@ pub(super) async fn gather_user_metadata(
 			.lazy_loading
 			.witness_retain(witness, lazy_loading_context)
 	});
-
-	let joined_since_last_sync =
-		timeline_changed.then_async(|| joined_since(services, room_id, sender_user, since));
 
 	// Busy rounds need these cursors too, to authorize an explicit zero count.
 	let last_notification_read = services
@@ -225,13 +268,8 @@ pub(super) async fn gather_user_metadata(
 		.read_receipt
 		.last_privateread_update(sender_user, room_id);
 
-	let (
-		(last_privateread_update, last_notification_read, thread_last_reads),
-		joined_since_last_sync,
-		witness,
-	) = join3(
+	let ((last_privateread_update, last_notification_read, thread_last_reads), witness) = join(
 		join3(last_privateread_update, last_notification_read, thread_last_reads),
-		joined_since_last_sync,
 		witness,
 	)
 	.await;
@@ -241,7 +279,6 @@ pub(super) async fn gather_user_metadata(
 		last_notification_read,
 		thread_last_reads,
 		last_privateread_update,
-		joined_since_last_sync: joined_since_last_sync.unwrap_or_default(),
 	}
 }
 

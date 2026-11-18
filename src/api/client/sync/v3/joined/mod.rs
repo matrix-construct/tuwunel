@@ -10,12 +10,15 @@ use ruma::{
 		filter::FilterDefinition,
 		sync::sync_events::{
 			UnreadNotificationsCount,
-			v3::{Ephemeral, JoinedRoom, RoomAccountData, RoomSummary, StateEvents, Timeline},
+			v3::{
+				Ephemeral, JoinedRoom, RoomAccountData, RoomSummary, StateEvents, Sticky,
+				Timeline,
+			},
 		},
 	},
 	events::{
 		AnyRawAccountDataEvent, AnyRoomAccountDataEvent, AnySyncEphemeralRoomEvent,
-		AnySyncStateEvent, StateEventType,
+		AnySyncStateEvent, AnySyncTimelineEvent, StateEventType,
 		TimelineEventType::*,
 		room::member::{MembershipState, RoomMemberEventContent},
 	},
@@ -49,8 +52,8 @@ use super::{
 	super::{load_timeline, strip_state_unsigned, timeline_prev_batch},
 	StateAfter, StateChangeParams, StateChanges,
 	state::{
-		UserMetadata, calculate_state_changes, gather_room_metadata, gather_user_metadata,
-		typings_event_for_user,
+		UserMetadata, UserMetadataParams, calculate_state_changes, gather_room_metadata,
+		gather_user_metadata, typings_event_for_user,
 	},
 };
 use crate::{ignored_filter, is_empty_account_data_event, with_membership};
@@ -64,6 +67,9 @@ pub(super) struct RoomMetadata {
 	pub(super) current_shortstatehash: Option<ShortStateHash>,
 	pub(super) receipt_events: Vec<(OwnedUserId, Raw<AnySyncEphemeralRoomEvent>)>,
 	pub(super) encrypted_room: Option<bool>,
+	pub(super) joined_since_last_sync: bool,
+	pub(super) sticky_pdus: Vec<(PduCount, PduEvent)>,
+	pub(super) now: u64,
 }
 
 struct BuildJoinedRoom {
@@ -73,6 +79,7 @@ struct BuildJoinedRoom {
 	state_events: Vec<Raw<AnySyncStateEvent>>,
 	account_data_events: Vec<Raw<AnyRoomAccountDataEvent>>,
 	room_events: Vec<PduEvent>,
+	sticky_events: Vec<Raw<AnySyncTimelineEvent>>,
 	heroes: Option<Vec<OwnedUserId>>,
 	joined_member_count: Option<u64>,
 	invited_member_count: Option<u64>,
@@ -90,6 +97,7 @@ struct FinalizeJoinedRoom<'a, S, F, W> {
 	filter: &'a FilterDefinition,
 	state_events: S,
 	aggregates: JoinAggregates,
+	sticky_pdus: Vec<(PduCount, PduEvent)>,
 	receipt_events: Vec<(OwnedUserId, Raw<AnySyncEphemeralRoomEvent>)>,
 	heroes: Option<Vec<OwnedUserId>>,
 	joined_member_count: Option<u64>,
@@ -122,6 +130,7 @@ struct FinalizeJoinFlags {
 	limited: bool,
 	joined_since_last_sync: bool,
 	initial: bool,
+	now: u64,
 }
 
 #[tracing::instrument(
@@ -162,6 +171,9 @@ pub(super) async fn load_room(
 		current_shortstatehash,
 		receipt_events,
 		encrypted_room,
+		joined_since_last_sync,
+		sticky_pdus,
+		now,
 	} = gather_room_metadata(
 		services,
 		sender_user,
@@ -181,20 +193,19 @@ pub(super) async fn load_room(
 		last_notification_read,
 		thread_last_reads,
 		last_privateread_update,
-		joined_since_last_sync,
-	} = gather_user_metadata(
+	} = gather_user_metadata(UserMetadataParams {
 		services,
 		sender_user,
 		sender_device,
 		room_id,
 		filter,
-		&timeline_pdus,
-		&receipt_events,
+		timeline_pdus: &timeline_pdus,
+		sticky_pdus: &sticky_pdus,
+		receipt_events: &receipt_events,
 		since,
 		initial,
-		timeline_changed,
 		encrypted_room,
-	)
+	})
 	.boxed() // size firewall
 	.await;
 
@@ -279,6 +290,7 @@ pub(super) async fn load_room(
 		limited,
 		joined_since_last_sync,
 		initial,
+		now,
 	};
 
 	let finalize = FinalizeJoinedRoom {
@@ -288,6 +300,7 @@ pub(super) async fn load_room(
 		filter,
 		state_events,
 		aggregates,
+		sticky_pdus,
 		receipt_events,
 		heroes,
 		joined_member_count,
@@ -547,6 +560,7 @@ async fn finalize_joined_room<S, F, W>(
 		filter,
 		state_events,
 		aggregates,
+		sticky_pdus,
 		receipt_events,
 		heroes,
 		joined_member_count,
@@ -582,9 +596,11 @@ where
 		limited,
 		joined_since_last_sync,
 		initial,
+		now,
 	} = flags;
 
 	let want_thread_unread = filter.room.timeline.unread_thread_notifications;
+	let event_fields = filter.event_fields.as_deref();
 
 	let state_events = assemble_join_state_events(
 		services,
@@ -595,8 +611,24 @@ where
 		filter,
 		full_state,
 		state_after,
-	)
-	.await;
+	);
+
+	// MSC4354: the timeline's own copy of a sticky event stands for it.
+	let in_timeline = |pdu: &PduEvent| {
+		room_events
+			.iter()
+			.any(|event| event.event_id().eq(pdu.event_id()))
+	};
+
+	let sticky_events = sticky_pdus
+		.into_iter()
+		.filter(|(_, pdu)| !in_timeline(pdu))
+		.stream()
+		.wide_then(|(_, pdu)| with_membership(services, pdu, sender_user, encrypted))
+		.map(|pdu| trim_event_fields(pdu.into_format_at(now), event_fields))
+		.collect();
+
+	let (state_events, sticky_events) = join(state_events, sticky_events).await;
 
 	let unread_notifications = assemble_unread_notifications(
 		notification_count,
@@ -613,6 +645,7 @@ where
 		state_events,
 		account_data_events,
 		room_events,
+		sticky_events,
 		heroes,
 		joined_member_count,
 		invited_member_count,
@@ -623,7 +656,7 @@ where
 		prev_batch,
 	};
 
-	let joined_room = build_joined_room(args, filter.event_fields.as_deref());
+	let joined_room = build_joined_room(args, event_fields);
 
 	// Initial and busy rounds (no last-reads) send every thread's zero.
 	let send_thread_zero = move |root: &OwnedEventId| {
@@ -669,6 +702,7 @@ fn build_joined_room(args: BuildJoinedRoom, event_fields: Option<&[String]>) -> 
 		state_events,
 		account_data_events,
 		room_events,
+		sticky_events,
 		heroes,
 		joined_member_count,
 		invited_member_count,
@@ -699,7 +733,6 @@ fn build_joined_room(args: BuildJoinedRoom, event_fields: Option<&[String]>) -> 
 		account_data: RoomAccountData { events: account_data_events },
 		ephemeral: Ephemeral { events: edus },
 		state,
-		sticky: Default::default(),
 		summary: RoomSummary {
 			joined_member_count: joined_member_count.map(ruma_from_u64),
 			invited_member_count: invited_member_count.map(ruma_from_u64),
@@ -716,6 +749,7 @@ fn build_joined_room(args: BuildJoinedRoom, event_fields: Option<&[String]>) -> 
 		unread_notifications,
 		// The caller adds these once it knows the room is reported.
 		unread_thread_notifications: BTreeMap::new(),
+		sticky: Sticky { events: sticky_events },
 	}
 }
 

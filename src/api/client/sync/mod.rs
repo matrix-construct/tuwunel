@@ -18,7 +18,9 @@ use ruma::{
 use tuwunel_core::{
 	Error, Result, debug_warn, is_equal_to,
 	utils::{
+		BoolExt,
 		result::{LogErr, NotFound},
+		stream::WidebandExt,
 		time::now_millis,
 	},
 	warn,
@@ -185,6 +187,46 @@ async fn joined_since(
 		.await
 		.inspect_err(|error| debug_warn!(%room_id, %user_id, %error, "joined count unreadable"))
 		.is_ok_and(|recorded| recorded > since)
+}
+
+/// The room's unexpired sticky events after `since` through `next_batch`, in
+/// timeline order (MSC4354).
+///
+/// A sender the user ignores is left out whatever the event type, and each
+/// event is readied for the user as a timeline event is. A room whose short id
+/// cannot be read offers none, logged.
+#[tracing::instrument(level = "trace", skip_all)]
+async fn load_sticky_events(
+	services: &Services,
+	sender_user: &UserId,
+	room_id: &RoomId,
+	since: u64,
+	next_batch: u64,
+	now: u64,
+) -> Vec<(PduCount, PduEvent)> {
+	let shortroomid = services
+		.short
+		.get_shortroomid(room_id)
+		.await
+		.inspect_err(|error| warn!(%room_id, %error, "Unreadable room for sticky events"));
+
+	let Ok(shortroomid) = shortroomid else {
+		return Vec::new();
+	};
+
+	services
+		.sticky
+		.unexpired(shortroomid, since, next_batch, now)
+		.wide_filter_map(async |(count, pdu)| {
+			services
+				.users
+				.user_is_ignored(pdu.sender(), sender_user)
+				.await
+				.is_false()
+				.then(|| (count, pdu.served_to(Some(sender_user))))
+		})
+		.collect()
+		.await
 }
 
 /// MSC4155: whether a stored invite may be served to the invitee.

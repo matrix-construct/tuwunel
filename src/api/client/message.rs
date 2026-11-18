@@ -414,9 +414,13 @@ where
 		return true;
 	}
 
-	if IGNORED_MESSAGE_TYPES
-		.binary_search(event.kind())
-		.is_err()
+	// MSC4480: an ignored sender's sticky event is never delivered, whatever its type.
+	let sticky = event.sticky().is_some() && event.state_key().is_none();
+
+	if !sticky
+		&& IGNORED_MESSAGE_TYPES
+			.binary_search(event.kind())
+			.is_err()
 	{
 		return false;
 	}
