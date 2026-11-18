@@ -49,6 +49,9 @@ pub struct Opts {
 	/// Wall-clock budget for dispatching the complete sweep.
 	pub sweep_deadline: Option<Duration>,
 
+	/// Optional per-destination response size limit, clamped to the global limit.
+	pub limit: Option<usize>,
+
 	/// Remove the local server before constructing a room sweep.
 	pub exclude_self: bool,
 
@@ -200,16 +203,17 @@ where
 
 	let client = &self.services.client.federation;
 	let record = opts.record;
+	let limit = opts.limit;
 
 	fanout_with(
 		pairs,
 		move |dest, request| async move {
 			match record {
 				| Record::Observe =>
-					self.execute_uncounted_allow_self(client, &dest, request, None)
+					self.execute_uncounted_allow_self(client, &dest, request, limit)
 						.await,
 				| Record::Contribute =>
-					self.execute_on_allow_self(client, &dest, request, None)
+					self.execute_on_allow_self(client, &dest, request, limit)
 						.await,
 			}
 		},

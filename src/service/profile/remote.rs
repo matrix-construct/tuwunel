@@ -23,6 +23,10 @@ type Removed = SmallVec<[ProfileFieldName; 1]>;
 
 type Fields = SmallVec<[(ProfileFieldName, Option<Value>); 2]>;
 
+/// Largest profile answer read from a remote server: four times the profile
+/// size limit, which leaves room for characters a server escapes as `\uXXXX`.
+const MAX_PROFILE_RESPONSE_BYTES: usize = 4 * MAX_PROFILE_SIZE;
+
 /// Merges a served profile without inferring deletions from omitted fields.
 ///
 /// The response and retained cache are checked before creating an unknown user
@@ -98,14 +102,21 @@ pub async fn mirror_remote_profile(&self, user_id: &UserId) -> Result<Removed> {
 		"mirror remote profile called with a local user"
 	);
 
-	let request = Request { user_id: user_id.to_owned(), field: None };
-	let response = self
-		.services
-		.federation
-		.execute(user_id.server_name(), request)
-		.await?;
+	let response = self.request_remote_profile(user_id).await?;
 
 	self.mirror_profile(user_id, response).await
+}
+
+/// Requests a remote user's complete profile from their server.
+#[implement(Service)]
+pub(super) async fn request_remote_profile(&self, user_id: &UserId) -> Result<Response> {
+	let client = &self.services.client.federation;
+	let request = Request { user_id: user_id.to_owned(), field: None };
+
+	self.services
+		.federation
+		.execute_on(client, user_id.server_name(), request, Some(MAX_PROFILE_RESPONSE_BYTES))
+		.await
 }
 
 /// Stores a profile response as the user's complete cached profile.
