@@ -1178,3 +1178,32 @@ async fn backfill_fails_over_past_empty_batch() {
 	assert_eq!(outcome.origin, b, "the nonempty server answers");
 	assert_eq!(mock.calls(), vec![a, b], "the empty batch is a miss");
 }
+
+#[test]
+fn federation_batch_response_limits() {
+	use super::transport::response_limit;
+
+	let opts = Opts::new(Op::MissingEvents, room());
+	let event = response_limit(Op::Event, &opts).expect("single-event cap");
+	assert_eq!(
+		response_limit(Op::MissingEvents, &opts),
+		Some(event.saturating_mul(10)),
+		"the default asks for ten events"
+	);
+	let opts = opts.backfill_limit(nz(2));
+	assert_eq!(
+		response_limit(Op::MissingEvents, &opts),
+		Some(event.saturating_mul(2)),
+		"use the requested event count"
+	);
+	assert_eq!(
+		response_limit(Op::StateIds, &opts),
+		Some(64 * 1024 * 1024),
+		"independent state ID limit"
+	);
+	assert_eq!(
+		response_limit(Op::Backfill, &opts),
+		None,
+		"unrelated operations use the global limit"
+	);
+}

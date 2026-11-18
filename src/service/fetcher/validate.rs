@@ -18,6 +18,16 @@ use super::{Op, Opts};
 /// thread's latest reply, so this allows several times the PDU size limit.
 pub(super) const MAX_SERVED_PDU_BYTES: usize = 4 * MAX_PDU_BYTES;
 
+/// Check the wire representation before parsing a served PDU, including its unsigned data.
+pub(crate) fn check_served_pdu_size(bytes: usize) -> Result {
+	if bytes > MAX_SERVED_PDU_BYTES {
+		return Err!(BadServerResponse(
+			"PDU is larger than maximum of {MAX_SERVED_PDU_BYTES} bytes"
+		));
+	}
+	Ok(())
+}
+
 /// Applies poison detection before a fetched response is accepted.
 ///
 /// When `check_conforms` is enabled, an event or auth-event response larger
@@ -28,10 +38,8 @@ pub(super) const MAX_SERVED_PDU_BYTES: usize = 4 * MAX_PDU_BYTES;
 #[tracing::instrument(name = "validate", level = "trace", skip_all)]
 pub(super) async fn validate(&self, opts: &Opts, bytes: &[u8]) -> Result {
 	if opts.check_conforms {
-		if matches!(opts.op, Op::Event | Op::AuthEvent) && bytes.len() > MAX_SERVED_PDU_BYTES {
-			return Err!(BadServerResponse(
-				"PDU is larger than maximum of {MAX_SERVED_PDU_BYTES} bytes"
-			));
+		if matches!(opts.op, Op::Event | Op::AuthEvent) {
+			check_served_pdu_size(bytes.len())?;
 		}
 
 		match opts.op {
