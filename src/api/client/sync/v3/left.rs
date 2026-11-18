@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use futures::{
 	FutureExt, StreamExt, TryFutureExt,
-	future::{join3, join4},
+	future::{join, join3},
 };
 use ruma::{
 	OwnedEventId, OwnedRoomId, RoomId, UserId,
@@ -16,7 +16,6 @@ use tuwunel_core::{
 	Error, Result, at, debug,
 	error::inspect_debug_log,
 	extract_variant, is_equal_to, ref_at,
-	result::FlatOk,
 	smallvec::SmallVec,
 	utils::{
 		BoolExt, FutureBoolExt, IterStream, ReadyExt, TryFutureExtExt,
@@ -32,7 +31,7 @@ use tuwunel_matrix::{
 	event::{Matches, trim_event_fields},
 	pdu::{PduCount, PduEvent},
 };
-use tuwunel_service::Services;
+use tuwunel_service::{Services, rooms::short::ShortStateHash};
 
 use super::{
 	super::{
@@ -137,12 +136,27 @@ async fn handle_left_room(
 	// Last, so a refusal on the same poll spares its reads.
 	let is_out_of_band = departed_out_of_band(services, room_id, sender_user, since);
 
-	if forgotten
+	let notice_only = forgotten
 		|| is_not_found
 			.or3(is_disabled, is_banned, is_out_of_band)
+			.await;
+	let departure = async {
+		if notice_only {
+			return Ok(None);
+		}
+		let Some(count) = services.state_accessor.departure_count(sender_user, room_id).await? else {
+			return Ok(None);
+		};
+		services.state_accessor.departure_shortstatehash(room_id, count)
+			.map_ok(|hash| Some((count, hash)))
 			.await
-	{
-		let departure = forgotten
+	}
+	.await
+	.inspect_err(|error| warn!(target: "tuwunel_api_client::sync::v3", %room_id, %sender_user, %error, "Unreadable departure snapshot"));
+
+	// The notification position isn't a safe history bound on a failed read.
+	if notice_only || departure.is_err() {
+		let departure = (forgotten || departure.is_err())
 			.then_async(async || {
 				own_departure(services, room_id, sender_user)
 					.await
@@ -169,21 +183,14 @@ async fn handle_left_room(
 		}));
 	}
 
-	let horizon = services
-		.state_accessor
-		.departure_count(sender_user, room_id)
-		.await
-		.inspect_err(|error| warn!(target: "tuwunel_api_client::sync::v3", %room_id, %sender_user, %error, "Unreadable departure count"))
-		.ok()
-		.flatten()
-		.map(PduCount::into_unsigned)
-		.unwrap_or(left_count);
+	let (horizon, snapshot) = departure?
+		.map_or((left_count, None), |(count, hash)| (count.into_unsigned(), Some(hash)));
 
-	let sees_room_state = services
-		.state_cache
-		.once_joined(sender_user, room_id)
-		.or(services.state_accessor.is_world_readable(room_id))
-		.await;
+	let sees_room_state = snapshot.is_some()
+		|| services
+			.state_accessor
+			.is_world_readable(room_id)
+			.await;
 
 	load_left_room(
 		services,
@@ -191,6 +198,7 @@ async fn handle_left_room(
 		room_id,
 		since,
 		horizon,
+		snapshot,
 		sees_room_state,
 		full_state,
 		state_after,
@@ -242,6 +250,7 @@ async fn load_left_room(
 	room_id: &RoomId,
 	since: u64,
 	horizon: u64,
+	snapshot: Option<ShortStateHash>,
 	sees_room_state: bool,
 	full_state: bool,
 	state_after: StateAfter,
@@ -289,29 +298,13 @@ async fn load_left_room(
 				.ok()
 		});
 
-	// MSC4222 `state_after` describes the state at the leave.
-	let after_shortstatehash = state_after.requested().then_async(|| {
-		services
-			.timeline
-			.shortstatehash_after(room_id, PduCount::Normal(horizon))
-			.inspect_err(inspect_debug_log)
-	});
-
-	let left_shortstatehash = services
-		.timeline
-		.get_shortstatehash(room_id, PduCount::Normal(horizon))
-		.inspect_err(inspect_debug_log)
-		.or_else(|_| services.state.get_room_shortstatehash(room_id))
-		.map_err(|_| missing_room_state(room_id));
-
-	let (since_shortstatehash, horizon_shortstatehash, after_shortstatehash, left_shortstatehash) =
-		join4(
-			since_shortstatehash,
-			horizon_shortstatehash,
-			after_shortstatehash,
-			left_shortstatehash,
-		)
-		.boxed() // erase region
+	let state_at_leave = left_snapshot(services, room_id, horizon, snapshot, state_after);
+	let (
+		since_shortstatehash,
+		horizon_shortstatehash,
+		(after_shortstatehash, left_shortstatehash),
+	) = join3(since_shortstatehash, horizon_shortstatehash, state_at_leave)
+		.boxed()
 		.await;
 
 	let StateChanges { state_events, .. } =
@@ -320,7 +313,7 @@ async fn load_left_room(
 			state_after,
 			since_shortstatehash,
 			horizon_shortstatehash: horizon_shortstatehash.flatten(),
-			after_shortstatehash: after_shortstatehash.flat_ok(),
+			after_shortstatehash,
 			current_shortstatehash: left_shortstatehash?,
 			joined_since_last_sync: false,
 			witness: None,
@@ -415,6 +408,48 @@ async fn load_left_room(
 				.collect(),
 		},
 	}))
+}
+
+/// The departure snapshot is authoritative for a former member, whether it
+/// is the requested state-after or the fallback for a missing window start.
+async fn left_snapshot(
+	services: &Services,
+	room_id: &RoomId,
+	horizon: u64,
+	snapshot: Option<ShortStateHash>,
+	state_after: StateAfter,
+) -> (Option<ShortStateHash>, Result<ShortStateHash>) {
+	if let Some(snapshot) = snapshot {
+		return (Some(snapshot), Ok(snapshot));
+	}
+	let count = PduCount::Normal(horizon);
+	let after = async {
+		if !state_after.requested() {
+			return None;
+		}
+		services
+			.timeline
+			.shortstatehash_after(room_id, count)
+			.await
+			.inspect_err(inspect_debug_log)
+			.ok()
+	};
+	let left = async {
+		if let Ok(hash) = services
+			.timeline
+			.get_shortstatehash(room_id, count)
+			.await
+			.inspect_err(inspect_debug_log)
+		{
+			return Ok(hash);
+		}
+		services
+			.state
+			.get_room_shortstatehash(room_id)
+			.await
+			.map_err(|_| missing_room_state(room_id))
+	};
+	join(after, left).await
 }
 
 /// A user who never joined a non-world-readable room gets only the state
