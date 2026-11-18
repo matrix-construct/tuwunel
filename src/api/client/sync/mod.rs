@@ -33,6 +33,7 @@ use tuwunel_service::{Services, users::InviteFilter};
 
 pub use self::v3::calculate_heroes;
 pub(crate) use self::{v3::sync_events_route, v5::sync_events_v5_route};
+use crate::utils::is_ignored_sender;
 
 #[derive(Clone, Copy)]
 enum TimelineErrors {
@@ -192,11 +193,11 @@ async fn joined_since(
 /// The room's unexpired sticky events after `since` through `next_batch`, in
 /// timeline order (MSC4354).
 ///
-/// A sender the user ignores is left out whatever the event type, and each
-/// event is readied for the user as a timeline event is, its bundled
-/// aggregations included. An event the user's view prunes, as an erased
-/// sender's is, has lost its stickiness and is left out. A room whose short id
-/// cannot be read offers none, logged.
+/// A sender the user ignores, or one on a server this one forbids, is left out
+/// whatever the event type, and each event is readied for the user as a
+/// timeline event is, its bundled aggregations included. An event the user's
+/// view prunes, as an erased sender's is, has lost its stickiness and is left
+/// out. A room whose short id cannot be read offers none, logged.
 #[tracing::instrument(level = "trace", skip_all)]
 async fn load_sticky_events(
 	services: &Services,
@@ -220,9 +221,7 @@ async fn load_sticky_events(
 		.sticky
 		.unexpired(shortroomid, since, next_batch, now)
 		.wide_filter_map(async |(count, pdu)| {
-			services
-				.users
-				.user_is_ignored(pdu.sender(), sender_user)
+			is_ignored_sender(services, pdu.sender(), sender_user)
 				.await
 				.is_false()
 				.then(|| (count, pdu.served_to(Some(sender_user))))

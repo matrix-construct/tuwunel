@@ -38,7 +38,7 @@ use tuwunel_service::{
 };
 
 use super::visibility_filter;
-use crate::Ruma;
+use crate::{Ruma, utils::is_ignored_sender};
 
 /// Shared inputs for [`get_messages`], the pagination core behind both the
 /// client-server `/messages` route and the admin room-messages endpoint.
@@ -425,15 +425,7 @@ where
 		return false;
 	}
 
-	let ignored_server = services
-		.config
-		.is_forbidden_remote_server_name(event.sender().server_name());
-
-	ignored_server
-		|| services
-			.users
-			.user_is_ignored(event.sender(), user_id)
-			.await
+	is_ignored_sender(services, event.sender(), user_id).await
 }
 
 #[inline]

@@ -10,7 +10,8 @@
 //! visibility hides, transaction replay, both membership types (the legacy call
 //! member and MSC4143's `rtc.member`), delayed sends fired by action and by
 //! timer, ignored senders, lazy members, expiry and redaction, an erased
-//! sender, a sticky thread root's bundle, and a withheld event weighed again.
+//! sender, a sticky thread root's bundle, a forbidden server's sender, and a
+//! withheld event weighed again.
 
 use std::time::Duration;
 
@@ -35,7 +36,10 @@ use self::{
 	federation::send,
 	fixture::boot,
 	require::require,
-	served::{erased_sender_leaves_the_section, sticky_root_bundles_only_seen_replies},
+	served::{
+		erased_sender_leaves_the_section, forbidden_server_leaves_the_section,
+		sticky_root_bundles_only_seen_replies,
+	},
 	sign::sign,
 	sync::joined_room,
 };
@@ -200,6 +204,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	lapsed_and_redacted_events_lose_stickiness(&alice, &dave, &room, &early).await?;
 	erased_sender_leaves_the_section(services, base, &alice, &room).await?;
 	sticky_root_bundles_only_seen_replies(services, base, &alice, &bob, &bob_id, &room).await?;
+	forbidden_server_leaves_the_section(services, &alice, &bob, &room).await?;
 
 	let withheld = Withheld {
 		services,
@@ -973,14 +978,7 @@ async fn signed_sticky(
 	key: &str,
 ) -> Result<(OwnedEventId, Box<RawJsonValue>)> {
 	// Carol holds the default power level, below what call membership needs.
-	let content = json!({ "msgtype": "m.text", "body": key, "msc4354_sticky_key": key });
-	let builder = PduBuilder {
-		event_type: "m.room.message".into(),
-		content: to_raw_value(&content)?.into(),
-		sticky: Some(Sticky { duration_ms: DURATION_MS }),
-		..PduBuilder::default()
-	};
-
+	let builder = sticky_text(key)?;
 	let (event, json) = sign(self.services, self.carol_id, room, builder).await?;
 	let pdu = self
 		.services
@@ -989,6 +987,21 @@ async fn signed_sticky(
 		.await;
 
 	Ok((event.event_id, pdu))
+}
+
+/// A sticky message under `key`, built for the local event path.
+///
+/// Any member may send one, unlike the call membership the other cases send.
+fn sticky_text(key: &str) -> Result<PduBuilder> {
+	let content = json!({ "msgtype": "m.text", "body": key, "msc4354_sticky_key": key });
+	let builder = PduBuilder {
+		event_type: "m.room.message".into(),
+		content: to_raw_value(&content)?.into(),
+		sticky: Some(Sticky { duration_ms: DURATION_MS }),
+		..PduBuilder::default()
+	};
+
+	Ok(builder)
 }
 
 /// Delivers one event over the federation ingest, from this server to itself.

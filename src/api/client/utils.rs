@@ -53,6 +53,27 @@ pub(crate) async fn is_self_redaction(
 		.is_ok_and(|target| target.sender() == user_id)
 }
 
+/// Whether events from `sender` are kept from `user_id`, because the sender's
+/// server is forbidden or the user ignores the sender.
+///
+/// The event types a sender's exclusion spares are the caller's to exempt.
+#[inline]
+pub(crate) async fn is_ignored_sender(
+	services: &Services,
+	sender: &UserId,
+	user_id: &UserId,
+) -> bool {
+	let ignored_server = services
+		.config
+		.is_forbidden_remote_server_name(sender.server_name());
+
+	ignored_server
+		|| services
+			.users
+			.user_is_ignored(sender, user_id)
+			.await
+}
+
 /// The unsigned fields carrying a client's transaction ID on the event it sent.
 ///
 /// Every client read removes the ID for anyone but the sender.
