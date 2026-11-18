@@ -53,6 +53,11 @@ testee_image="${POLICYSERV_TESTEE_IMAGE:-policyserv-testee--${cell}}"
 results_dir="${results_dir:-tests/policyserv}"
 results="$results_dir/results.jsonl"
 
+# The check under way. `check` sets these and `pass` clears them again, so if
+# the run exits while they are set, that check is the one that failed.
+check_id=
+check_name=
+
 # Run-id: unique per runner registration, stable across a re-run on the same
 # registration, so the prior attempt's resources self-reclaim.
 run_seed="${RUNNER_NAME:-local-$$}"
@@ -81,10 +86,37 @@ mkdir -p "$results_dir"
 log()  { printf '\033[1;36m[policyserv]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;41;37mERROR\033[0m %s\n' "$*" >&2; exit 1; }
 
-# One row per passed check; a failed check exits before writing its row.
+# check ID NAME
+#
+# Begins a check. The checks run in order and each builds on the ones before
+# it, so the first failure ends the run, and on_exit records the check that was
+# under way as failed. The checks after it write no row at all; the summary
+# fills those in as skipped, from the committed baseline.
+check() {
+	check_id=$1
+	check_name=$2
+}
+
+# record OUTCOME
+#
+# Appends a row for the current check to the results; OUTCOME is pass or fail.
+record() {
+	local row
+
+	row=$(printf '{"check":"%s","name":"%s","outcome":"%s"}' \
+		"$check_id" "$check_name" "$1")
+
+	printf '%s\n' "$row" >>"$results"
+}
+
+# pass
+#
+# Ends the current check as passed.
 pass() {
-	printf '{"check":"%s","name":"%s","outcome":"pass"}\n' "$1" "$2" >>"$results"
-	log "check $1 passed: $2"
+	record pass
+	log "check $check_id passed: $check_name"
+
+	check_id=
 }
 
 capture_logs() {
@@ -102,6 +134,13 @@ teardown() {
 }
 
 on_exit() {
+	# A check still under way when the run exits is the one that failed. Its
+	# row is best effort, so a results file that cannot be written still leaves
+	# teardown to run.
+	if [ -n "$check_id" ]; then
+		record fail || true
+	fi
+
 	capture_logs
 	teardown
 	exit "$1"
@@ -321,16 +360,20 @@ wait_for "the TLS front" "https://policyserv:8448/_matrix/federation/v1/version"
 ###############################################################################
 
 # A: both servers answer on their federation ports, over verified TLS.
+check A "both servers answer over verified TLS"
+
 reply=$(request GET "https://tuwunel:8448/_matrix/federation/v1/version")
 expect_status 200 "$reply" "tuwunel federation version"
 
 reply=$(request GET "https://policyserv:8448/_matrix/federation/v1/version")
 expect_status 200 "$reply" "policyserv federation version through the front"
 
-pass A "both servers answer over verified TLS"
+pass
 
 # B: Alice registers and opens a public room, and policyserv joins it the way a
 # homeserver would, with make_join and send_join against tuwunel.
+check B "policyserv joined the room"
+
 credentials=$(printf '"username":"%s","password":"%s"' "$ALICE" "$ALICE_PW")
 
 reply=$(request POST "$hs_client/_matrix/client/v3/register" "" "{$credentials}")
@@ -372,9 +415,11 @@ until [ "$SECONDS" -ge "$deadline" ]; do
 done
 
 [ "$joined" = 1 ] || fail "$POLICYSERV_USER did not join $room: $(body_of "$reply")"
-pass B "policyserv joined the room"
+pass
 
 # C: the room names policyserv its policy server, under the key it publishes.
+check C "the room names policyserv"
+
 reply=$(request GET "https://policyserv:8448/.well-known/matrix/policy_server")
 expect_status 200 "$reply" "policyserv policy key"
 
@@ -385,19 +430,23 @@ policy=$(printf '{"via":"policyserv","public_keys":{"ed25519":"%s"}}' "$policy_k
 reply=$(request PUT "$hs_client/_matrix/client/v3/rooms/$room/state/m.room.policy/" "$token" "$policy")
 expect_status 200 "$reply" "m.room.policy"
 
-pass C "the room names policyserv"
+pass
 
 # D: a benign message is sent. With policy servers on, tuwunel sends nothing
 # policyserv has not signed under the room's key; the stored signature itself
 # is checked by the Complement suite, as a client cannot see it.
+check D "a benign message is sent"
+
 reply=$(send_text d "hello")
 expect_status 200 "$reply" "benign message"
 [ -n "$(body_of "$reply" | field event_id)" ] || fail "no event_id: $(body_of "$reply")"
 
-pass D "a benign message is sent"
+pass
 
 # E: a message policyserv refuses is refused with its answer, errcode and
 # message both.
+check E "a refused message is refused with policyserv's answer"
+
 reply=$(send_text e "this is spam")
 expect_status 400 "$reply" "refused message"
 
@@ -405,15 +454,19 @@ refusal=$(body_of "$reply")
 [ "$(printf '%s' "$refusal" | field errcode)" = M_FORBIDDEN ] || fail "refusal not relayed: $refusal"
 [ "$(printf '%s' "$refusal" | field error)" = "$REFUSAL_MESSAGE" ] || fail "refusal not relayed: $refusal"
 
-pass E "a refused message is refused with policyserv's answer"
+pass
 
 # F: the refusal does not carry over to the next message.
+check F "a message after a refusal is sent"
+
 reply=$(send_text f "hello again")
 expect_status 200 "$reply" "message after a refusal"
 
-pass F "a message after a refusal is sent"
+pass
 
 # G: with policyserv unreachable, a message gets no verdict and fails.
+check G "a message during the outage fails as unavailable"
+
 docker stop "$front" >/dev/null
 
 started=$(date +%s)
@@ -423,14 +476,15 @@ elapsed=$(( $(date +%s) - started ))
 expect_status 503 "$reply" "message during the outage"
 [ "$elapsed" -le 60 ] || fail "the outage took ${elapsed}s to answer"
 
-pass G "a message during the outage fails as unavailable"
+pass
 
 # H: leaving needs no verdict, so it goes out during the outage.
+check H "leaving during the outage succeeds"
+
 reply=$(request POST "$hs_client/_matrix/client/v3/rooms/$room/leave" "$token" '{}')
 expect_status 200 "$reply" "leave during the outage"
 
-pass H "leaving during the outage succeeds"
+pass
 
-pass all "every check passed"
 log "policyserv integration test PASSED"
 printf '\033[1;42;30mACCEPT\033[0m\n'
