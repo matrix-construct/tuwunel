@@ -1,10 +1,10 @@
+use std::collections::BTreeMap;
+
 use futures::{StreamExt, pin_mut};
-use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId,
-};
+use ruma::{CanonicalJsonObject, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId};
 use serde_json::value::RawValue as RawJsonValue;
-use tuwunel_core::{Result, err, implement, result::FlatOk};
-use tuwunel_matrix::event::gen_event_id;
+use tuwunel_core::{Result, err, implement};
+use tuwunel_matrix::{event::gen_event_id, pdu::check_raw_size};
 
 use super::room_version_of;
 
@@ -25,26 +25,34 @@ type Parsed = (OwnedRoomId, OwnedEventId, CanonicalJsonObject);
     )
 )]
 pub async fn parse_incoming_pdu(&self, pdu: &RawJsonValue) -> Result<Parsed> {
-	let value: CanonicalJsonObject = serde_json::from_str(pdu.get()).map_err(|e| {
-		err!(BadServerResponse(debug_error!("Error parsing incoming event: {e} {pdu:#?}")))
-	})?;
-
-	let room_id: OwnedRoomId = value
-		.get("room_id")
-		.and_then(CanonicalJsonValue::as_str)
-		.map(OwnedRoomId::parse)
-		.flat_ok_or(err!(Request(InvalidParam("Invalid room_id in pdu"))))?;
-
+	check_raw_size(pdu)?;
+	let room_id = incoming_room_id(pdu)?;
 	let room_version_id = self
 		.incoming_room_version(&room_id)
 		.await
 		.ok_or_else(|| err!("Server is not in room {room_id}"))?;
+
+	let value: CanonicalJsonObject = serde_json::from_str(pdu.get()).map_err(|e| {
+		err!(BadServerResponse(debug_error!("Error parsing incoming event: {e} {pdu:#?}")))
+	})?;
 
 	gen_event_id(&value, &room_version_id)
 		.map(move |event_id| (room_id, event_id, value))
 		.map_err(|e| {
 			err!(Request(InvalidParam("Could not convert event to canonical json: {e}")))
 		})
+}
+
+/// Keep only the room ID across a possible wait on the federation lock. Like
+/// the canonical object, this accepts escaped field names and retains the last
+/// value of a repeated key; the field values themselves stay raw.
+fn incoming_room_id(pdu: &RawJsonValue) -> Result<OwnedRoomId> {
+	let fields: BTreeMap<String, &RawJsonValue> = serde_json::from_str(pdu.get())
+		.map_err(|e| err!(BadServerResponse("Error reading incoming room ID: {e}")))?;
+	fields
+		.get("room_id")
+		.and_then(|raw| serde_json::from_str(raw.get()).ok())
+		.ok_or_else(|| err!(Request(InvalidParam("Invalid room_id in pdu"))))
 }
 
 /// The version of the room an incoming event names, if this server can know it.
@@ -110,3 +118,6 @@ async fn invited_room_version(&self, room_id: &RoomId) -> Option<RoomVersionId> 
 
 	None
 }
+
+#[cfg(test)]
+mod tests;

@@ -23,7 +23,9 @@ use tuwunel_core::{
 	},
 	warn,
 };
-use tuwunel_matrix::{RoomVersionRules, event::gen_event_id_canonical_json, room_version};
+use tuwunel_matrix::{
+	RoomVersionRules, event::gen_event_id_canonical_json, pdu::check_raw_size, room_version,
+};
 use tuwunel_service::Services;
 
 use super::utils::{auth_chain_pdu, require_known_room, state_pdu, walk_auth_chain};
@@ -101,6 +103,7 @@ async fn create_join_event(
 	// hashes checks
 	let room_version_id = services.state.get_room_version(room_id).await?;
 
+	check_raw_size(pdu)?;
 	let Ok((event_id, mut value)) = gen_event_id_canonical_json(pdu, &room_version_id) else {
 		// Event could not be converted to canonical json
 		return Err!(Request(BadJson("Could not convert event to canonical json.")));
