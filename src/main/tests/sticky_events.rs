@@ -7,8 +7,10 @@
 //! time on a timeline copy, the legacy sync section on initial and incremental
 //! syncs with its deduplication against the timeline, the sliding sync
 //! extension, a later joiner fetching a sticky event the room's history
-//! visibility hides, transaction replay, delayed sends, ignored senders, lazy
-//! members, expiry and redaction, and a withheld event weighed again.
+//! visibility hides, transaction replay, both membership types (the legacy call
+//! member and MSC4143's `rtc.member`), delayed sends fired by action and by
+//! timer, ignored senders, lazy members, expiry and redaction, and a withheld
+//! event weighed again.
 
 use std::time::Duration;
 
@@ -78,6 +80,7 @@ const CAROL: &str = "sticky-events-carol-token-00000000";
 const DAVE: &str = "sticky-events-dave-token-000000000";
 const QUIET: [&str; 2] = ["logging.enable=false", "database.pool.max_workers=64"];
 const CALL_MEMBER: &str = "org.matrix.msc3401.call.member";
+const RTC_MEMBER: &str = "org.matrix.msc4143.rtc.member";
 const DURATION: &str = "org.matrix.msc4354.sticky_duration_ms";
 const STICKY_KEY: &str = "msc4354_sticky";
 const TTL: &str = "msc4354_sticky_duration_ttl_ms";
@@ -90,6 +93,24 @@ const BRIEF_MS: u64 = 1_000;
 
 // How long the worker may take to weigh a withheld event once its room changes.
 const PROMOTION_DEADLINE: Duration = Duration::from_secs(10);
+
+// The legacy and the MSC4143 membership types, each with a label for its transaction ids.
+const MEMBER_TYPES: [(&str, &str); 2] = [(CALL_MEMBER, "call"), (RTC_MEMBER, "rtc")];
+
+// The application every `rtc.member` join runs, and the slot each event names:
+// an `m.rtc.slot` state key, the application type then `#` and the slot's id.
+const APPLICATION: &str = "m.call";
+const SLOT_ID: &str = "m.call#room";
+
+// The sticky key and transaction id of the leave only its timer sends.
+const TIMED_LEAVE: &str = "timed-leave";
+
+// Short enough to wait out, so the delayed event fires by its timer alone.
+const TIMER_DELAY_MS: u64 = 300;
+
+// Far past the timer's delay, so a slow host is not mistaken for a timer that
+// never fired.
+const FIRE_DEADLINE: Duration = Duration::from_secs(10);
 
 // `{"room":{"timeline":{"limit":1}}}`, encoded for a query string.
 const ONE_EVENT: &str = "%7B%22room%22%3A%7B%22timeline%22%3A%7B%22limit%22%3A1%7D%7D%7D";
@@ -160,7 +181,9 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	extension_offers_events_outside_the_timeline(&bob, &room, [&early, &later]).await?;
 	later_joiner_fetches_only_the_sticky_event(&bob, &room, &early, &hidden).await?;
 	retried_transaction_keeps_its_answer(&alice, &room).await?;
+	member_types_reach_the_section(&alice, &bob, &room).await?;
 	delayed_sticky_events_fire(&alice, &room).await?;
+	delayed_sticky_leave_fires_by_timer(&alice, &room).await?;
 	filtered_timeline_leaves_the_event_to_the_section(&alice, &bob, &room).await?;
 	sliding_increment_offers_only_new_events(&alice, &bob, &room, &early).await?;
 	lazy_members_include_sticky_senders(&bob, &alice_id, &room).await?;
@@ -412,28 +435,142 @@ async fn retried_transaction_keeps_its_answer(alice: &Client<'_>, room: &RoomId)
 	)
 }
 
-/// A delayed sticky event, from either route, is sent with its sticky object
-/// and a remaining time counted from when it fires.
+/// A sticky membership of either type reaches the section of an incremental
+/// sync whose timeline it falls outside.
+///
+/// The legacy call member and MSC4143's `rtc.member` each send an event and
+/// then a message, so a one-event timeline leaves the membership to the
+/// section.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn member_types_reach_the_section(
+	alice: &Client<'_>,
+	bob: &Client<'_>,
+	room: &RoomId,
+) -> Result {
+	for (event_type, label) in MEMBER_TYPES {
+		let since = bob.get("sync?timeout=0").await?;
+		let since = field(&since, "next_batch")?;
+		let key = format!("{label}-member");
+		let member = alice
+			.send_sticky_for(room, event_type, &key, DURATION_MS)
+			.await?;
+
+		let last = alice
+			.send_text(room, &format!("{label}-text"), "after")
+			.await?;
+
+		let sync = bob
+			.get(&format!("sync?timeout=0&since={since}&filter={ONE_EVENT}"))
+			.await?;
+
+		let joined = joined_room(&sync, room)?;
+		let expected = member_content(event_type, &key, "join");
+
+		require(
+			find(&joined["timeline"]["events"], &last).is_some(),
+			"the timeline lost its event",
+		)?;
+
+		require(
+			find(&joined[STICKY_KEY]["events"], &member)
+				.is_some_and(|event| fresh_copy_of(event, &expected)),
+			"the section omitted a sticky membership or changed its content",
+		)?;
+	}
+
+	Ok(())
+}
+
+/// Content for a sticky membership of either type, keyed by `key`.
+///
+/// An `rtc.member` event follows MSC4143's schema: its slot, a member whose id
+/// is the sticky key, and the application on a join or the reason on a leave.
+/// A legacy call member carries the sticky key alone, as elsewhere in the suite.
+fn member_content(event_type: &str, key: &str, membership: &str) -> Value {
+	let member = json!({ "id": key, "membership": membership });
+
+	match (event_type, membership) {
+		| (RTC_MEMBER, "join") => json!({
+			"slot_id": SLOT_ID,
+			"member": member,
+			"application": { "type": APPLICATION },
+			"msc4354_sticky_key": key,
+		}),
+		| (RTC_MEMBER, _) => json!({
+			"slot_id": SLOT_ID,
+			"member": member,
+			"leave_reason": { "code": "delayed_leave" },
+			"msc4354_sticky_key": key,
+		}),
+		| _ => json!({ "msc4354_sticky_key": key }),
+	}
+}
+
+/// Whether a copy is fresh and carries the content it was sent with.
+///
+/// The server keeps a sticky event's content as sent, so any difference is a
+/// defect in delivery rather than a client's edit.
+fn fresh_copy_of(event: &Value, content: &Value) -> bool {
+	fresh_copy(event) && event["content"] == *content
+}
+
+/// A delayed sticky event of either membership type, from either route, is
+/// sent with its sticky object and a remaining time counted from when it fires.
 ///
 /// Each is scheduled well in the future and fired at once through its send
 /// action, then read back from the timeline.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn delayed_sticky_events_fire(alice: &Client<'_>, room: &RoomId) -> Result {
+	for (event_type, label) in MEMBER_TYPES {
+		fire_delayed_sticky_events(alice, room, event_type, label).await?;
+	}
+
+	let sync = alice.get("sync?timeout=0").await?;
+	let timeline = &joined_room(&sync, room)?["timeline"]["events"];
+
+	for (event_type, label) in MEMBER_TYPES {
+		for route in ["delayed-query", "delayed-body"] {
+			let key = format!("{label}-{route}");
+			let expected = member_content(event_type, &key, "leave");
+
+			require(
+				find_keyed(timeline, &key).is_some_and(|event| fresh_copy_of(event, &expected)),
+				"a fired delayed event lacks the sticky key, its remaining time or its content",
+			)?;
+		}
+	}
+
+	Ok(())
+}
+
+/// Schedule one delayed sticky event of a type through each route, then fire
+/// both through their send actions.
+///
+/// The label keeps each type's transaction ids and sticky keys apart.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn fire_delayed_sticky_events(
+	alice: &Client<'_>,
+	room: &RoomId,
+	event_type: &str,
+	label: &str,
+) -> Result {
+	let query_key = format!("{label}-delayed-query");
 	let by_query = format!(
-		"rooms/{room}/send/{CALL_MEMBER}/delayed-query?org.matrix.msc4140.delay=60000&\
+		"rooms/{room}/send/{event_type}/{query_key}?org.matrix.msc4140.delay=60000&\
 		 {DURATION}={DURATION_MS}"
 	);
 
 	let by_query = alice
-		.put(&by_query, &json!({ "msc4354_sticky_key": "delayed-query" }))
+		.put(&by_query, &member_content(event_type, &query_key, "leave"))
 		.await?;
 
+	let body_key = format!("{label}-delayed-body");
 	let by_body = alice
-		.client_url(UNSTABLE, &format!("rooms/{room}/delayed_event/{CALL_MEMBER}/delayed-body"));
+		.client_url(UNSTABLE, &format!("rooms/{room}/delayed_event/{event_type}/{body_key}"));
 
 	let body = json!({
 		"delay_ms": 60_000,
-		"content": { "msc4354_sticky_key": "delayed-body" },
+		"content": member_content(event_type, &body_key, "leave"),
 		DURATION: DURATION_MS,
 	});
 
@@ -451,17 +588,44 @@ async fn delayed_sticky_events_fire(alice: &Client<'_>, room: &RoomId) -> Result
 			.await?;
 	}
 
-	let sync = alice.get("sync?timeout=0").await?;
-	let timeline = &joined_room(&sync, room)?["timeline"]["events"];
-
-	for key in ["delayed-query", "delayed-body"] {
-		require(
-			find_keyed(timeline, key).is_some_and(fresh_copy),
-			"a fired delayed event lacks the sticky key or its remaining time",
-		)?;
-	}
-
 	Ok(())
+}
+
+/// A delayed sticky leave fires by its timer, with its sticky object and the
+/// content it was scheduled with.
+///
+/// The `rtc.member` leave names its slot and member as MSC4143 requires, and no
+/// send action touches it, so only the timer can send it.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn delayed_sticky_leave_fires_by_timer(alice: &Client<'_>, room: &RoomId) -> Result {
+	let path = format!(
+		"rooms/{room}/send/{RTC_MEMBER}/{TIMED_LEAVE}?org.matrix.msc4140.delay={TIMER_DELAY_MS}&\
+		 {DURATION}={DURATION_MS}"
+	);
+
+	let reply = alice
+		.put(&path, &member_content(RTC_MEMBER, TIMED_LEAVE, "leave"))
+		.await?;
+
+	field(&reply, "delay_id")?;
+
+	let fired = poll_until(FIRE_DEADLINE, async || timed_leave_sent(alice, room).await).await;
+
+	require(fired, "a delayed sticky leave never fired by its timer")
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn timed_leave_sent(alice: &Client<'_>, room: &RoomId) -> bool {
+	let Ok(sync) = alice.get("sync?timeout=0").await else {
+		return false;
+	};
+
+	let expected = member_content(RTC_MEMBER, TIMED_LEAVE, "leave");
+
+	joined_room(&sync, room).is_ok_and(|joined| {
+		find_keyed(&joined["timeline"]["events"], TIMED_LEAVE)
+			.is_some_and(|event| fresh_copy_of(event, &expected))
+	})
 }
 
 /// A sticky event the timeline filter leaves out reaches the section.
@@ -683,7 +847,7 @@ async fn lapsed_and_redacted_events_lose_stickiness(
 	early: &EventId,
 ) -> Result {
 	let brief = alice
-		.send_sticky_for(room, "brief", BRIEF_MS)
+		.send_sticky_for(room, CALL_MEMBER, "brief", BRIEF_MS)
 		.await?;
 
 	let doomed = alice.send_sticky(room, "doomed").await?;
@@ -820,7 +984,7 @@ async fn deliver(&self, event_id: &EventId, pdu: Box<RawJsonValue>) -> Result {
 #[implement(Client, params = "<'_>")]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn send_sticky(&self, room: &RoomId, txn_id: &str) -> Result<OwnedEventId> {
-	self.send_sticky_for(room, txn_id, DURATION_MS)
+	self.send_sticky_for(room, CALL_MEMBER, txn_id, DURATION_MS)
 		.await
 }
 
@@ -829,12 +993,13 @@ async fn send_sticky(&self, room: &RoomId, txn_id: &str) -> Result<OwnedEventId>
 async fn send_sticky_for(
 	&self,
 	room: &RoomId,
+	event_type: &str,
 	txn_id: &str,
 	duration_ms: u64,
 ) -> Result<OwnedEventId> {
-	let path = format!("rooms/{room}/send/{CALL_MEMBER}/{txn_id}?{DURATION}={duration_ms}");
+	let path = format!("rooms/{room}/send/{event_type}/{txn_id}?{DURATION}={duration_ms}");
 	let response = self
-		.put(&path, &json!({ "msc4354_sticky_key": txn_id }))
+		.put(&path, &member_content(event_type, txn_id, "join"))
 		.await?;
 
 	let event_id = field(&response, "event_id")?.try_into()?;

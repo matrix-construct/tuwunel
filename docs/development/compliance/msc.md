@@ -29,14 +29,14 @@
 
 | ✅ `yes` | 🟨 `part` | 🟥 `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 296 | 60 | 442 | 312 | 1110 |
+| 298 | 58 | 442 | 312 | 1110 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
-| merged | 193 | 20 | 11 | 57 | 281 |
-| open | 67 | 25 | 345 | 181 | 618 |
+| merged | 194 | 19 | 11 | 57 | 281 |
+| open | 68 | 24 | 345 | 181 | 618 |
 | closed | 36 | 15 | 86 | 74 | 211 |
 
 ## Merged
@@ -98,7 +98,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4163 | ✅ ● | 100/100 | Make ACLs apply to EDUs | ACLs applied on receipt and typing EDUs |
 | MSC4156 | ✅ ● | 100/100 | Migrate `server_name` to `via` | via parameter handled via Ruma |
 | MSC4151 | ✅ ● | 100/100 | Reporting rooms (Client-Server API) | POST /rooms/{roomId}/report implemented and routed |
-| MSC4143 | 🟨 ◐ | 70/90 | MatrixRTC | Discovery, upgrade slot copy, delayed leave; no sticky member or transport auth |
+| MSC4143 | ✅ ● | 100/100 | MatrixRTC | Both transports paths, token or guest, ordered, typed; sticky rtc.member |
 | MSC4140 | ✅ ● | 80/80 | Cancellable delayed events | Full lifecycle, finalised records, sender-only delay_id; no rate limits |
 | MSC4138 | ✅ ● | 100/100 | Update allowed HTTP methods in CORS responses | CORS METHODS list includes HEAD and PATCH; excludes CONNECT/TRACE |
 | MSC4133 | ✅ ● | 85/95 | Extending User Profile API with Custom Key:Value Pairs | endpoints + caps/errcodes; unset legacy 200 omit by choice, 404 key-scoped |
@@ -284,7 +284,6 @@ for spec compliance.
 | MSC2409 | 🟨 ● | 70/70 | 1.13 | Proposal to send typing, presence and receipts to appservices | typing+receipt EDUs sent to AS; presence not forwarded |
 | MSC3925 | 🟨 ● | 70/70 | 1.7 | m.replace aggregation with full event | Full m.replace fold; off by default (bundle_edit_relations); backfill unindexed |
 | MSC3970 | 🟨 ◐ | 70/80 | 1.7 | Scope transaction IDs to devices | txn key is user, device, txn with no path; redact untracked; echo user scoped |
-| MSC4143 | 🟨 ◐ | 70/90 | next | MatrixRTC | Discovery, upgrade slot copy, delayed leave; no sticky member or transport auth |
 | MSC4543 | 🟨 ◐ | 70/90 | next | Sliding Sync Extensions: End-to-end encryption | No-pos and count rules met; left misses departures, bans; claim race; flag held |
 | MSC4548 | 🟨 ◐ | 70/90 | next | Sliding Sync Extensions: Account data | Client caching excluded; first-enable and independent room-scope gaps |
 | MSC2290 | 🟨 ● | 65/55 | 1.0 | Separate Endpoints for Binding Threepids | add endpoint (UIA+dupe) + HS email validation; IS-bind half out of scope |
@@ -346,7 +345,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4524 | 🟥 ● | 0/0 | Federation Bi-directional Ping | no federation ping or pong route; the cited commit is a Continuwuity branch |
 | MSC4522 | ✅ ● | 100/100 | Username colors | Custom profile field passthrough; object value stored and served via MSC4133 |
 | MSC4521 | 🟥 ● | 0/0 | Adaptive set reconciliation | no PinSketch, minisketch or algebraic_v1 digest anywhere in the tree |
-| MSC4519 | 🟨 ● | 60/80 | MatrixRTC Transports Registry | src/api/client/rtc.rs:7 serves the MSC4143-prefixed unstable transports route |
+| MSC4519 | ✅ ● | 80/80 | MatrixRTC Transports Registry | Unstable transports path, token or guest, typed array; unregistered types pass |
 | MSC4517 | 🟥 ● | 0/0 | Federated thirdparty lookups | no server= parameter and no federation thirdparty routes; local lookups only |
 | MSC4514 | 🟥 ● | 0/0 | EDU size limit | no 65536 byte EDU cap; only the 24 MiB global request body limit applies |
 | MSC4513 | ✅ ◐ | 90/90 | Standard HTTP status codes for all endpoints, current and future | central kind to status map emits 413, 429, 502, 504 with Matrix error bodies |
