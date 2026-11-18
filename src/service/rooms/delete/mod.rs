@@ -196,6 +196,9 @@ impl Service {
 			.delete_all_soft_failed_for_room(room_id)
 			.await;
 
+		debug!("Deleting all the room's sticky event rows");
+		self.services.sticky.delete_room(room_id).await;
+
 		debug!("Deleting all the room's member counts");
 		self.services
 			.state_cache

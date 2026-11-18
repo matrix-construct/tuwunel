@@ -661,6 +661,8 @@ fn append_pdu_json(&self, pdu_id: &RawPduId, pdu: &PduEvent, json: &CanonicalJso
 	let key = (pdu.room_id(), ts, count_key);
 	txn.put_raw(&self.db.roomid_tscount_pducount, key, pdu_id.count());
 
+	self.services.sticky.stage(&mut txn, pdu_id, pdu);
+
 	txn.execute();
 }
 

@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use futures::{Stream, TryStreamExt};
 use ruma::{CanonicalJsonObject, EventId};
 use tuwunel_core::{
-	Result, debug_info, expected, implement,
+	Result, debug, debug_info, expected, implement,
 	utils::{BoolExt as _, TryReadyExt, time::now},
 };
 use tuwunel_database::{Deserialized, Json, Map};
@@ -72,6 +72,10 @@ impl crate::Service for Service {
 
 				debug_info!(?count, "Finished cleaning up retained events");
 			}
+
+			let expired = self.services.sticky.sweep().await;
+
+			debug!(?expired, "Swept expired sticky event index rows");
 
 			tokio::select! {
 				() = tokio::time::sleep(Duration::from_hours(1)) => {},

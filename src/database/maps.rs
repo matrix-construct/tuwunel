@@ -316,6 +316,12 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::SEQUENTIAL
 	},
 	Descriptor {
+		name: "pduid_stickyuntil",
+		key_size_hint: Some(16),
+		val_size_hint: Some(8),
+		..descriptor::SEQUENTIAL_SMALL
+	},
+	Descriptor {
 		name: "profilechangeid_userid",
 		..descriptor::RANDOM
 	},

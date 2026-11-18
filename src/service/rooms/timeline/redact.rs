@@ -121,6 +121,8 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 		.redact_pdu(&pdu_id, event_id, &pdu)
 		.await;
 
+	self.services.sticky.unindex(&pdu_id);
+
 	// Read before redaction strips `m.relates_to`.
 	let root_event_id = pdu.get("content").and_then(thread_root);
 	let keep_thread = root_event_id.as_deref() != Some(event_id);
