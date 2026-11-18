@@ -22,9 +22,12 @@ use tuwunel_core::{
 		BoolExt, FutureBoolExt, OptionExt, future::TryExtExt, result::NotFound, time::now_millis,
 	},
 };
-use tuwunel_matrix::{Event, PduCount, StateKey, pdu::PduBuilder};
+use tuwunel_matrix::{Event, Pdu, PduCount, RawPduId, StateKey, pdu::PduBuilder};
 
-use crate::rooms::{short::ShortStateHash, state::RoomMutexGuard};
+use crate::rooms::{short::ShortStateHash, state::RoomMutexGuard, timeline::Mapped};
+
+/// Bound the cost of locating a retained departure after later membership changes.
+const MEMBERSHIP_STEPS: usize = 16;
 
 /// The state an event's visibility is judged against.
 ///
@@ -396,8 +399,8 @@ where
 ///
 /// A current member sees the whole room, which the first check answers without
 /// touching room state; a user joined at the event sees it too, and a former
-/// member keeps events through their latest leave. A failed read is the error
-/// only when no check grants the event.
+/// member keeps events through the departure ending their last join. A failed
+/// read is the error only when no check grants the event.
 #[implement(super::Service)]
 async fn user_shared_history<Pdu>(
 	&self,
@@ -436,9 +439,10 @@ where
 	joined.and(joined_at_event).and(departed_after)
 }
 
-/// Whether a former member's latest leave falls no earlier than the event.
+/// Whether the departure ending a former member's last join falls no earlier
+/// than the event.
 ///
-/// A user who never joined, or whose leave or the event's position is
+/// A user who never joined, or whose departure or the event's position is
 /// missing, is denied; a failed read or a position that does not decode is an
 /// error.
 #[implement(super::Service)]
@@ -446,26 +450,14 @@ async fn departed_after<Pdu>(&self, pdu: &Pdu, user_id: &UserId) -> Result<bool>
 where
 	Pdu: Event,
 {
-	let state_cache = &self.services.state_cache;
-	let room_id = pdu.room_id();
-	let event_id = pdu.event_id();
-
-	if state_cache
-		.try_once_joined(user_id, room_id)
+	let Some(departure) = self
+		.retained_departure_count(user_id, pdu.room_id())
 		.await?
-		.is_false()
-	{
-		return Ok(false);
-	}
-
-	let Some(left_count) = state_cache
-		.get_left_count(room_id, user_id)
-		.await
-		.present()?
 	else {
 		return Ok(false);
 	};
 
+	let event_id = pdu.event_id();
 	let pdu_id = self
 		.services
 		.timeline
@@ -473,8 +465,7 @@ where
 		.await?
 		.pdu_id(event_id)?;
 
-	let visible =
-		pdu_id.is_some_and(|pdu_id| pdu_id.pdu_count() <= PduCount::from_unsigned(left_count));
+	let visible = pdu_id.is_some_and(|pdu_id| pdu_id.pdu_count() <= departure);
 
 	Ok(visible)
 }
@@ -583,21 +574,41 @@ pub async fn user_visible_shortstatehash(
 /// Returns the timeline count at which a departed member left a room.
 ///
 /// A user who once joined and keeps a leave or ban count is a departed member.
-/// The count is bounded by the leave or ban in current state, so one
-/// overwritten by a later count never reaches past the real departure. A
+/// The retained row is an upper bound, not necessarily the event ending the
+/// last join. If that event cannot be established, do not grant history. A
 /// joined user, one who never joined, or one whose count is gone because they
 /// forgot the room or were invited back, has none.
 #[implement(super::Service)]
-#[tracing::instrument(skip(self), level = "debug")]
 pub async fn departure_count(
+	&self,
+	user_id: &UserId,
+	room_id: &RoomId,
+) -> Result<Option<PduCount>> {
+	if self
+		.services
+		.state_cache
+		.try_is_joined(user_id, room_id)
+		.await?
+	{
+		return Ok(None);
+	}
+
+	self.retained_departure_count(user_id, room_id)
+		.await
+}
+
+#[implement(super::Service)]
+async fn retained_departure_count(
 	&self,
 	user_id: &UserId,
 	room_id: &RoomId,
 ) -> Result<Option<PduCount>> {
 	let state_cache = &self.services.state_cache;
 
-	if state_cache.is_joined(user_id, room_id).await
-		|| !state_cache.once_joined(user_id, room_id).await
+	if state_cache
+		.try_once_joined(user_id, room_id)
+		.await?
+		.is_false()
 	{
 		return Ok(None);
 	}
@@ -607,46 +618,83 @@ pub async fn departure_count(
 		.get_left_count(room_id, user_id)
 		.map_ok(PduCount::from_unsigned)
 		.await
-		.optional()?
+		.present()?
 	else {
 		return Ok(None);
 	};
 
 	self.departure_event_count(user_id, room_id)
-		.map_ok(|event_count| event_count.into_iter().chain([left_count]).min())
+		.map_ok(|count| Some(count.min(left_count)))
 		.await
 }
 
-/// Returns the timeline count of the user's leave or ban in current state.
-///
-/// There is none when the member event is absent or sets any other
-/// membership, or when the event has no timeline count.
+/// Walk the user's member events, newest first, to the transition out of
+/// `join`. An unreadable or missing predecessor cannot prove a departure.
 #[implement(super::Service)]
-#[tracing::instrument(skip(self), level = "debug")]
-async fn departure_event_count(
-	&self,
-	user_id: &UserId,
-	room_id: &RoomId,
-) -> Result<Option<PduCount>> {
-	let Some(member) = self
-		.room_state_get(room_id, &StateEventType::RoomMember, user_id.as_str())
-		.await
-		.optional()?
-	else {
-		return Ok(None);
-	};
+async fn departure_event_count(&self, user_id: &UserId, room_id: &RoomId) -> Result<PduCount> {
+	let kind = StateEventType::RoomMember;
+	let key = user_id.as_str();
+	let room_state = self
+		.services
+		.state
+		.get_room_shortstatehash(room_id)
+		.await?;
+	let mut member = self
+		.state_get_checked(room_state, &kind, key)
+		.await?;
 
-	let content: RoomMemberEventContent = member.get_content()?;
+	for _ in 0..MEMBERSHIP_STEPS {
+		let before = self
+			.services
+			.state
+			.pdu_shortstatehash(member.event_id())
+			.await?;
+		let previous = self.state_get_checked(before, &kind, key).await?;
+		if previous.membership_for(user_id) == Some(MembershipState::Join) {
+			let content: RoomMemberEventContent = member.get_content()?;
+			if !matches!(content.membership, MembershipState::Leave | MembershipState::Ban) {
+				return Err!(Request(Forbidden("No departure after the last join.")));
+			}
 
-	if !matches!(content.membership, MembershipState::Leave | MembershipState::Ban) {
-		return Ok(None);
+			let event_id = member.event_id();
+			let pdu_id = self
+				.services
+				.timeline
+				.pdu_position(event_id)
+				.await?
+				.pdu_id(event_id)?;
+
+			return pdu_id
+				.map(RawPduId::pdu_count)
+				.ok_or_else(|| err!(Database("Missing timeline position for {event_id}.")));
+		}
+
+		member = previous;
 	}
 
-	self.services
+	Err!(Request(Forbidden("Too many membership changes since the last join.")))
+}
+
+#[implement(super::Service)]
+async fn state_get_checked(
+	&self,
+	shortstatehash: ShortStateHash,
+	event_type: &StateEventType,
+	state_key: &str,
+) -> Result<Pdu> {
+	let event_id = self
+		.state_get_id(shortstatehash, event_type, state_key)
+		.await?;
+
+	match self
+		.services
 		.timeline
-		.get_pdu_count(member.event_id())
-		.await
-		.optional()
+		.get_checked(&event_id)
+		.await?
+	{
+		| Mapped::Damaged => Err!(Database("The timeline position of {event_id} is damaged.")),
+		| Mapped::Event(event) => Ok(event),
+	}
 }
 
 /// Returns the snapshot after a departed member's departure.

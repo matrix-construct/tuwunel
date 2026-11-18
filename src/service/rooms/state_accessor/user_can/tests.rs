@@ -247,6 +247,22 @@ async fn departed_member_reads_the_state_after_their_leave_event() -> Result {
 			.await
 	);
 
+	let releft = event_id!("$later-leave:localhost");
+	let ev = (8, releft, "m.room.member", member_key, json!({ "membership": "leave" }));
+	store_state(services, shortroomid, room, member, &[ev]);
+	services
+		.state
+		.set_event_state(releft, room, Arc::new([created, kicked, named].into()))
+		.await?;
+	let left = compress_state(services, &StateEventType::RoomMember, member_key, releft).await;
+	save_room_state(services, room, Arc::new([created, left, named].into())).await?;
+	set_memberships(services, member, [(room, member, MembershipState::Leave, 8)]).await?;
+	assert_eq!(accessor.departure_count(member, room).await?, Some(PduCount::Normal(4)));
+	let after = accessor
+		.user_visible_shortstatehash(member, room, Some(PduCount::Normal(7)))
+		.await?;
+	assert_eq!(after, Some(visible));
+
 	services.state_cache.forget(room, member).await?;
 
 	let forgotten = accessor
@@ -328,6 +344,7 @@ async fn snapshotless_event_is_judged_by_current_state() -> Result {
 	let state = compress_states(services, &state_events).await;
 
 	save_room_state(services, room, Arc::new(state)).await?;
+	set_predecessor_join(services, room, member, leave).await?;
 
 	let memberships = [
 		(room, member, MembershipState::Join, 2),
@@ -630,4 +647,24 @@ fn store(services: &Services, shortroomid: ShortRoomId, count: u64, id: &EventId
 
 fn outlier(services: &Services, id: &EventId, pdu: &Value) {
 	services.db["eventid_outlierpdu"].raw_put(id, Json(pdu));
+}
+
+async fn set_predecessor_join(
+	services: &Services,
+	room: &RoomId,
+	user: &UserId,
+	leave: &EventId,
+) -> Result {
+	let join = event_id!("$member-join:localhost");
+	let pdu = with_state_key(
+		pdu_json(join, room, user, "m.room.member", &json!({ "membership": "join" })),
+		user.as_str(),
+	);
+	outlier(services, join, &pdu);
+	let joined = compress_state(services, &StateEventType::RoomMember, user.as_str(), join).await;
+	services
+		.state
+		.set_event_state(leave, room, Arc::new([joined].into()))
+		.await?;
+	Ok(())
 }

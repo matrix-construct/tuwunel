@@ -206,8 +206,9 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	accounts.forgotten_member().await?;
 	accounts.recorded_ban_stays_a_ban().await?;
+	accounts.unban_after_ban().await?;
 	accounts
-		.missing_snapshot_keeps_the_timeline()
+		.missing_snapshot_keeps_the_notification()
 		.await?;
 
 	accounts
@@ -265,7 +266,7 @@ async fn left_history(&self, History { joined, unreadable }: History) -> Result 
 		let timeline = &room["timeline"]["events"];
 
 		assert!(room.is_object(), "left room missing: {reply}");
-		assert_eq!(has_event(timeline, &message), joined && unreadable, "history bound: {reply}");
+		assert!(!has_event(timeline, &message), "history bound: {reply}");
 		if !joined {
 			let state = &room["state"]["events"];
 			let member = own_member(state, invitee);
@@ -288,7 +289,7 @@ async fn left_history(&self, History { joined, unreadable }: History) -> Result 
 		let after = client.sync_v3(Some(&query)).await?;
 		let state = state_after_events(&after, &room_id);
 
-		assert_eq!(has_event(state, &name), joined && unreadable, "state bound: {after}");
+		assert!(!has_event(state, &name), "state bound: {after}");
 
 		let resumed = client
 			.sync_v3(Some(field(&reply, "next_batch")?))
@@ -1073,12 +1074,63 @@ async fn ban_in_v3(&self, room_id: &RoomId, since: &str, section: &str) -> Resul
 	Ok(())
 }
 
-/// An event with no snapshot after the client's position is still an event.
-///
-/// So the departure is a recorded one, and the room stays with the ordinary
-/// loader, which serves its timeline without that snapshot.
+/// Unbanning a previously banned member delivers the unban `leave` event on
+/// their next v3 sync without exposing room history or state from after the ban.
 #[implement(Accounts, params = "<'_>")]
-async fn missing_snapshot_keeps_the_timeline(&self) -> Result {
+async fn unban_after_ban(&self) -> Result {
+	let &Self { invitee, .. } = self;
+	let (owner, client) = (&self.inviter_client, &self.invitee_client);
+	let room_id = self.joined_room().await?;
+	let joined = self.position().await?;
+
+	owner.act_on(&room_id, "ban", invitee).await?;
+	let banned = client.sync_v3(Some(&joined)).await?;
+	let after_ban = field(&banned, "next_batch")?;
+	let message = owner
+		.send_text(&room_id, "after-ban", "after ban")
+		.await?;
+	let name = owner
+		.put_event(&format!("rooms/{room_id}/state/m.room.name"), &json!({ "name": "after ban" }))
+		.await?;
+
+	owner.act_on(&room_id, "unban", invitee).await?;
+	let unban = self.member_event_id(&room_id, invitee).await?;
+
+	for (position, in_timeline) in [(after_ban, false), (joined.as_str(), true)] {
+		let reply = client.sync_v3(Some(position)).await?;
+		let room = &reply["rooms"]["leave"][room_id.as_str()];
+		let (state, timeline) = (&room["state"]["events"], &room["timeline"]["events"]);
+		let member = if in_timeline {
+			timeline.as_array().unwrap().last().unwrap()
+		} else {
+			own_member(state, invitee)
+		};
+
+		assert_eq!(member["event_id"], unban.as_str(), "unban missing: {reply}");
+		assert_eq!(member["content"]["membership"], "leave", "unban membership: {reply}");
+		assert!(!has_event(timeline, &message) && !has_event(timeline, &name), "leak: {reply}");
+		assert!(!has_event(state, &name), "post-ban state leaked: {reply}");
+		assert!(!in_timeline || room["timeline"]["limited"] == true, "not limited: {reply}");
+
+		let next = field(&reply, "next_batch")?;
+		let resumed = client.sync_v3(Some(next)).await?;
+		let left = &resumed["rooms"]["leave"];
+		assert!(left.get(room_id.as_str()).is_none(), "repeated: {resumed}");
+	}
+
+	let after = client
+		.sync_v3(Some(&format!("{after_ban}&org.matrix.msc4222.use_state_after=true")))
+		.await?;
+	let state_after = state_after_events(&after, &room_id);
+	assert_eq!(own_member(state_after, invitee)["event_id"], unban.as_str(), "after: {after}");
+	assert!(!has_event(state_after, &name), "state_after state leaked: {after}");
+
+	Ok(())
+}
+
+/// Without its predecessor snapshot only the departure notification is safe.
+#[implement(Accounts, params = "<'_>")]
+async fn missing_snapshot_keeps_the_notification(&self) -> Result {
 	let &Self { services, invitee, .. } = self;
 	let room_id = self.joined_room().await?;
 	let joined = self.position().await?;
@@ -1090,7 +1142,7 @@ async fn missing_snapshot_keeps_the_timeline(&self) -> Result {
 
 	services.db["shorteventid_shortstatehash"].del(shorteventid);
 
-	self.left_section(&room_id, &joined, "timeline")
+	self.left_section(&room_id, &joined, "state")
 		.await
 		.map(drop)
 }

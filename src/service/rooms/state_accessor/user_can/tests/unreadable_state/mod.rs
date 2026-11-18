@@ -16,7 +16,9 @@ use tuwunel_matrix::{
 	event::{STICKY_DURATION_MAX, STICKY_KEY},
 };
 
-use super::{compress_states, set_memberships, store, store_messages, store_state};
+use super::{
+	compress_states, set_memberships, set_predecessor_join, store, store_messages, store_state,
+};
 use crate::test_utils::{fixture, pdu_json, save_room_state, with_field};
 
 /// A timeline position that does not decode fails the visibility read that
@@ -86,6 +88,8 @@ async fn damaged_event_position_is_a_failed_read() -> Result {
 			.await?;
 	}
 
+	set_predecessor_join(services, room, member, leave).await?;
+
 	let memberships = [
 		(room, owner, MembershipState::Join, 2),
 		(room, member, MembershipState::Join, 2),
@@ -139,6 +143,17 @@ async fn damaged_event_position_is_a_failed_read() -> Result {
 		accessor.user_can_see_event(owner, &quiet).await,
 		"an unreadable history visibility was not taken for shared"
 	);
+
+	services.db["eventid_pduid"].insert(leave.as_bytes(), [0xFF_u8]);
+	let err = accessor
+		.try_user_can_see_event(member, &message)
+		.await
+		.expect_err("a damaged departure position read as a decision");
+	assert!(err.to_string().contains(leave.as_str()));
+	let seen = accessor
+		.user_can_see_event(member, &message)
+		.await;
+	assert!(!seen);
 
 	Ok(())
 }
@@ -240,6 +255,7 @@ async fn departure_grants_history_past_an_unreadable_membership() -> Result {
 	let create = event_id!("$create:localhost");
 	let join = event_id!("$join:localhost");
 	let entered = event_id!("$entered:localhost");
+	let leave = event_id!("$leave:localhost");
 	let early = event_id!("$early:localhost");
 	let shortroomid = services
 		.short
@@ -251,6 +267,7 @@ async fn departure_grants_history_past_an_unreadable_membership() -> Result {
 		(1, create, "m.room.create", "", create_content),
 		(2, join, "m.room.member", owner.as_str(), json!({ "membership": "join" })),
 		(3, entered, "m.room.member", member.as_str(), json!({ "membership": "join" })),
+		(5, leave, "m.room.member", member.as_str(), json!({ "membership": "leave" })),
 	];
 
 	store_state(services, shortroomid, room, owner, &state_events);
@@ -259,12 +276,17 @@ async fn departure_grants_history_past_an_unreadable_membership() -> Result {
 
 	store_messages(services, owner, &content, &[(shortroomid, room, 4, early)]);
 
-	let state = Arc::new(compress_states(services, &state_events).await);
+	let base = compress_states(services, &state_events[..2]).await;
+	let state = Arc::new(&base | &compress_states(services, &state_events[2..3]).await);
+	let current = &base | &compress_states(services, &state_events[3..]).await;
 
+	save_room_state(services, room, Arc::new(current)).await?;
 	services
 		.state
 		.set_event_state(early, room, state)
 		.await?;
+
+	set_predecessor_join(services, room, member, leave).await?;
 
 	let memberships = [
 		(room, owner, MembershipState::Join, 2),
