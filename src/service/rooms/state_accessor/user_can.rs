@@ -18,7 +18,9 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, err, implement,
-	utils::{BoolExt, FutureBoolExt, OptionExt, future::TryExtExt, result::NotFound},
+	utils::{
+		BoolExt, FutureBoolExt, OptionExt, future::TryExtExt, result::NotFound, time::now_millis,
+	},
 };
 use tuwunel_matrix::{Event, PduCount, StateKey, pdu::PduBuilder};
 
@@ -131,7 +133,7 @@ where
 		return false;
 	};
 
-	match self.history_visibility(shortstatehash).await {
+	let visible = match self.history_visibility(shortstatehash).await {
 		| HistoryVisibility::WorldReadable => true,
 
 		// Allow the user's own invite or join, or a user at least invited at the event
@@ -154,7 +156,36 @@ where
 		| HistoryVisibility::Shared | _ =>
 			self.user_shared_history(shortstatehash, room_id, pdu.event_id(), user_id)
 				.await,
-	}
+	};
+
+	// MSC4354: a joined user may see a sticky event the history visibility hides.
+	visible || self.user_sees_sticky(user_id, pdu).await
+}
+
+/// Whether a user currently joined to the room may see a sticky event its
+/// history visibility hides (MSC4354).
+///
+/// The event must be unexpired by its own sticky object, which a redaction
+/// removes, and by its index row, which only an accepted event has.
+#[implement(super::Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn user_sees_sticky<Pdu>(&self, user_id: &UserId, pdu: &Pdu) -> bool
+where
+	Pdu: Event,
+{
+	let now = now_millis();
+
+	pdu.sticky_until(now).is_some()
+		&& self
+			.services
+			.sticky
+			.indexed_unexpired(pdu.event_id(), now)
+			.await
+		&& self
+			.services
+			.state_cache
+			.is_joined(user_id, pdu.room_id())
+			.await
 }
 
 /// Whether a user may see an event under `shared` history visibility.

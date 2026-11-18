@@ -8,7 +8,11 @@ use ruma::{
 	EventId, RoomId, ServerName, UserId,
 	events::{StateEventType, room::history_visibility::HistoryVisibility},
 };
-use tuwunel_core::{implement, utils::stream::ReadyExt};
+use tuwunel_core::{
+	implement,
+	utils::{stream::ReadyExt, time::now_millis},
+};
+use tuwunel_matrix::Event;
 
 /// Reports whether a server may see an event over federation.
 ///
@@ -40,7 +44,7 @@ pub async fn server_can_see_event(
 		.room_members(room_id)
 		.ready_filter(|member| member.server_name() == origin);
 
-	match history_visibility {
+	let visible = match history_visibility {
 		| HistoryVisibility::Invited => {
 			// Allow if any member on requesting server was AT LEAST invited, else deny
 			current_server_members
@@ -54,7 +58,47 @@ pub async fn server_can_see_event(
 				.await
 		},
 		| HistoryVisibility::WorldReadable | HistoryVisibility::Shared | _ => true,
-	}
+	};
+
+	// MSC4354: a joined server may see a sticky event the history visibility hides.
+	visible
+		|| self
+			.server_sees_sticky(origin, room_id, event_id)
+			.await
+}
+
+/// Whether a server currently joined to the room may see a sticky event its
+/// history visibility hides (MSC4354).
+///
+/// The event must be accepted with an unexpired index row, which a
+/// soft-failed or policy-refused event never has. It must also be unexpired by
+/// its own sticky object, which a redaction removes. It is loaded last, and
+/// only on this denial path.
+#[implement(super::Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn server_sees_sticky(
+	&self,
+	origin: &ServerName,
+	room_id: &RoomId,
+	event_id: &EventId,
+) -> bool {
+	let now = now_millis();
+
+	self.services
+		.sticky
+		.indexed_unexpired(event_id, now)
+		.await
+		&& self
+			.services
+			.state_cache
+			.server_in_room(origin, room_id)
+			.await
+		&& self
+			.services
+			.timeline
+			.get_pdu(event_id)
+			.await
+			.is_ok_and(|pdu| pdu.sticky_until(now).is_some())
 }
 
 /// Reports whether any user from an origin was joined at an event.
