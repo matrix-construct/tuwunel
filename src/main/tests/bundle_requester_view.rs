@@ -148,7 +148,9 @@ async fn relations_view(
 		.await?;
 
 	// Positions are read before the redaction hides the reaction from every listing.
-	let listed = visible.relations(&room, &root, "?dir=f").await?;
+	let listed = visible
+		.relations(&room, &root, "?dir=b&limit=1")
+		.await?;
 	let redacted_at = field(&listed, "next_batch")?.to_owned();
 	let first_two = visible
 		.relations(&room, &root, "?dir=f&limit=2")
