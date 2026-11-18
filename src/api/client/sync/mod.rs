@@ -4,7 +4,7 @@ mod tests;
 mod v3;
 mod v5;
 
-use futures::{StreamExt, pin_mut};
+use futures::{Stream, StreamExt, pin_mut};
 use ruma::{
 	EventId, OwnedUserId, RoomId, UserId,
 	events::{
@@ -18,7 +18,7 @@ use ruma::{
 use tuwunel_core::{
 	Error, Result, debug_warn, is_equal_to,
 	utils::{
-		BoolExt,
+		BoolExt, IterStream,
 		result::{LogErr, NotFound},
 		stream::{ReadyExt, WidebandExt},
 		time::now_millis,
@@ -131,8 +131,47 @@ async fn load_timeline_with_errors(
 	}
 
 	timeline_pdus.reverse();
+	let judged = timeline_pdus
+		.into_iter()
+		.stream()
+		.wide_then(async |item| {
+			let visible = matches!(
+				item.1.membership_for(sender_user),
+				Some(MembershipState::Leave | MembershipState::Ban)
+			) || services
+				.state_accessor
+				.user_can_see_event(sender_user, &item.1)
+				.await;
 
-	Ok((timeline_pdus, limited, last_timeline_count))
+			(item, visible)
+		});
+
+	let (timeline, truncated) =
+		visible_window(judged, |(_, pdu)| pdu.state_key().is_some()).await;
+
+	Ok((timeline, limited || truncated, last_timeline_count))
+}
+
+/// State changes before the window belong in the state section. If a hidden
+/// state event interrupts the timeline, start the window after it and allow
+/// pagination back to any visible events removed from the front.
+async fn visible_window<T>(
+	events: impl Stream<Item = (T, bool)>,
+	is_state: impl Fn(&T) -> bool,
+) -> (Vec<T>, bool) {
+	pin_mut!(events);
+	let mut timeline = Vec::new();
+	let mut truncated = false;
+	while let Some((event, visible)) = events.next().await {
+		if visible {
+			timeline.push(event);
+		} else if is_state(&event) {
+			truncated |= !timeline.is_empty();
+			timeline.clear();
+		}
+	}
+
+	(timeline, truncated)
 }
 
 /// Returns the backward pagination token for a timeline slice.

@@ -196,7 +196,7 @@ async fn left_history(&self, History { joined, unreadable }: History) -> Result 
 		let timeline = &room["timeline"]["events"];
 
 		assert!(room.is_object(), "left room missing: {reply}");
-		assert_eq!(has_event(timeline, &message), !bounded, "history bound: {reply}");
+		assert_eq!(has_event(timeline, &message), joined && unreadable, "history bound: {reply}");
 		if bounded && position == &before {
 			assert_eq!(timeline.as_array().unwrap().last().unwrap()["event_id"], leave.as_str());
 		}
