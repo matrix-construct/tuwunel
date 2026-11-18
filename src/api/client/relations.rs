@@ -230,7 +230,7 @@ async fn paginate_relations_with_filter(
 		Right(relations)
 	};
 
-	let events = relations
+	let mut events = relations
 		.wide_filter_map(async |(count, pdu)| {
 			services
 				.state_accessor
@@ -238,23 +238,19 @@ async fn paginate_relations_with_filter(
 				.await
 				.then_some((count, pdu))
 		})
-		.take(limit)
-		.wide_then(async |(count, pdu)| {
-			let pdu = services
-				.pdu_metadata
-				.bundle_aggregations(sender_user, pdu)
-				.await;
-
-			(count, pdu)
-		})
+		.take(limit.saturating_add(1))
 		.collect::<Vec<_>>()
 		.await;
+
+	let more = events.len() > limit;
+	events.truncate(limit);
 
 	Ok(Response {
 		recursion_depth,
 
 		next_batch: events
 			.last()
+			.filter(|_| more)
 			.map(at!(0))
 			.as_ref()
 			.map(ToString::to_string),
@@ -269,8 +265,15 @@ async fn paginate_relations_with_filter(
 		chunk: events
 			.into_iter()
 			.map(at!(1))
+			.stream()
+			.wide_then(|pdu| {
+				services
+					.pdu_metadata
+					.bundle_aggregations(sender_user, pdu)
+			})
 			.map(Event::into_format)
-			.collect(),
+			.collect()
+			.await,
 	})
 }
 
