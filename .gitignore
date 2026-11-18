@@ -109,6 +109,9 @@ tests/complement/interop/
 tests/playwright/results.json
 tests/playwright/output.log
 
+# server logs captured by docker/policyserv.sh beside its tracked baseline
+tests/policyserv/*.log
+
 # cargo profiles from -Z self-profile
 *.mm_profdata
 

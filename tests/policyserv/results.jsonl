@@ -1,0 +1,8 @@
+{"check":"A","name":"both servers answer over verified TLS","outcome":"pass"}
+{"check":"B","name":"policyserv joined the room","outcome":"pass"}
+{"check":"C","name":"the room names policyserv","outcome":"pass"}
+{"check":"D","name":"a benign message is sent","outcome":"pass"}
+{"check":"E","name":"a refused message is refused with policyserv's answer","outcome":"pass"}
+{"check":"F","name":"a message after a refusal is sent","outcome":"pass"}
+{"check":"G","name":"a message during the outage fails as unavailable","outcome":"pass"}
+{"check":"H","name":"leaving during the outage succeeds","outcome":"pass"}
