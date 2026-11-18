@@ -13,21 +13,24 @@ use std::{
 };
 
 use ruma::{
-	RoomId, RoomVersionId, UserId, event_id,
+	EventId, OwnedEventId, RoomId, RoomVersionId, UserId, event_id,
 	events::{
-		StateEventType,
+		StateEventType, TimelineEventType,
 		room::{
 			create::RoomCreateEventContent,
 			join_rules::{JoinRule, RoomJoinRulesEventContent},
 			member::{MembershipState, RoomMemberEventContent},
 		},
 	},
-	room_id, user_id,
+	room_id,
+	serde::Raw,
+	user_id,
 };
+use serde_json::{Value, from_value, json, to_value};
 use tuwunel_core::{Error, Result, config::Figment, utils::result::NotFound};
 use tuwunel_matrix::pdu::PduBuilder;
 
-use super::{Direction, PduCount, Service};
+use super::{Direction, PduCount, RoomMutexGuard, Service};
 use crate::{
 	Services,
 	test_utils::{fixture, pdu_id, poll_once},
@@ -172,6 +175,42 @@ async fn accepting_an_invite_installs_state_before_publishing_the_join() -> Resu
 	Ok(())
 }
 
+#[tokio::test]
+async fn redacting_an_edit_records_the_thread_replies_it_has() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room = room_id!("!adopt:localhost");
+	let creator = user_id!("@creator:localhost");
+
+	invite(services, room, creator, user_id!("@member:localhost")).await?;
+
+	let state_lock = services.state.mutex.lock(room).await;
+
+	// Redacting the edit lets it root a thread, and the reply it has counts.
+	let edit = edit_with_reply(services, room, creator, &state_lock).await?;
+	let content = json!({ "redacts": edit });
+
+	redact(services, room, creator, &edit, content, &state_lock).await?;
+	assert_eq!(thread_summary(services, &edit).await?["count"], json!(1));
+
+	// A redaction that also replies in the thread counts once, as its latest.
+	let edit = edit_with_reply(services, room, creator, &state_lock).await?;
+	let thread = json!({ "rel_type": "m.thread", "event_id": edit });
+	let content = json!({ "redacts": edit, "m.relates_to": thread });
+	let redaction = redact(services, room, creator, &edit, content, &state_lock).await?;
+	let summary = thread_summary(services, &edit).await?;
+
+	assert_eq!(
+		(&summary["count"], &summary["latest_event"]["event_id"]),
+		(&json!(2), &json!(redaction))
+	);
+
+	Ok(())
+}
+
 async fn invite(services: &Services, room: &RoomId, creator: &UserId, member: &UserId) -> Result {
 	let _short_id = services
 		.short
@@ -204,6 +243,79 @@ async fn invite(services: &Services, room: &RoomId, creator: &UserId, member: &U
 	}
 
 	Ok(())
+}
+
+async fn send(
+	services: &Services,
+	room: &RoomId,
+	sender: &UserId,
+	content: Value,
+	state_lock: &RoomMutexGuard,
+) -> Result<OwnedEventId> {
+	let builder = PduBuilder {
+		content: Raw::new(&from_value(content)?)?,
+		..PduBuilder::default()
+	};
+
+	services
+		.timeline
+		.build_and_append_pdu(builder, sender, room, state_lock)
+		.await
+}
+
+/// Sends a message, an edit of it, and a thread reply to the edit.
+///
+/// The edit is a relation's child, so the reply is accepted but not counted.
+async fn edit_with_reply(
+	services: &Services,
+	room: &RoomId,
+	sender: &UserId,
+	state_lock: &RoomMutexGuard,
+) -> Result<OwnedEventId> {
+	let text = json!({ "msgtype": "m.text", "body": "text" });
+	let target = send(services, room, sender, text.clone(), state_lock).await?;
+	let replace = json!({ "rel_type": "m.replace", "event_id": target });
+	let edit = json!({ "body": "* text", "m.new_content": text, "m.relates_to": replace });
+	let edit = send(services, room, sender, edit, state_lock).await?;
+	let thread = json!({ "rel_type": "m.thread", "event_id": edit });
+	let reply = json!({ "msgtype": "m.text", "body": "reply", "m.relates_to": thread });
+
+	send(services, room, sender, reply, state_lock).await?;
+
+	Ok(edit)
+}
+
+async fn redact(
+	services: &Services,
+	room: &RoomId,
+	sender: &UserId,
+	target: &EventId,
+	content: Value,
+	state_lock: &RoomMutexGuard,
+) -> Result<OwnedEventId> {
+	let builder = PduBuilder {
+		event_type: TimelineEventType::RoomRedaction,
+		content: Raw::new(&from_value(content)?)?,
+		redacts: Some(target.to_owned()),
+		..PduBuilder::default()
+	};
+
+	services
+		.timeline
+		.build_and_append_pdu(builder, sender, room, state_lock)
+		.await
+}
+
+async fn thread_summary(services: &Services, event_id: &EventId) -> Result<Value> {
+	let pdu_id = services.timeline.get_pdu_id(event_id).await?;
+	let pdu = services
+		.timeline
+		.get_pdu_json_from_id(&pdu_id)
+		.await?;
+
+	let summary = to_value(pdu)?["unsigned"]["m.relations"]["m.thread"].clone();
+
+	Ok(summary)
 }
 
 impl Wake for RetiredAtStateWrite {

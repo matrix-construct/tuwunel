@@ -32,8 +32,9 @@ use tuwunel_matrix::{
 
 pub(crate) use self::summary::thread_bundle_mut;
 use self::summary::{
-	counts_replies, omit_thread_latest, set_thread_count, set_thread_latest, thread_bundle,
-	thread_count, thread_latest, thread_reply_json, update_thread_bundle,
+	counts_replies, omit_thread_latest, remove_thread_bundle, set_thread_count,
+	set_thread_latest, thread_bundle, thread_count, thread_latest, thread_reply_json,
+	update_thread_bundle,
 };
 use crate::{
 	integrity::undecodable_as,
@@ -367,6 +368,48 @@ impl Service {
 		Some(RedactedRoot { id: root_id, pdu, emptied, activity })
 	}
 
+	/// Records the standing replies of a root its redaction let root a thread.
+	///
+	/// While the root was a relation's child its replies were accepted but not
+	/// recorded, so any summary it holds is dropped and each standing reply is
+	/// recorded again as it would have been on arrival. The walk reads every
+	/// relation row of the root, so the caller holds the room lock but no sequence
+	/// permit. A failed read leaves the replies recorded before it.
+	#[tracing::instrument(level = "debug", skip(self))]
+	pub(crate) async fn adopt_replies(&self, root_event_id: &EventId) -> Result {
+		let root_id = self
+			.services
+			.timeline
+			.get_pdu_id(root_event_id)
+			.await?;
+
+		let root = self
+			.services
+			.timeline
+			.get_pdu_json_from_id(&root_id)
+			.await?;
+
+		// An earlier server's summary, or one the redaction's own thread relation
+		// started, would count its replies a second time.
+		if thread_bundle(&root).is_some() {
+			self.services
+				.timeline
+				.replace_pdu(&root_id, &remove_thread_bundle(root))
+				.await?;
+		}
+
+		// Oldest first and one at a time: each reply rewrites the root, so the
+		// newest must be recorded last to end up as its latest.
+		self.walk_thread_replies(root_id, Direction::Forward, usize::MAX)
+			.try_for_each(async |(count, reply)| {
+				let reply_id = activity_key(root_id, count);
+
+				self.add_to_thread(root_event_id, reply_id, &reply)
+					.await
+			})
+			.await
+	}
+
 	pub fn threads_until<'a>(
 		&'a self,
 		user_id: &'a UserId,
@@ -691,6 +734,20 @@ pub(crate) fn thread_replies(
 	root_id: RawPduId,
 	limit: usize,
 ) -> impl Stream<Item = Result<(PduCount, Pdu)>> + Send + '_ {
+	self.walk_thread_replies(root_id, Direction::Backward, limit)
+}
+
+/// Walks a thread's unredacted replies in `dir` order.
+///
+/// It reads at most `limit` relation rows of the root, as
+/// [`Service::thread_replies`] does newest first.
+#[implement(Service)]
+fn walk_thread_replies(
+	&self,
+	root_id: RawPduId,
+	dir: Direction,
+	limit: usize,
+) -> impl Stream<Item = Result<(PduCount, Pdu)>> + Send + '_ {
 	let PduId { shortroomid, count } = root_id.into();
 
 	self.services
@@ -699,7 +756,7 @@ pub(crate) fn thread_replies(
 			shortroomid,
 			target: count,
 			from: None,
-			dir: Direction::Backward,
+			dir,
 			user_id: None,
 			limit,
 		})
@@ -939,6 +996,22 @@ fn unreadable_only(error: Error) -> Result {
 /// the child of a relation may not start a thread.
 pub(crate) fn may_root_thread(root: &impl Event) -> bool {
 	root.state_key().is_none() && !root.is_relation_child()
+}
+
+/// Whether redacting a stored event lets it root a thread it may not root now.
+///
+/// Redaction strips `m.relates_to`, so a relation's child that is no state event
+/// becomes a root, and the replies it already has were never recorded.
+pub(crate) fn roots_once_redacted(pdu: &CanonicalJsonObject) -> bool {
+	// Most redacted events relate to nothing, so they skip decoding the event.
+	let relates = pdu
+		.get("content")
+		.and_then(CanonicalJsonValue::as_object)
+		.is_some_and(|content| content.contains_key("m.relates_to"));
+
+	relates
+		&& Pdu::from_value(CanonicalJsonValue::Object(pdu.clone()))
+			.is_ok_and(|pdu| pdu.state_key().is_none() && pdu.is_relation_child())
 }
 
 fn is_thread_reply(pdu: &impl Event) -> bool {

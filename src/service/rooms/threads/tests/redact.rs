@@ -217,6 +217,74 @@ async fn redacting_uncounted_replies_keeps_the_count() -> Result {
 }
 
 #[tokio::test]
+async fn redacted_relation_child_counts_the_replies_it_roots() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let room = Room::new(&fixture.services).await?;
+	let [target, root, early, late] = ["target", "root", "early", "late"].map(id);
+
+	room.append(1, &target, text()).await?;
+	room.append(2, &root, edit(&target)).await?;
+
+	// An edit roots no thread, so its reply is accepted but not counted.
+	room.append(3, &early, thread(&root)).await?;
+	assert_eq!(room.count(&root).await?, Value::Null);
+
+	// Redaction strips the edit's relation, and its caller records the reply it has.
+	assert!(room.redact_pdu(&root).await?, "the redacted edit may root a thread");
+	assert_eq!(room.count(&root).await?, Value::Null);
+
+	let threads = &fixture.services.threads;
+
+	threads.adopt_replies(&root).await?;
+
+	assert_eq!(room.count(&root).await?, 1);
+	assert_eq!(room.listed().await?, [&*root]);
+
+	room.append(4, &late, thread(&root)).await?;
+	room.redact(&early).await?;
+
+	assert_eq!((room.count(&root).await?, room.latest(&root).await?), (json!(1), json!(late)));
+	assert_eq!(room.listed().await?, [&*root]);
+
+	room.redact(&late).await?;
+
+	let unlisted: [&EventId; 0] = [];
+
+	assert_eq!(room.listed().await?, unlisted);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn redacted_relation_child_drops_the_summary_it_held() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let room = Room::new(&fixture.services).await?;
+	let [target, root, first, second] = ["target", "root", "first", "second"].map(id);
+
+	room.append(1, &target, text()).await?;
+	room.append(2, &root, edit(&target)).await?;
+	room.append(3, &first, thread(&root)).await?;
+	room.append(4, &second, thread(&root)).await?;
+
+	// A summary an earlier version left on the edit, counting replies since gone.
+	let stale = json!({ "m.relations": { "m.thread": { "count": 3 } } });
+
+	room.set_unsigned(&root, &stale).await?;
+	room.redact(&root).await?;
+
+	// The replies are recorded oldest first, so the newest ends up as the latest.
+	assert_eq!((room.count(&root).await?, room.latest(&root).await?), (json!(2), json!(second)));
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn redacted_root_keeps_its_thread_summary() -> Result {
 	let Some(fixture) = fixture(Figment::new()).await? else {
 		return Ok(());
@@ -813,7 +881,21 @@ impl<'a> Room<'a> {
 		Ok((pdu_id, pdu))
 	}
 
+	/// Redact an event as `append_pdu` does.
+	///
+	/// A root the redaction lets start a thread then records its replies.
 	async fn redact(&self, target: &EventId) -> Result {
+		if !self.redact_pdu(target).await? {
+			return Ok(());
+		}
+
+		self.0.threads.adopt_replies(target).await
+	}
+
+	/// Redact an event without recording the replies it leaves to its caller.
+	///
+	/// Returns whether the target now roots a thread with replies to record.
+	async fn redact_pdu(&self, target: &EventId) -> Result<bool> {
 		let Self(services, shortroomid, room) = self;
 		let content = json!({ "redacts": target });
 		let reason = event(room, event_id!("$redaction:localhost"), "m.room.redaction", content);

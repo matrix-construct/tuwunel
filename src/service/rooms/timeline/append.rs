@@ -7,7 +7,7 @@
 use std::{collections::btree_map::Entry, sync::Arc};
 
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, RoomId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, RoomId, UserId,
 	events::{
 		TimelineEventType,
 		receipt::ReceiptThread,
@@ -30,7 +30,6 @@ use tuwunel_database::Json;
 use tuwunel_matrix::{
 	event::Event,
 	pdu::{PduCount, PduEvent, PduId, RawPduId},
-	room_version,
 };
 
 use super::{ExtractBody, ExtractRelatesTo, ExtractRelatesToEventId, RoomMutexGuard, bias_count};
@@ -273,7 +272,18 @@ where
 	}
 
 	drop(next_count);
-	effects?;
+	let adopts = effects?;
+
+	// Its walk reads every relation row of the root, so it waits until the
+	// redaction's count has retired.
+	if let Some(root_event_id) = adopts {
+		self.services
+			.threads
+			.adopt_replies(&root_event_id)
+			.await
+			.log_err()
+			.ok();
+	}
 
 	self.services
 		.appservice
@@ -452,7 +462,11 @@ async fn append_pdu_effects(
 		replaced_join,
 	}: Appended<'_>,
 	state_lock: &RoomMutexGuard,
-) -> Result {
+) -> Result<Option<OwnedEventId>> {
+	let adopts = self
+		.append_redaction_effects(pdu, shortroomid, state_lock)
+		.await?;
+
 	match *pdu.kind() {
 		| TimelineEventType::RoomMember =>
 			self.append_member_effects(pdu, replaced_join, count)
@@ -466,28 +480,6 @@ async fn append_pdu_effects(
 					.search
 					.index_pdu(shortroomid, &pdu_id, &topic);
 			},
-		| TimelineEventType::RoomRedaction => {
-			let room_version = self
-				.services
-				.state
-				.get_room_version(pdu.room_id())
-				.await?;
-
-			let room_rules = room_version::rules(&room_version)?;
-
-			let redacts_id = pdu.redacts_id(&room_rules);
-
-			if let Some(redacts_id) = &redacts_id
-				&& self
-					.services
-					.state_accessor
-					.user_can_redact(redacts_id, pdu.sender(), pdu.room_id(), false)
-					.await?
-			{
-				self.redact_pdu(redacts_id, pdu, shortroomid, state_lock)
-					.await?;
-			}
-		},
 		| _ => {},
 	}
 
@@ -546,7 +538,47 @@ async fn append_pdu_effects(
 		}
 	}
 
-	Ok(())
+	Ok(adopts)
+}
+
+/// Applies a redaction event to the event it redacts, when its sender may.
+///
+/// Returns the redacted event when it now roots a thread, for the caller to
+/// record its standing replies once the redaction's count has retired.
+#[implement(super::Service)]
+async fn append_redaction_effects(
+	&self,
+	pdu: &PduEvent,
+	shortroomid: ShortRoomId,
+	state_lock: &RoomMutexGuard,
+) -> Result<Option<OwnedEventId>> {
+	if *pdu.kind() != TimelineEventType::RoomRedaction {
+		return Ok(None);
+	}
+
+	let room_rules = self
+		.services
+		.state
+		.get_room_version_rules(pdu.room_id())
+		.await?;
+
+	let Some(redacts_id) = pdu.redacts_id(&room_rules) else {
+		return Ok(None);
+	};
+
+	let may_redact = self
+		.services
+		.state_accessor
+		.user_can_redact(&redacts_id, pdu.sender(), pdu.room_id(), false)
+		.await?;
+
+	if !may_redact {
+		return Ok(None);
+	}
+
+	self.redact_pdu(&redacts_id, pdu, shortroomid, state_lock)
+		.await
+		.map(|adopts| adopts.then_some(redacts_id))
 }
 
 /// Record the membership transition an `m.room.member` event carries.

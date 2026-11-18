@@ -159,7 +159,7 @@ fn bundle_count(thread: &CanonicalJsonObject) -> Option<UInt> {
 		.and_then(|count| count.try_into().ok())
 }
 
-fn remove_thread_bundle(mut root: CanonicalJsonObject) -> CanonicalJsonObject {
+pub(super) fn remove_thread_bundle(mut root: CanonicalJsonObject) -> CanonicalJsonObject {
 	let Some(unsigned) = root
 		.get_mut("unsigned")
 		.and_then(CanonicalJsonValue::as_object_mut)

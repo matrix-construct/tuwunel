@@ -24,7 +24,7 @@ use crate::{
 	integrity::leading_json,
 	rooms::{
 		short::ShortRoomId,
-		threads::{thread_bundle_mut, thread_root},
+		threads::{roots_once_redacted, thread_bundle_mut, thread_root},
 		timeline::RoomMutexGuard,
 	},
 };
@@ -58,7 +58,9 @@ pub(crate) enum Restoration {
 /// removed from its root's `m.thread` summary (the count, and the latest event
 /// when it was the latest) in the same write as the accepted row, which also
 /// takes a thread left with no replies off the thread list; a redacted thread
-/// root keeps its summary.
+/// root keeps its summary. Returns whether redaction let a relation's child
+/// root a thread, for the caller to record its standing replies with
+/// `adopt_replies` once it holds no sequence permit.
 #[implement(super::Service)]
 #[tracing::instrument(name = "redact", level = "debug", skip(self))]
 pub async fn redact_pdu<Pdu: Event + Send + Sync>(
@@ -67,7 +69,7 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 	reason: &Pdu,
 	shortroomid: ShortRoomId,
 	state_lock: &RoomMutexGuard,
-) -> Result {
+) -> Result<bool> {
 	let Ok(pdu_id) = self.get_pdu_id(event_id).await else {
 		// If event does not exist, just noop
 		// TODO this is actually wrong!
@@ -75,7 +77,7 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 			.sticky
 			.mark_redacted(shortroomid, event_id);
 
-		return Ok(());
+		return Ok(false);
 	};
 
 	let pdu = self
@@ -129,6 +131,7 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 
 	// Read before redaction strips `m.relates_to`.
 	let root_event_id = pdu.get("content").and_then(thread_root);
+	let adopts = roots_once_redacted(&pdu);
 	let keep_thread = root_event_id.as_deref() != Some(event_id);
 	let pdu = redact_keeping_thread(
 		pdu,
@@ -149,6 +152,7 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 
 	self.replace_redacted_pdu(&pdu_id, &pdu, root)
 		.await
+		.map(|()| adopts)
 }
 
 /// Records an applied redaction on an accepted PDU that does not carry it.
