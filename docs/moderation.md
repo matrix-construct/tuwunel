@@ -265,12 +265,21 @@ specification requires. If state resolution keeps the soft-failed event, it
 becomes current state. Clients receive it through the `state` of their sync
 responses, though it still never enters the timeline.
 
-The soft-fail verdict is not permanent. When federation supplies the event
-again, Tuwunel re-checks it if the retry interval has elapsed. That interval
-widens from five minutes to a day. If the event passes, Tuwunel clears the
-verdict. An explicit policy-server refusal stays cached for 24 hours.
-Re-checks within that window use the cached refusal. Tuwunel asks the policy
-server again only after it expires.
+The soft-fail verdict is not permanent. When the event arrives again over
+federation, Tuwunel re-checks it if the retry interval has elapsed. That
+interval widens from five minutes to a day. If the event passes, Tuwunel
+clears the verdict. An explicit policy-server refusal stays cached for 24
+hours. Re-checks within that window use the cached refusal. Tuwunel asks the
+policy server again only after it expires.
+
+Backfill, which fetches older room history, never re-checks a stored
+soft-failed event, regardless of how much time has passed. The event stays
+out of the timeline until its soft-fail verdict is cleared.
+
+If the policy server refuses a backfilled event, Tuwunel marks that event
+soft-failed too. If the policy server gives no verdict, Tuwunel leaves the
+event unmarked and asks again the next time it receives the event through
+backfill.
 
 To clear the stored verdicts for a room, run
 `!admin rooms clear-soft-failed-events <room>` in the admin room. This also
