@@ -1,6 +1,9 @@
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, RoomId, RoomVersionId,
-	api::error::ErrorKind, events::room::member::RoomMemberEventContent, room_id,
+	api::error::ErrorKind,
+	event_id,
+	events::{StateEventType, room::member::RoomMemberEventContent},
+	room_id, user_id,
 };
 use serde_json::{Value, from_value, json, to_vec, value::to_raw_value};
 use tuwunel_core::{Error, Result, config::Figment};
@@ -9,7 +12,10 @@ use tuwunel_matrix::{event::gen_event_id, room_version::rules as room_version_ru
 use super::merge_member_content;
 use crate::{
 	Services,
-	test_utils::{keyed_fixture, pdu_id, signed_state, with_field},
+	test_utils::{
+		keyed_fixture, pdu_id, pdu_json, save_room_state, signed_state, store_outlier,
+		with_field, with_state_key,
+	},
 };
 
 const MAX_BYTES: usize = 4096;
@@ -256,6 +262,7 @@ async fn a_send_join_event_needs_its_auth_chain() -> Result {
 		.membership
 		.ingest_send_join_events(
 			room_id,
+			user_id!("@bob:localhost"),
 			&version,
 			&room_version_rules(&version)?,
 			&[],
@@ -264,6 +271,48 @@ async fn a_send_join_event_needs_its_auth_chain() -> Result {
 		.await?;
 	assert!(state.values().any(|id| id == &name_id));
 	assert!(services.timeline.pdu_exists(&name_id).await);
+	Ok(())
+}
+
+#[tokio::test]
+async fn send_join_keeps_a_local_leave_missing_from_the_response() -> Result {
+	let Some(fixture) = keyed_fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+	let services = &fixture.services;
+	let room_id = room_id!("!room:localhost");
+	let alice = user_id!("@alice:localhost");
+	let leave = event_id!("$leave");
+	let member = StateEventType::RoomMember;
+	let content = json!({ "membership": "leave" });
+	let leave_pdu = pdu_json(leave, room_id, alice, &member, &content);
+	let entry = store_outlier(
+		services,
+		&member,
+		alice.as_str(),
+		leave,
+		with_state_key(leave_pdu, alice.as_str()),
+	)
+	.await?;
+	save_room_state(services, room_id, std::sync::Arc::new([entry].into())).await?;
+	let key = services
+		.short
+		.get_shortstatekey(&member, alice.as_str())
+		.await?;
+	let [(_, create), (_, join)] = room(services, room_id)?;
+	let version = RoomVersionId::V11;
+	let state = services
+		.membership
+		.ingest_send_join_events(
+			room_id,
+			user_id!("@bob:localhost"),
+			&version,
+			&room_version_rules(&version)?,
+			&[],
+			&[to_raw_value(&create)?, to_raw_value(&join)?],
+		)
+		.await?;
+	assert_eq!(state.get(&key).map(AsRef::as_ref), Some(leave));
 	Ok(())
 }
 
@@ -278,6 +327,7 @@ async fn ingest(services: &Services, room_id: &RoomId, events: &[Value]) -> Resu
 		.membership
 		.ingest_send_join_events(
 			room_id,
+			user_id!("@bob:localhost"),
 			&version,
 			&room_version_rules(&version)?,
 			&auth_chain,
