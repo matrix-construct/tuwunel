@@ -94,7 +94,7 @@ pub(super) async fn send_events_dest_federation(
 	let result = self
 		.services
 		.federation
-		.execute_on(&self.services.client.sender, &server, request)
+		.execute_on(&self.services.client.sender, &server, request, None)
 		.await;
 
 	result
