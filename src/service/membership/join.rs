@@ -8,8 +8,8 @@ use std::{
 
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join};
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedServerName, OwnedUserId, RoomId,
-	RoomOrAliasId, RoomVersionId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedServerName, OwnedUserId,
+	RoomId, RoomOrAliasId, RoomVersionId, UserId,
 	api::{error::ErrorKind, federation},
 	canonical_json::to_canonical_value,
 	events::{
@@ -402,9 +402,19 @@ async fn join_remote(
 		)
 		.await;
 
-	let create = self.services.event_handler.known_create_id(room_id).await?;
+	let create = self
+		.services
+		.event_handler
+		.known_create_id(room_id)
+		.await?;
 	let state = self
-		.ingest_send_join_state(room_id, &room_version_id, &room_version_rules, &response.state, create.as_deref())
+		.ingest_send_join_state(
+			room_id,
+			&room_version_id,
+			&room_version_rules,
+			&response.state,
+			create.as_deref(),
+		)
 		.await;
 
 	self.ingest_send_join_auth_chain(
@@ -722,9 +732,12 @@ fn verified_pdus<'a>(
 ) -> impl Stream<Item = VerifiedPdu> + Send + 'a {
 	pdus.iter()
 		.stream()
-		.wide_then(async move |pdu| {
-			let verified = self.verified_pdu(room_id, room_version_id, room_version_rules, pdu).await?;
-			self.services.event_handler.check_event_provenance(&verified.1, room_version_rules, create)?;
+		.wide_then(|pdu| self.verified_pdu(room_id, room_version_id, room_version_rules, pdu))
+		.map(move |result| -> Result<_> {
+			let verified = result?;
+			self.services
+				.event_handler
+				.check_event_provenance(&verified.1, room_version_rules, create)?;
 			Ok(verified)
 		})
 		.inspect_err(move |error| debug_error!(?error, list, "Invalid send_join event."))
@@ -743,14 +756,21 @@ async fn ingest_send_join_auth_chain(
 	info!(events = auth_chain.len(), "Going through send_join response auth_chain...");
 	let cork = self.services.db.cork_and_flush();
 
-	self.verified_pdus(room_id, room_version_id, room_version_rules, auth_chain, "auth_chain", create)
-		.for_each(async |(event_id, _, value, verified)| {
-			self.services
-				.timeline
-				.add_verified_outlier(&event_id, &value, &verified)
-				.await;
-		})
-		.await;
+	self.verified_pdus(
+		room_id,
+		room_version_id,
+		room_version_rules,
+		auth_chain,
+		"auth_chain",
+		create,
+	)
+	.for_each(async |(event_id, _, value, verified)| {
+		self.services
+			.timeline
+			.add_verified_outlier(&event_id, &value, &verified)
+			.await;
+	})
+	.await;
 
 	drop(cork);
 }
