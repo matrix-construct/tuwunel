@@ -19,7 +19,7 @@ use reqwest::{
 	header::{ACCEPT, CONTENT_TYPE},
 };
 use ruma::{
-	UserId,
+	OwnedUserId, UserId,
 	api::error::{ErrorKind, LimitExceededErrorData},
 };
 use serde::Serialize;
@@ -87,6 +87,39 @@ pub fn get_server(&self) -> Result<&Server> {
 	self.server
 		.as_deref()
 		.ok_or_else(|| err!(Request(Unrecognized("OIDC server not configured"))))
+}
+
+/// Parse an identity provider's candidate and check local username policy.
+/// Existing identity bindings do not go through candidate selection.
+#[implement(Service)]
+pub async fn candidate_user_id(&self, username: &str) -> Result<OwnedUserId> {
+	let server = self.services.globals.server_name();
+	let user_id = UserId::parse_with_server_name(username, server)
+		.map_err(|e| err!(Request(InvalidUsername("Invalid username: {e}"))))?;
+	user_id
+		.validate_strict()
+		.map_err(|e| err!(Request(InvalidUsername("Invalid username: {e}"))))?;
+
+	if self
+		.services
+		.config
+		.registration
+		.forbidden_usernames
+		.is_match(username)
+	{
+		return Err!(Request(Forbidden("Username forbidden.")));
+	}
+
+	if self
+		.services
+		.appservice
+		.is_exclusive_user_id(&user_id)
+		.await
+	{
+		return Err!(Request(Exclusive("Username reserved by an appservice.")));
+	}
+
+	Ok(user_id)
 }
 
 /// Cap on the rate-limit table; fully refilled buckets are pruned past it.
