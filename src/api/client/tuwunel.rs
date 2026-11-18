@@ -7,8 +7,8 @@ use axum::{
 	response::IntoResponse,
 };
 use axum_extra::headers::{Authorization, HeaderMapExt, authorization::Bearer};
-use futures::{FutureExt, Stream, StreamExt, pin_mut};
-use ruma::{OwnedRoomId, OwnedUserId, RoomId, ServerName};
+use futures::{Stream, StreamExt, pin_mut};
+use ruma::{OwnedRoomId, OwnedUserId, ServerName};
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{Err, Result};
 use tuwunel_service::appservice::RegistrationInfo;
@@ -126,14 +126,22 @@ pub(crate) async fn tuwunel_appservice_shared_rooms(
 		authorize(appservice.as_ref(), query.as_ref().ok(), services.globals.server_name())?;
 
 	let state_cache = &services.state_cache;
+	let with = &with;
 	let memberships = state_cache
 		.rooms_joined(&user_id)
-		.map(|room_id| {
-			read_with_membership(
-				state_cache.is_invited(&with, room_id),
-				state_cache.is_joined(&with, room_id),
+		// Own each id before reading ahead. `rooms_joined` yields keys borrowed
+		// from the database iterator's buffer, which the next item overwrites;
+		// with up to SHARED_ROOMS_READ_AHEAD reads in flight, a borrowed id
+		// named whichever room the iterator was on by then: answers came back
+		// with one room repeated and real shared rooms missing.
+		.map(ToOwned::to_owned)
+		.map(|room_id: OwnedRoomId| async move {
+			let membership = read_with_membership(
+				state_cache.is_invited(with, &room_id),
+				state_cache.is_joined(with, &room_id),
 			)
-			.map(move |membership| (room_id, membership))
+			.await;
+			(room_id, membership)
 		})
 		.buffered(SHARED_ROOMS_READ_AHEAD)
 		// Boxing pins the borrowed lifetimes down; without it the handler
@@ -227,9 +235,10 @@ where
 /// order, keeps the rooms R is joined or invited to, and stops after `cap`
 /// kept rooms. `limited` is true only when a further qualifying room exists
 /// beyond the cap, so an answer is never cut short without saying so.
-async fn collect_shared_rooms<'a, S>(memberships: S, cap: usize) -> SharedRoomsResponse
+async fn collect_shared_rooms<R, S>(memberships: S, cap: usize) -> SharedRoomsResponse
 where
-	S: Stream<Item = (&'a RoomId, Option<WithMembership>)> + Send,
+	R: Into<OwnedRoomId>,
+	S: Stream<Item = (R, Option<WithMembership>)> + Send,
 {
 	pin_mut!(memberships);
 
@@ -246,7 +255,7 @@ where
 		}
 
 		rooms.push(SharedRoom {
-			room_id: room_id.to_owned(),
+			room_id: room_id.into(),
 			with_membership,
 		});
 	}
@@ -258,8 +267,10 @@ where
 mod tests {
 	use std::{cell::Cell, collections::HashMap};
 
-	use futures::{future::ready, stream};
-	use ruma::{OwnedServerName, api::appservice::Registration, owned_room_id, server_name};
+	use futures::{FutureExt, future::ready, stream};
+	use ruma::{
+		OwnedServerName, RoomId, api::appservice::Registration, owned_room_id, server_name,
+	};
 
 	use super::*;
 
