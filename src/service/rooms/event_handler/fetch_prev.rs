@@ -325,8 +325,7 @@ async fn land_missing_event(
 	eval @ Eval { room_id, room_version, .. }: Eval<'_>,
 	pdu: &RawJsonValue,
 ) -> Result {
-	let value: CanonicalJsonObject = serde_json::from_str(pdu.get())
-		.map_err(|e| err!(BadServerResponse("missing-events pdu is not canonical json: {e}")))?;
+	let value = parse_missing_event(pdu)?;
 
 	value
 		.get("room_id")
@@ -349,3 +348,12 @@ async fn land_missing_event(
 		.await
 		.map(|_| ())
 }
+
+fn parse_missing_event(pdu: &RawJsonValue) -> Result<CanonicalJsonObject> {
+	crate::fetcher::check_served_pdu_size(pdu.get().len())?;
+	serde_json::from_str(pdu.get())
+		.map_err(|e| err!(BadServerResponse("missing-events pdu is not canonical json: {e}")))
+}
+
+#[cfg(test)]
+mod size_tests;
