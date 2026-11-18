@@ -9,8 +9,8 @@
 //! extension, a later joiner fetching a sticky event the room's history
 //! visibility hides, transaction replay, both membership types (the legacy call
 //! member and MSC4143's `rtc.member`), delayed sends fired by action and by
-//! timer, ignored senders, lazy members, expiry and redaction, and a withheld
-//! event weighed again.
+//! timer, ignored senders, lazy members, expiry and redaction, an erased
+//! sender, a sticky thread root's bundle, and a withheld event weighed again.
 
 use std::time::Duration;
 
@@ -35,6 +35,7 @@ use self::{
 	federation::send,
 	fixture::boot,
 	require::require,
+	served::{erased_sender_leaves_the_section, sticky_root_bundles_only_seen_replies},
 	sign::sign,
 	sync::joined_room,
 };
@@ -73,6 +74,9 @@ mod require;
 
 #[path = "client/sync.rs"]
 mod sync;
+
+#[path = "sticky_events/served.rs"]
+mod served;
 
 const ALICE: &str = "sticky-events-alice-token-00000000";
 const BOB: &str = "sticky-events-bob-token-0000000000";
@@ -190,6 +194,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	ignored_sender_is_left_out(&alice, &bob, &bob_id, &alice_id, &room, &early).await?;
 	departed_member_loses_sight(&carol, &room, &early).await?;
 	lapsed_and_redacted_events_lose_stickiness(&alice, &dave, &room, &early).await?;
+	erased_sender_leaves_the_section(services, base, &alice, &room).await?;
+	sticky_root_bundles_only_seen_replies(services, base, &alice, &bob, &bob_id, &room).await?;
 
 	let withheld = Withheld {
 		services,

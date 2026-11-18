@@ -20,7 +20,7 @@ use tuwunel_core::{
 	utils::{
 		BoolExt,
 		result::{LogErr, NotFound},
-		stream::WidebandExt,
+		stream::{ReadyExt, WidebandExt},
 		time::now_millis,
 	},
 	warn,
@@ -193,7 +193,9 @@ async fn joined_since(
 /// timeline order (MSC4354).
 ///
 /// A sender the user ignores is left out whatever the event type, and each
-/// event is readied for the user as a timeline event is. A room whose short id
+/// event is readied for the user as a timeline event is, its bundled
+/// aggregations included. An event the user's view prunes, as an erased
+/// sender's is, has lost its stickiness and is left out. A room whose short id
 /// cannot be read offers none, logged.
 #[tracing::instrument(level = "trace", skip_all)]
 async fn load_sticky_events(
@@ -225,6 +227,15 @@ async fn load_sticky_events(
 				.is_false()
 				.then(|| (count, pdu.served_to(Some(sender_user))))
 		})
+		.wide_then(async |(count, pdu)| {
+			let pdu = services
+				.pdu_metadata
+				.bundle_aggregations(sender_user, pdu)
+				.await;
+
+			(count, pdu)
+		})
+		.ready_filter(|(_, pdu)| pdu.sticky_until(now).is_some())
 		.collect()
 		.await
 }
