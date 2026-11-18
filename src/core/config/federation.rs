@@ -257,9 +257,10 @@ pub struct History {
 	/// reloadable: yes
 	/// default: 1024
 	///
-	/// The auth chain walks of one event or one state lookup together fetch at
-	/// most this many times 64 KiB of events. Raising this limit increases
-	/// recovery work; it is not a count of network requests.
+	/// The auth chain walks started for one incoming event, including those for
+	/// its missing prior events, or for one state lookup together fetch at most
+	/// this many times 64 KiB of events. Raising this limit increases recovery
+	/// work; it is not a count of network requests.
 	/// legacy: max_fetch_prev_events
 	#[serde(default = "default_max_fetch_prev_events")]
 	pub max_fetch_prev_events: u16,

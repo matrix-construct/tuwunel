@@ -15,7 +15,7 @@ use tuwunel_matrix::{
 	room_version,
 };
 
-use super::eval::Eval;
+use super::{eval::Eval, fetch_auth::AuthFetchBudget};
 
 /// The auth events of one event, each read once from storage.
 ///
@@ -53,6 +53,7 @@ pub(super) async fn handle_outlier_pdu(
 		..
 	}: Eval<'_>,
 	mut pdu_json: CanonicalJsonObject,
+	budget: &AuthFetchBudget,
 ) -> Result<(PduEvent, CanonicalJsonObject)> {
 	debug!(?event_id, ?auth_events_known, %recursion_level, "handle outlier");
 
@@ -115,7 +116,7 @@ pub(super) async fn handle_outlier_pdu(
 		//    the auth events are also rejected "due to auth events"
 		// NOTE: Step 5 is not applied anymore because it failed too often
 		debug!("Fetching auth events");
-		let fetch = self.fetch_auth(eval, event.auth_events());
+		let fetch = self.fetch_auth(eval, event.auth_events(), budget);
 
 		cfg_select! {
 			debug_assertions => Box::pin(fetch).await, // size firewall

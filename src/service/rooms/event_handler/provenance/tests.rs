@@ -484,9 +484,11 @@ async fn admit(
 		auth_events_known: true,
 	};
 
+	let budget = services.event_handler.auth_fetch_budget();
+
 	services
 		.event_handler
-		.handle_outlier_pdu(eval, from_value(event)?)
+		.handle_outlier_pdu(eval, from_value(event)?, &budget)
 		.await
 }
 

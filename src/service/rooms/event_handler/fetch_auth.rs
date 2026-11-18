@@ -31,8 +31,8 @@ use crate::fetcher::{Op, Opts};
 type Fetched = Vec<(PduEvent, Option<CanonicalJsonObject>)>;
 
 /// Each root walk has a count limit; all roots in a lookup share a byte limit.
-struct AuthFetchBudget {
-	limit: usize,
+pub(super) struct AuthFetchBudget {
+	pub(super) limit: usize,
 	remaining: AtomicUsize,
 }
 
@@ -59,6 +59,18 @@ impl AuthFetchBudget {
 			.map(|_| ())
 			.map_err(|_| err!(Request(TooLarge("Auth chain fetch byte limit reached"))))
 	}
+}
+
+#[implement(super::Service)]
+pub(super) fn auth_fetch_budget(&self) -> AuthFetchBudget {
+	AuthFetchBudget::new(
+		self.services
+			.server
+			.config
+			.federation
+			.history
+			.max_fetch_prev_events,
+	)
 }
 
 /// Find the event and auth it. Once the event is validated (steps 1 - 8)
@@ -90,24 +102,15 @@ pub(super) async fn fetch_auth<'a, Events>(
 		..
 	}: Eval<'_>,
 	events: Events,
+	budget: &AuthFetchBudget,
 ) -> Result<Fetched>
 where
 	Events: Iterator<Item = &'a EventId> + Clone + Send,
 {
-	// Every walk keeps the events it fetched until all walks have ended, so they
-	// share one bound on the bytes they hold.
-	let budget = AuthFetchBudget::new(
-		self.services
-			.server
-			.config
-			.federation
-			.history
-			.max_fetch_prev_events,
-	);
 	let events_with_auth_events: Vec<_> = events
 		.stream()
 		.broad_then(|event_id| {
-			self.fetch_auth_chain(origin, room_id, event_id, room_version, &budget)
+			self.fetch_auth_chain(origin, room_id, event_id, room_version, budget)
 		})
 		.try_collect()
 		.debug_boxed() // size firewall
@@ -128,7 +131,7 @@ where
 				pdus.push((local_pdu, None));
 			}
 
-			self.admit_chain(eval, &id, events_in_reverse_order, pdus)
+			self.admit_chain(eval, &id, events_in_reverse_order, budget, pdus)
 				.await
 		})
 		.await;
@@ -254,6 +257,7 @@ async fn admit_chain(
 	eval: Eval<'_>,
 	event_id: &EventId,
 	chain_in_reverse_order: Vec<(OwnedEventId, Vec<u8>)>,
+	budget: &AuthFetchBudget,
 	pdus: Fetched,
 ) -> Fetched {
 	chain_in_reverse_order
@@ -263,7 +267,7 @@ async fn admit_chain(
 		.filter_map(async |(next_id, pdu_json)| {
 			let requested = *next_id == *event_id;
 
-			self.admit_fetched(eval, &next_id, pdu_json)
+			self.admit_fetched(eval, &next_id, pdu_json, budget)
 				.map(|admitted| admitted.filter(|_| requested))
 				.await
 		})
@@ -286,6 +290,7 @@ async fn admit_fetched(
 	eval @ Eval { recursion_level, .. }: Eval<'_>,
 	event_id: &EventId,
 	pdu_json: Vec<u8>,
+	budget: &AuthFetchBudget,
 ) -> Option<(PduEvent, CanonicalJsonObject)> {
 	if self
 		.is_suppressed(Context::Auth, event_id, Duration::from_mins(5)..Duration::from_hours(24))
@@ -302,7 +307,9 @@ async fn admit_fetched(
 		..eval
 	};
 
-	let admitted = self.admit_outlier(fetched, pdu_json).await;
+	let admitted = self
+		.admit_outlier(fetched, pdu_json, budget)
+		.await;
 
 	match admitted {
 		| Some(_) => self.record_success(Context::Auth, event_id).await,
@@ -319,11 +326,12 @@ async fn admit_outlier<'a>(
 	&'a self,
 	eval: Eval<'a>,
 	pdu_json: Vec<u8>,
+	budget: &'a AuthFetchBudget,
 ) -> Option<(PduEvent, CanonicalJsonObject)> {
 	let admitted = match serde_json::from_slice(&pdu_json) {
 		| Ok(value) => {
 			drop(pdu_json);
-			self.handle_outlier_pdu(eval, value).await
+			self.handle_outlier_pdu(eval, value, budget).await
 		},
 		| Err(error) => Err(error.into()),
 	};
