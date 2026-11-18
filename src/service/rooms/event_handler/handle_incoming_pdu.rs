@@ -17,6 +17,7 @@ use tuwunel_core::{
 		future::ReadyEqExt,
 		result::NotFound,
 		stream::{IterStream, TryBroadbandExt, TryReadyExt},
+		time::now_millis,
 	},
 	warn,
 };
@@ -207,7 +208,10 @@ pub async fn handle_incoming_pdu<'a>(
 		.await;
 
 	// An application service can backdate an event at the tip of the DAG.
-	if gapped && incoming_pdu.origin_server_ts() < first_normal_ts {
+	let old = gapped && incoming_pdu.origin_server_ts() < first_normal_ts;
+
+	// MSC4354: a resident server pushes a joiner sticky events older than its join.
+	if old && incoming_pdu.sticky_until(now_millis()).is_none() {
 		debug!(
 			origin_server_ts = ?incoming_pdu.origin_server_ts(),
 			?first_normal_ts,
