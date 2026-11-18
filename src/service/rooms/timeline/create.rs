@@ -53,6 +53,7 @@ pub async fn create_hash_and_sign_event(
 		state_key,
 		redacts,
 		timestamp,
+		sticky,
 	} = pdu_builder;
 
 	let prev_events = self
@@ -145,6 +146,7 @@ pub async fn create_hash_and_sign_event(
 		depth,
 		redacts,
 		unsigned,
+		sticky,
 		hashes: EventHash::default(),
 		prev_events,
 		auth_events: auth_events

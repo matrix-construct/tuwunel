@@ -7,7 +7,7 @@ use ruma::{
 use serde::Deserialize;
 use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
 
-use super::{Content, StateKey};
+use super::{Content, StateKey, Sticky};
 
 /// Collects the initial fields needed to build and append a PDU.
 ///
@@ -49,6 +49,13 @@ pub struct Builder {
 	/// An absent value uses the current time when the PDU is built. Ordinary
 	/// callers should leave this field unset.
 	pub timestamp: Option<MilliSecondsSinceUnixEpoch>,
+
+	/// MSC4354 sticky object for the new event.
+	///
+	/// Callers bound the duration to an hour before setting it, so every
+	/// client reading the event treats it as sticky.
+	#[serde(default)]
+	pub sticky: Option<Sticky>,
 }
 
 impl Default for Builder {
@@ -60,6 +67,7 @@ impl Default for Builder {
 			state_key: None,
 			redacts: None,
 			timestamp: None,
+			sticky: None,
 		}
 	}
 }
@@ -127,6 +135,10 @@ impl fmt::Debug for Builder {
 
 		if let Some(timestamp) = self.timestamp.as_ref() {
 			d.field("ts", timestamp);
+		}
+
+		if let Some(sticky) = self.sticky.as_ref() {
+			d.field("sticky", sticky);
 		}
 
 		if let Some(unsigned) = self.unsigned.as_ref() {

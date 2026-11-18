@@ -12,6 +12,7 @@ mod msgtype;
 mod redact;
 mod relation;
 pub mod state_key;
+mod sticky;
 mod type_ext;
 mod unsigned;
 
@@ -27,6 +28,7 @@ use serde::Deserialize;
 use serde_json::{Value as JsonValue, value::RawValue as RawJsonValue};
 use tuwunel_core::{Result, utils, utils::BoolExt};
 
+pub(crate) use self::sticky::deserialize_lenient as deserialize_sticky;
 pub use self::{
 	filter::{Matches, trim_event_fields},
 	format::{Owned, Ref},
@@ -34,11 +36,14 @@ pub use self::{
 	msgtype::MsgType,
 	relation::RelationTypeEqual,
 	state_key::{StateKey, TypeStateKey},
+	sticky::{STICKY_DURATION_MAX, STICKY_KEY, STICKY_TTL_KEY, Sticky},
 	type_ext::TypeExt,
 };
 use self::{
-	format::to_sync_message_like_without_unsigned, msgtype::content_msgtype,
+	format::to_sync_message_like_without_unsigned,
+	msgtype::content_msgtype,
 	relation::has_rel_type,
+	sticky::{event_remaining, event_until},
 };
 use super::pdu::Pdu;
 
@@ -80,7 +85,7 @@ pub trait Event: Clone + Debug + Send + Sync {
 		T: From<Owned<Self>>,
 		Self: Sized,
 	{
-		Owned(self).into()
+		Owned(self, None).into()
 	}
 
 	/// Serialize into a Ruma JSON format
@@ -90,7 +95,62 @@ pub trait Event: Clone + Debug + Send + Sync {
 		T: From<Ref<'a, Self>>,
 		Self: Sized + 'a,
 	{
-		Ref(self).into()
+		Ref(self, None).into()
+	}
+
+	/// Serialize into a Ruma JSON format, consuming, with MSC4354 stickiness
+	/// judged at `now`.
+	///
+	/// A response that selected sticky events at `now` formats them at the same
+	/// instant, so none it selected goes out without its remaining time.
+	#[inline]
+	fn into_format_at<T>(self, now: u64) -> T
+	where
+		T: From<Owned<Self>>,
+		Self: Sized,
+	{
+		Owned(self, Some(now)).into()
+	}
+
+	/// Serialize into a Ruma JSON format, with MSC4354 stickiness judged at
+	/// `now`.
+	///
+	/// A response that selected sticky events at `now` formats them at the same
+	/// instant, so none it selected goes out without its remaining time.
+	#[inline]
+	fn to_format_at<'a, T>(&'a self, now: u64) -> T
+	where
+		T: From<Ref<'a, Self>>,
+		Self: Sized + 'a,
+	{
+		Ref(self, Some(now)).into()
+	}
+
+	/// The instant, in milliseconds since the epoch, at which this event stops
+	/// being sticky, or `None` when it is not sticky at `now` (MSC4354).
+	///
+	/// Stickiness runs from the event's own timestamp for at most an hour. An
+	/// event dated more than five minutes past `now` is not sticky, so a forged
+	/// timestamp gains no more than that.
+	#[inline]
+	fn sticky_until(&self, now: u64) -> Option<u64>
+	where
+		Self: Sized,
+	{
+		event_until(self, now)
+	}
+
+	/// The milliseconds this event stays sticky past `now`, as served to
+	/// clients, or `None` when it is not sticky (MSC4354).
+	///
+	/// The value is the server's own remaining time, bounded by an hour, and is
+	/// never zero.
+	#[inline]
+	fn sticky_remaining(&self, now: u64) -> Option<u64>
+	where
+		Self: Sized,
+	{
+		event_remaining(self, now)
 	}
 
 	/// Serializes a borrowed sync message-like event without unsigned data.
@@ -367,6 +427,12 @@ pub trait Event: Clone + Debug + Send + Sync {
 
 	/// Metadata container; peer-trusted only.
 	fn unsigned(&self) -> Option<&RawJsonValue>;
+
+	/// The event's MSC4354 `sticky` object, as it carries it.
+	///
+	/// The object alone says nothing about whether the event is still sticky;
+	/// `sticky_until` and `sticky_remaining` answer that at a given instant.
+	fn sticky(&self) -> Option<Sticky>;
 
 	//#[deprecated]
 	/// Returns the event's timeline type.

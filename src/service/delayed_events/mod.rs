@@ -518,6 +518,7 @@ async fn append(&self, delay_id: &str, event: &Event) -> Result<OwnedEventId> {
 		state_key: event.state_key.clone(),
 		redacts: event.redacts.clone(),
 		timestamp: event.timestamp,
+		sticky: None,
 	};
 
 	let state_lock = self.services.state.mutex.lock(room_id).await;

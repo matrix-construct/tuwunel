@@ -347,6 +347,7 @@ fn stand_in_leave(
 		depth: uint!(1),
 		origin: None,
 		unsigned: None,
+		sticky: None,
 		redacts: None,
 		hashes: EventHash::default(),
 		auth_events: Default::default(),

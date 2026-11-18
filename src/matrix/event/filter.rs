@@ -9,7 +9,10 @@ use serde_json::{Map, Value};
 use smallvec::SmallVec;
 use tuwunel_core::is_equal_to;
 
-use super::Event;
+use super::{
+	Event,
+	sticky::{STICKY_KEY, STICKY_TTL_KEY},
+};
 
 /// Segments of one `event_fields` entry; most paths are one or two deep.
 type FieldPath = SmallVec<[String; 2]>;
@@ -170,8 +173,15 @@ fn matches_url<E: Event>(event: &E, filter: &RoomEventFilter) -> bool {
 #[must_use]
 pub fn trim_event_fields<T>(raw: Raw<T>, event_fields: Option<&[String]>) -> Raw<T> {
 	// Identity keys clients rely on are always kept; the spec permits a superset.
-	const ALWAYS_KEEP: [&str; 6] =
-		["event_id", "type", "sender", "origin_server_ts", "state_key", "room_id"];
+	const ALWAYS_KEEP: [&str; 7] = [
+		"event_id",
+		"type",
+		"sender",
+		"origin_server_ts",
+		"state_key",
+		"room_id",
+		STICKY_KEY,
+	];
 
 	let Some(fields) = event_fields else {
 		return raw;
@@ -194,27 +204,31 @@ pub fn trim_event_fields<T>(raw: Raw<T>, event_fields: Option<&[String]>) -> Raw
 		copy_field_path(&source, &mut out, &split_field(field));
 	}
 
+	// MSC4354: clients recognize a sticky copy by its key and remaining time.
+	copy_field_path(&source, &mut out, &["unsigned", STICKY_TTL_KEY]);
+
 	Raw::from_json_value(&Value::Object(out))
 }
 
 /// Copy the leaf or subtree at `segments` from `source` into the same nested
 /// path in `out`, creating intermediate objects as needed; an absent or
 /// non-object path is skipped.
-fn copy_field_path(
+fn copy_field_path<S: AsRef<str>>(
 	source: &Map<String, Value>,
 	out: &mut Map<String, Value>,
-	segments: &[String],
+	segments: &[S],
 ) {
 	let Some((head, rest)) = segments.split_first() else {
 		return;
 	};
 
+	let head = head.as_ref();
 	let Some(value) = source.get(head) else {
 		return;
 	};
 
 	if rest.is_empty() {
-		out.insert(head.clone(), value.clone());
+		out.insert(head.to_owned(), value.clone());
 		return;
 	}
 
@@ -223,7 +237,7 @@ fn copy_field_path(
 	};
 
 	if let Value::Object(child_out) = out
-		.entry(head.clone())
+		.entry(head.to_owned())
 		.or_insert_with(|| Value::Object(Map::new()))
 	{
 		copy_field_path(child, child_out, rest);
@@ -261,9 +275,33 @@ fn split_field(field: &str) -> FieldPath {
 
 #[cfg(test)]
 mod tests {
-	use super::split_field;
+	use ruma::serde::Raw;
+	use serde_json::{Value, json};
+
+	use super::{split_field, trim_event_fields};
 
 	fn segments(field: &str) -> Vec<String> { split_field(field).into_vec() }
+
+	#[test]
+	fn trimming_keeps_the_sticky_key_and_remaining_time() {
+		let event: Raw<Value> = Raw::new(&json!({
+			"event_id": "$event:example.com",
+			"type": "org.matrix.msc3401.call.member",
+			"content": { "body": "x" },
+			"msc4354_sticky": { "duration_ms": 600_000 },
+			"unsigned": { "age": 4, "msc4354_sticky_duration_ttl_ms": 500_000 },
+		}))
+		.expect("test event serializes");
+
+		let fields = ["content.body".to_owned()];
+		let trimmed: Value = trim_event_fields(event, Some(&fields))
+			.deserialize()
+			.expect("trimmed event deserializes");
+
+		assert_eq!(trimmed["msc4354_sticky"], json!({ "duration_ms": 600_000 }));
+		assert_eq!(trimmed["unsigned"], json!({ "msc4354_sticky_duration_ttl_ms": 500_000 }));
+		assert_eq!(trimmed["content"], json!({ "body": "x" }));
+	}
 
 	#[test]
 	fn split_simple_path() {

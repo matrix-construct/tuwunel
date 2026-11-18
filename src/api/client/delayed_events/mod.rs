@@ -261,6 +261,7 @@ async fn check_room_auth(
 		state_key: event.state_key.clone(),
 		redacts: event.redacts.clone(),
 		timestamp: event.timestamp,
+		sticky: None,
 	};
 
 	services

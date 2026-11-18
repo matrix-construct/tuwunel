@@ -12,7 +12,10 @@ use serde_json::{
 };
 
 use super::{Content, Count, DELAY_ID, Pdu, Unsigned, into_outgoing_federation};
-use crate::Event;
+use crate::{
+	Event,
+	event::{STICKY_KEY, STICKY_TTL_KEY, Sticky},
+};
 
 fn message_pdu() -> Pdu {
 	serde_json::from_value(json!({
@@ -1157,4 +1160,113 @@ fn outgoing_federation_without_rules_omits_unsigned() {
 
 	assert!(!pdu.contains_key("unsigned"), "unknown room version kept unsigned data");
 	assert!(!pdu.contains_key("event_id"), "unknown room version kept the event ID");
+}
+
+const STICKY_START: u64 = 1_838_188_000;
+
+#[test]
+fn sticky_formats_carry_the_key_and_remaining_time() {
+	let pdu = sticky_pdu(600_000);
+	let now = STICKY_START + 100_000;
+	let sync: Raw<AnySyncTimelineEvent> = pdu.to_format_at(now);
+	let room: Raw<AnyTimelineEvent> = pdu.to_format_at(now);
+
+	for (format, event) in [("sync", sync.json()), ("room", room.json())] {
+		let event = formatted(event);
+
+		assert_eq!(event[STICKY_KEY], json!({ "duration_ms": 600_000 }), "{format}: key");
+		assert_eq!(event["unsigned"][STICKY_TTL_KEY], 500_000, "{format}: remaining time");
+		assert_eq!(event["unsigned"]["age"], 4, "{format}: the rest of unsigned");
+	}
+}
+
+fn sticky_pdu(duration_ms: u64) -> Pdu {
+	Pdu {
+		sticky: Some(Sticky { duration_ms }),
+		..message_pdu()
+	}
+}
+
+fn formatted(event: &RawJsonValue) -> serde_json::Value {
+	serde_json::from_str(event.get()).expect("formatted event should be valid JSON")
+}
+
+#[test]
+fn expired_sticky_format_keeps_the_key_without_a_remaining_time() {
+	let sync: Raw<AnySyncTimelineEvent> =
+		sticky_pdu(600_000).to_format_at(STICKY_START + 600_000);
+
+	let event = formatted(sync.json());
+
+	assert_eq!(event[STICKY_KEY], json!({ "duration_ms": 600_000 }));
+	assert!(event["unsigned"].get(STICKY_TTL_KEY).is_none(), "expired copy kept a TTL");
+}
+
+#[test]
+fn plain_format_has_neither_the_key_nor_a_remaining_time() {
+	let sync: Raw<AnySyncTimelineEvent> = message_pdu().to_format_at(STICKY_START);
+	let event = formatted(sync.json());
+
+	assert!(event.get(STICKY_KEY).is_none(), "plain event gained the sticky key");
+	assert!(event["unsigned"].get(STICKY_TTL_KEY).is_none(), "plain event gained a TTL");
+}
+
+#[test]
+fn stored_copy_keeps_the_key_without_unsigned() {
+	let stored = sticky_pdu(600_000).to_sync_message_like_without_unsigned();
+	let event = formatted(stored.json());
+
+	assert_eq!(event[STICKY_KEY], json!({ "duration_ms": 600_000 }));
+	assert!(event.get("unsigned").is_none(), "stored copy carried unsigned");
+}
+
+#[test]
+fn nested_sticky_copy_gains_its_own_remaining_time() {
+	let pdu = message_pdu_with(&json!({
+		"m.relations": {
+			"m.thread": {
+				"count": 1,
+				"latest_event": {
+					"event_id": "$latest:example.com",
+					"origin_server_ts": STICKY_START,
+					"msc4354_sticky": { "duration_ms": 600_000 },
+				},
+			},
+		},
+	}));
+
+	let sync: Raw<AnySyncTimelineEvent> = pdu.to_format_at(STICKY_START + 100_000);
+	let unsigned = formatted_unsigned(sync.json());
+	let latest = &unsigned["m.relations"]["m.thread"]["latest_event"];
+
+	assert_eq!(latest["unsigned"][STICKY_TTL_KEY], 500_000, "nested copy's remaining time");
+	assert!(unsigned.get(STICKY_TTL_KEY).is_none(), "plain outer event gained a TTL");
+}
+
+#[test]
+fn lapsed_copies_lose_a_remaining_time_formatted_earlier() {
+	let pdu = message_pdu_with(&json!({
+		STICKY_TTL_KEY: 1_000,
+		"m.relations": {
+			"m.thread": {
+				"count": 1,
+				"latest_event": {
+					"event_id": "$latest:example.com",
+					"origin_server_ts": STICKY_START,
+					"msc4354_sticky": { "duration_ms": 600_000 },
+					"unsigned": { STICKY_TTL_KEY: 1_000 },
+				},
+			},
+		},
+	}));
+
+	let sync: Raw<AnySyncTimelineEvent> = pdu.to_format_at(STICKY_START + 700_000);
+	let unsigned = formatted_unsigned(sync.json());
+	let latest = &unsigned["m.relations"]["m.thread"]["latest_event"];
+
+	assert!(
+		latest["unsigned"].get(STICKY_TTL_KEY).is_none(),
+		"lapsed nested copy kept a TTL"
+	);
+	assert!(unsigned.get(STICKY_TTL_KEY).is_none(), "plain outer event kept a TTL");
 }

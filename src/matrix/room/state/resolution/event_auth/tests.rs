@@ -783,6 +783,7 @@ async fn auth_event_in_different_room() {
 		content: json!({ "users": { alice(): 100 } }).into(),
 		redacts: None,
 		unsigned: None,
+		sticky: None,
 		auth_events: vec![event_id("CREATE"), event_id("IMA")].into(),
 		prev_events: vec![event_id("IMA")].into(),
 		depth: uint!(0),
@@ -923,6 +924,7 @@ async fn rejected_auth_event() {
 		content: json!({ "users": { alice(): 100 } }).into(),
 		redacts: None,
 		unsigned: None,
+		sticky: None,
 		auth_events: vec![event_id("CREATE"), event_id("IMA")].into(),
 		prev_events: vec![event_id("IMA")].into(),
 		depth: uint!(0),
@@ -1012,6 +1014,7 @@ async fn event_without_room_id() {
 			.into(),
 		redacts: None,
 		unsigned: None,
+		sticky: None,
 		auth_events: [
 			owned_event_id!("$CREATE"),
 			owned_event_id!("$IMA"),

@@ -42,7 +42,10 @@ pub use self::{
 	raw_id::*,
 	unsigned::{DELAY_ID, PRIVATE as PRIVATE_UNSIGNED},
 };
-use super::{Event, ShortRoomId, StateKey};
+use super::{
+	Event, ShortRoomId, StateKey,
+	event::{Sticky, deserialize_sticky},
+};
 
 /// Stores a Matrix persistent data unit in typed form.
 ///
@@ -135,6 +138,18 @@ pub struct Pdu {
 	/// state, and bundled relations. The field is omitted when absent.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub unsigned: Option<Unsigned>,
+
+	/// MSC4354 sticky object, under its unstable top-level name.
+	///
+	/// It is part of the hashed and signed event. A malformed object reads as
+	/// absent, leaving the event non-sticky rather than unreadable.
+	#[serde(
+		rename = "msc4354_sticky",
+		default,
+		deserialize_with = "deserialize_sticky",
+		skip_serializing_if = "Option::is_none"
+	)]
+	pub sticky: Option<Sticky>,
 
 	//TODO: https://spec.matrix.org/v1.14/rooms/v11/#rejected-events
 	/// Whether state resolution rejected this event in test fixtures.
@@ -368,6 +383,9 @@ where
 	fn unsigned(&self) -> Option<&RawJsonValue> { self.unsigned.as_ref().map(Unsigned::json) }
 
 	#[inline]
+	fn sticky(&self) -> Option<Sticky> { self.sticky }
+
+	#[inline]
 	fn as_mut_pdu(&mut self) -> &mut Pdu { self }
 
 	#[inline]
@@ -437,6 +455,9 @@ where
 
 	#[inline]
 	fn unsigned(&self) -> Option<&RawJsonValue> { self.unsigned.as_ref().map(Unsigned::json) }
+
+	#[inline]
+	fn sticky(&self) -> Option<Sticky> { self.sticky }
 
 	#[inline]
 	fn as_pdu(&self) -> &Pdu { self }

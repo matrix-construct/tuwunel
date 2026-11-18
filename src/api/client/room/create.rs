@@ -1125,6 +1125,7 @@ impl From<InitialEvent> for PduBuilder {
 			state_key: Some(value.state_key),
 			redacts: None,
 			timestamp: None,
+			sticky: None,
 		}
 	}
 }
