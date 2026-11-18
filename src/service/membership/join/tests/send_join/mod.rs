@@ -1,8 +1,8 @@
 use std::{collections::HashMap, iter::once, slice::from_ref};
 
 use ruma::{
-	EventId, OwnedEventId, RoomId, RoomVersionId, events::StateEventType, room_id, server_name,
-	user_id,
+	EventId, OwnedEventId, RoomId, RoomVersionId, UserId, events::StateEventType, room_id,
+	server_name, user_id,
 };
 use serde_json::{Value, from_value, json, to_vec, value::to_raw_value};
 use tuwunel_core::{Error, Result, config::Figment};
@@ -434,7 +434,9 @@ async fn a_repeated_event_is_checked_again_after_a_stored_copy_is_replaced() -> 
 	let auth_chain = [room.as_slice(), &[altered, dave_join.clone(), invite.clone()]].concat();
 	let listed = [room.as_slice(), &[levels, dave_join, invite]].concat();
 
-	let state = ingest_as(services, room_id, &version, &auth_chain, &listed).await?;
+	let state =
+		ingest_as(services, room_id, user_id!("@dave:localhost"), &version, &auth_chain, &listed)
+			.await?;
 
 	assert!(state.values().any(|id| id == &levels_id));
 	assert!(state.values().any(|id| id == &dave_id));
@@ -499,11 +501,13 @@ async fn a_v12_send_join_event_waits_for_the_implied_create() -> Result {
 
 	let (name_id, name) = signed(services, &version, name)?;
 
-	ingest_as(services, &room_id, &version, &[], from_ref(&name)).await?;
+	let bob = user_id!("@bob:localhost");
+
+	ingest_as(services, &room_id, bob, &version, &[], from_ref(&name)).await?;
 
 	assert!(!services.timeline.pdu_exists(&name_id).await);
 
-	let state = ingest_as(services, &room_id, &version, &[], &[name, join, create]).await?;
+	let state = ingest_as(services, &room_id, bob, &version, &[], &[name, join, create]).await?;
 
 	assert!(state.values().any(|id| id == &name_id));
 	assert!(state.values().any(|id| id == &create_id));
@@ -821,11 +825,12 @@ async fn a_send_join_event_must_name_the_known_create() -> Result {
 	Ok(())
 }
 
-/// A send_join response's member event for another local user installs as
-/// given, over the departure this server holds for that user.
+/// A send_join response's member event for another local user replaces a held
+/// departure only when it follows that departure in its auth events.
 ///
-/// A first response leaves alice's own leave as her current membership; a
-/// second bans her, and the ban replaces the leave in the room's current state.
+/// A first response leaves alice's own leave as her current membership.
+/// Omitting her or sending a ban that does not cite her leave keeps it in
+/// place; a ban that follows the leave replaces it.
 #[tokio::test]
 async fn a_send_join_member_event_installs_over_a_local_departure() -> Result {
 	let Some(fixture) = fixture(Figment::new()).await? else {
@@ -864,11 +869,18 @@ async fn a_send_join_member_event_installs_over_a_local_departure() -> Result {
 	let (alice_join_id, alice_join) = membership(joined, &[&create_id, &rules_id])?;
 	let left = json!({ "membership": "leave" });
 	let (leave_id, leave) = membership(left, &[&create_id, &alice_join_id])?;
-	let (ban_id, ban) = state_event(services, room_id, StateEvent {
+	let (_, unanchored_ban) = state_event(services, room_id, StateEvent {
 		kind: "m.room.member",
 		state_key: alice.as_str(),
 		content: &json!({ "membership": "ban" }),
 		auth_events: &[&create_id, &join_id],
+	})?;
+
+	let (ban_id, ban) = state_event(services, room_id, StateEvent {
+		kind: "m.room.member",
+		state_key: alice.as_str(),
+		content: &json!({ "membership": "ban" }),
+		auth_events: &[&create_id, &join_id, &leave_id],
 	})?;
 
 	let _shortroomid = services
@@ -884,7 +896,7 @@ async fn a_send_join_member_event_installs_over_a_local_departure() -> Result {
 			.map(|event| event.event_id)
 	};
 
-	let departed = [create.clone(), join.clone(), rules, leave];
+	let departed = [create.clone(), join.clone(), rules.clone(), leave.clone()];
 	let held = ingest_response(services, room_id, from_ref(&alice_join), &departed).await?;
 	let state_lock = services.state.mutex.lock(room_id).await;
 
@@ -896,14 +908,71 @@ async fn a_send_join_member_event_installs_over_a_local_departure() -> Result {
 	assert_eq!(current().await?, leave_id, "alice's leave is her current membership");
 	assert!(services.state_cache.is_left(alice, room_id).await);
 
-	let state = ingest_response(services, room_id, &[], &[create, join, ban]).await?;
+	for (label, response) in [
+		("omitted", vec![create.clone(), join.clone()]),
+		("unanchored ban", vec![create.clone(), join.clone(), unanchored_ban.clone()]),
+	] {
+		let state = ingest_response(services, room_id, &[], &response).await?;
+		services
+			.membership
+			.apply_send_join_state(room_id, &state, &state_lock)
+			.await?;
+		assert_eq!(current().await?, leave_id, "{label} keeps alice's leave");
+	}
 
+	let auth_chain = [rules, alice_join, leave];
+	let conflict = [create.clone(), join.clone(), unanchored_ban, ban.clone()];
+	let refused = ingest_response(services, room_id, &auth_chain, &conflict).await;
+	assert!(matches!(refused, Err(Error::BadServerResponse(_))));
+
+	let state = ingest_response(services, room_id, &auth_chain, &[create, join, ban]).await?;
 	services
 		.membership
 		.apply_send_join_state(room_id, &state, &state_lock)
 		.await?;
+	assert_eq!(current().await?, ban_id, "a ban following the leave replaces it");
 
-	assert_eq!(current().await?, ban_id, "the response's ban replaces it");
+	Ok(())
+}
+
+#[tokio::test]
+async fn two_send_join_member_events_for_another_local_user_fail_the_response() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room_id = room_id!("!member-conflict:localhost");
+	let alice = user_id!("@alice:localhost");
+	let [(create_id, create), (join_id, join)] = room(services, room_id)?;
+	let (rules_id, rules) = state_event(services, room_id, StateEvent {
+		kind: "m.room.join_rules",
+		state_key: "",
+		content: &json!({ "join_rule": "public" }),
+		auth_events: &[&create_id, &join_id],
+	})?;
+	let (alice_join_id, alice_join) = signed(
+		services,
+		&RoomVersionId::V11,
+		json!({
+			"type": "m.room.member", "state_key": alice, "sender": alice, "room_id": room_id,
+			"content": { "membership": "join" }, "origin_server_ts": 1, "depth": 3,
+			"prev_events": [&rules_id], "auth_events": [&create_id, &rules_id],
+		}),
+	)?;
+	let (_, ban) = state_event(services, room_id, StateEvent {
+		kind: "m.room.member",
+		state_key: alice.as_str(),
+		content: &json!({ "membership": "ban" }),
+		auth_events: &[&create_id, &join_id, &alice_join_id],
+	})?;
+
+	let repeated = [create.clone(), join.clone(), alice_join.clone(), alice_join.clone()];
+	ingest_response(services, room_id, from_ref(&rules), &repeated).await?;
+	let refused =
+		ingest_response(services, room_id, from_ref(&rules), &[create, join, alice_join, ban])
+			.await;
+	assert!(matches!(refused, Err(Error::BadServerResponse(_))));
 
 	Ok(())
 }
@@ -925,12 +994,14 @@ async fn ingest_response(
 	auth_chain: &[Value],
 	state: &[Value],
 ) -> Result<HashMap<u64, OwnedEventId>> {
-	ingest_as(services, room_id, &RoomVersionId::V11, auth_chain, state).await
+	let bob = user_id!("@bob:localhost");
+	ingest_as(services, room_id, bob, &RoomVersionId::V11, auth_chain, state).await
 }
 
 async fn ingest_as(
 	services: &Services,
 	room_id: &RoomId,
+	joining: &UserId,
 	version: &RoomVersionId,
 	auth_chain: &[Value],
 	state: &[Value],
@@ -948,7 +1019,7 @@ async fn ingest_as(
 
 	services
 		.membership
-		.ingest_send_join_events(room_id, version, &room_version_rules(version)?, events)
+		.ingest_send_join_events(room_id, joining, version, &room_version_rules(version)?, events)
 		.await
 }
 
