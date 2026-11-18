@@ -44,6 +44,29 @@ Upgrading the room is not a workaround either: the replacement room inherits
 `m.federate` from its predecessor, as it does on Synapse. Moving the
 conversation to a newly created room is the only remedy.
 
+#### Sliding sync returns `M_INVALID_PARAM` for a list or extension selection
+
+Tuwunel refuses the whole request instead of silently dropping selectors,
+list ranges or filters. The previous connection and `pos` remain usable.
+Reduce the selection and retry. To replace all sticky lists, start a valid
+request without `pos`.
+
+| Selection | Maximum |
+| --- | --- |
+| Sticky lists on one connection | 64 |
+| List ID, including IDs in extension filters | 64 UTF-8 bytes |
+| Ranges on one list | 16 |
+| `spaces`, `tags`, `not_tags`, `room_types`, `not_room_types` on one list | 16 entries each |
+| `required_state` on one list or one room subscription | 256 entries |
+| Distinct `required_state` selectors across all lists plus any one room subscription | 256 |
+| `lists` and `rooms` on each account data, receipts, typing, profiles or sticky events extension | 64 list IDs and 256 rooms |
+
+Per-field limits count entries as sent, including repeats. The combined
+`required_state` budget counts a selector only once across lists, even when
+their windows do not overlap today. A room can enter another list on a later
+sync. Two different rooms' subscriptions are not added together. On a resumed connection, omitted sticky settings still
+count. An empty list `required_state` also keeps the previous selection.
+
 ## General potential issues
 
 #### Potential DNS issues when using Docker

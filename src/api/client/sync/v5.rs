@@ -1,5 +1,6 @@
 mod extensions;
 mod filter;
+mod limits;
 mod range;
 mod rooms;
 mod selector;
@@ -126,6 +127,8 @@ pub(crate) async fn sync_events_v5_route(
 		services.profile.check_requested_fields(fields)?;
 	}
 
+	// Refuse an invalid request before allocating or resetting its connection.
+	limits::check(request, None)?;
 	check_to_device(&request.extensions.to_device)?;
 	check_sticky_events(&request.extensions.sticky_events)?;
 
@@ -160,6 +163,8 @@ pub(crate) async fn sync_events_v5_route(
 	let (mut conn, _) = join(conn, ping_presence).await;
 
 	if since != 0 {
+		// A valid delta can exceed a limit together with the retained selections.
+		limits::check(request, Some(&conn))?;
 		check_profile_selection(services, request, &conn)?;
 	}
 
