@@ -155,7 +155,7 @@ pub(crate) use self::{
 		get_room_event_route, get_room_summary, get_room_summary_legacy, room_initial_sync_route,
 		upgrade_room_route,
 	},
-	rtc::get_transports_route,
+	rtc::{get_transports_route, get_transports_unstable_route},
 	search::search_events_route,
 	session::{
 		get_login_types_route, login_route, login_token_route, logout_all_route, logout_route,

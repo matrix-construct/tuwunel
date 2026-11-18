@@ -318,6 +318,7 @@ fn register_client_misc_routes(router: Router<State>) -> Router<State> {
 	router
 		.ruma_route(&client::turn_server_route)
 		.ruma_route(&client::get_transports_route)
+		.ruma_route(&client::get_transports_unstable_route)
 		.ruma_route(&client::well_known_support)
 		.ruma_route(&client::well_known_client)
 		.ruma_route(&client::tuwunel_remote_version)
