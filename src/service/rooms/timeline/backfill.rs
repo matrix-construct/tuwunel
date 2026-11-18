@@ -15,7 +15,7 @@ use std::{
 
 use futures::{
 	FutureExt, Stream, StreamExt, TryFutureExt,
-	future::{join, try_join, try_join3},
+	future::{join, try_join3},
 	stream::unfold,
 };
 use rand::seq::SliceRandom;
@@ -844,20 +844,20 @@ pub async fn backfill_pdu(
 	origin: &ServerName,
 	pdu: Box<RawJsonValue>,
 ) -> Result<Backfilled> {
-	let parsed = self
+	let (_, event_id, value) = self
 		.services
 		.event_handler
-		.parse_incoming_pdu(&pdu);
+		.parse_incoming_pdu(&pdu)
+		.await?;
 
-	// Lock so we cannot backfill the same pdu twice at the same time
+	// Lock so we cannot backfill the same pdu twice at the same time; only after
+	// parsing, which can wait on this lock.
 	let mutex_lock = self
 		.services
 		.event_handler
 		.mutex_federation
 		.lock(room_id)
-		.map(Ok);
-
-	let ((_, event_id, value), mutex_lock) = try_join(parsed, mutex_lock).await?;
+		.await;
 
 	let soft_failed = self
 		.services
