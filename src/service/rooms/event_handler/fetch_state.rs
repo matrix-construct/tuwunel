@@ -1,4 +1,4 @@
-use std::collections::{HashMap, hash_map};
+use std::collections::{HashMap, HashSet, hash_map};
 
 use futures::FutureExt;
 use ruma::{EventId, OwnedEventId, RoomId, RoomVersionId, ServerName, events::StateEventType};
@@ -11,9 +11,12 @@ use crate::{
 	rooms::short::ShortStateKey,
 };
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Deserialize)]
 struct StateIdsResponse {
-	pdu_ids: Vec<OwnedEventId>,
+	pdu_ids: HashSet<OwnedEventId>,
 }
 
 /// Call /state_ids to find out what the state at this pdu is. We trust the
