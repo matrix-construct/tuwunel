@@ -4,7 +4,7 @@ use futures::FutureExt;
 use ruma::{EventId, OwnedEventId, RoomId, RoomVersionId, ServerName, events::StateEventType};
 use serde::Deserialize;
 use tuwunel_core::{Err, Result, debug, debug_warn, err, implement};
-use tuwunel_matrix::Event;
+use tuwunel_matrix::{Event, PduEvent, pdu::check_room_id};
 
 use crate::{
 	fetcher::{Op, Opts},
@@ -59,9 +59,7 @@ pub(super) async fn fetch_state(
 
 	let mut state: HashMap<ShortStateKey, OwnedEventId> = HashMap::with_capacity(state_vec.len());
 	for (pdu, _) in state_vec {
-		let state_key = pdu
-			.state_key()
-			.ok_or_else(|| err!(Database("Found non-state pdu in state events.")))?;
+		let state_key = fetched_state_key(&pdu, room_id)?;
 
 		let shortstatekey = self
 			.services
@@ -77,8 +75,7 @@ pub(super) async fn fetch_state(
 				return Err!(Request(InvalidParam(
 					"State event's type and state_key ({:?},{:?}) exists multiple times.",
 					pdu.event_type(),
-					pdu.state_key()
-						.expect("all state events have state_key"),
+					state_key,
 				)));
 			},
 		}
@@ -100,4 +97,38 @@ pub(super) async fn fetch_state(
 	}
 
 	Ok(Some(state))
+}
+
+fn fetched_state_key<'a>(pdu: &'a PduEvent, room_id: &RoomId) -> Result<&'a str> {
+	check_room_id(pdu, room_id)?;
+	pdu.state_key()
+		.ok_or_else(|| err!(Database("Found non-state pdu in state events.")))
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::{event_id, room_id, user_id};
+	use serde_json::{from_value, json};
+	use tuwunel_core::Result;
+
+	use super::fetched_state_key;
+	use crate::test_utils::{pdu_json, with_state_key};
+
+	#[test]
+	fn a_fetched_state_key_is_scoped_to_its_room() -> Result {
+		let room = room_id!("!one:example.com");
+		let name = pdu_json(
+			event_id!("$name"),
+			room,
+			user_id!("@alice:example.com"),
+			"m.room.name",
+			&json!({ "name": "Room one" }),
+		);
+		let pdu = from_value(with_state_key(name, ""))?;
+
+		assert_eq!(fetched_state_key(&pdu, room)?, "");
+		fetched_state_key(&pdu, room_id!("!two:example.com"))
+			.expect_err("a state key cannot be taken from another room");
+		Ok(())
+	}
 }
