@@ -16,7 +16,7 @@ use super::{Op, Opts};
 /// Largest event response accepted before parsing. A server serves an event
 /// with its `unsigned` data, which can hold the previous state content and a
 /// thread's latest reply, so this allows several times the PDU size limit.
-const MAX_SERVED_PDU_BYTES: usize = 4 * MAX_PDU_BYTES;
+pub(super) const MAX_SERVED_PDU_BYTES: usize = 4 * MAX_PDU_BYTES;
 
 /// Applies poison detection before a fetched response is accepted.
 ///
