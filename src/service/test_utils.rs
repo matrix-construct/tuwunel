@@ -20,7 +20,7 @@ use ruma::{
 };
 use serde::Serialize;
 use serde_json::{Value as JsonValue, from_value, json, to_value};
-use tokio::{process::Command, runtime::Handle};
+use tokio::{process::Command, runtime::Handle, task::coop::unconstrained};
 use tracing::{
 	Level,
 	dispatcher::DefaultGuard,
@@ -391,7 +391,10 @@ pub(crate) fn membership_update<'a>(
 /// Watch tests poll a subscriber before and after a write to see whether the
 /// write woke it.
 pub(crate) fn poll_once<F: Future>(future: Pin<&mut F>, waker: &Waker) -> Poll<F::Output> {
-	future.poll(&mut Context::from_waker(waker))
+	// Poll outside tokio's cooperative budget. With the budget spent, a tokio
+	// resource returns `Pending` without registering and the runtime wakes
+	// `waker` at its next yield, which a probe would take for a notification.
+	pin!(unconstrained(future)).poll(&mut Context::from_waker(waker))
 }
 
 /// Asserts that a future waits while a guard is held, then releases the guard
