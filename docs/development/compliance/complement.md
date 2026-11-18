@@ -4,14 +4,14 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 225. Passing: **86.7%**
-  - ✅ `pass`: 195
+- Test groups: 229. Passing: **86.9%**
+  - ✅ `pass`: 199
   - 🟨 `some`: 9
   - 🟥 `fail`: 21
   - ⬛ `skip`: 0
 
-- Subtests: 633. Passing: **83.9%**
-  - ✅ `pass`: 531
+- Subtests: 637. Passing: **84.0%**
+  - ✅ `pass`: 535
   - 🟥 `fail`: 94
   - ⬛ `skip`: 8
 
@@ -143,6 +143,10 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | 3/0/0 | `MSC4311FullEventsOnStrippedStateFederation` |
 | ✅ | 2/0/0 | `MSC4311RejectInvalidStrippedStateFederation` |
 | ✅ | 5/0/0 | `MSC4311StrippedStateClientAPI` |
+| ✅ | – | `MSC4354ErasedSenderStickyEventsStayHome` |
+| ✅ | 2/0/0 | `MSC4354OldStickyEventsOverFederation` |
+| ✅ | – | `MSC4354SoftFailedStickyEventPromoted` |
+| ✅ | 2/0/0 | `MSC4354StickyEventsReachJoiningServer` |
 | 🟥 | 0/6/0 | `MSC4429ProfileUpdates` |
 | ✅ | – | `MediaConfig` |
 | ✅ | 25/0/0 | `MediaFilenames` |
