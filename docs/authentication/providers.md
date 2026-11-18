@@ -54,6 +54,13 @@ please refer to the section on [environment variables](#configuring-via-environm
 
 The callback URL is where the provider returns the browser after sign-in.
 
+> [!WARNING]
+> If `callback_url` is unset and `well_known.client` is set, Tuwunel derives
+> the new URL from `well_known.client`, and nothing warns at startup. Before
+> upgrading, register the new URL with the provider (most providers accept
+> several), or set `callback_url` to the old URL. Otherwise sign-in through
+> that provider fails on the provider's page.
+
 > [!IMPORTANT]
 > Changes to `callback_url` require a Tuwunel restart. Reloading the
 > configuration does not apply them.
@@ -66,9 +73,15 @@ The callback URL is where the provider returns the browser after sign-in.
 3. Set `callback_url` in the provider's `[[global.identity_provider]]` table
    to exactly the same URL, then restart Tuwunel.
 
-If you still use `/_matrix/client/unstable/login/sso/callback/<client_id>`,
-that legacy path keeps working until `3.0` and produces a warning at startup.
-Follow the steps above to switch to the new URL.
+The legacy path `/_matrix/client/unstable/login/sso/callback/<client_id>`
+keeps working until `3.0` in either of these cases:
+
+- `callback_url` names the legacy path.
+- Neither `callback_url` nor `well_known.client` is set. The provider returns
+  users to the URL registered with it.
+
+Tuwunel logs a warning at startup in both cases. Follow the steps above to
+switch to the new URL.
 
 ### Login behavior
 

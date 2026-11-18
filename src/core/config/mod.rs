@@ -1783,7 +1783,10 @@ pub struct IdentityProvider {
 	///
 	/// The URL host must point directly at the matrix server and use the path
 	/// `/_tuwunel/sso/callback/<client_id>`, where `<client_id>` is the one
-	/// configured for this provider above. The legacy path
+	/// configured for this provider above. When unset, it is derived from
+	/// `well_known.client` with that path, which a provider registered with the
+	/// old derived URL rejects until the new one is registered there. A
+	/// `callback_url` naming the legacy path
 	/// `/_matrix/client/unstable/login/sso/callback/<client_id>` keeps working
 	/// until 3.0 with a startup warning. A change takes effect on restart, not
 	/// on reload.
