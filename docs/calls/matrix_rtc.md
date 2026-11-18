@@ -146,14 +146,25 @@ that address changes; see
 
 ## 3. Configure .well-known
 
-Clients discover MatrixRTC through two surfaces, and Tuwunel serves
-both: the `org.matrix.msc4143.rtc_foci` key in
-`.well-known/matrix/client`, and the client API endpoint
-`GET /_matrix/client/unstable/org.matrix.msc4143/rtc/transports` that
-Element Call and Element X query. That endpoint is answered from
-`tuwunel.toml` alone, never from a `.well-known` file another server
-hosts, so `livekit_url` belongs in your Tuwunel configuration either
-way.
+Set `livekit_url` in your `tuwunel.toml` even when another server
+publishes your `.well-known` file. Tuwunel builds its list of calling
+services, called transports, from its own configuration. It never reads
+that list from a `.well-known` file another server hosts.
+
+Clients discover MatrixRTC through two places that Tuwunel serves:
+
+- The `org.matrix.msc4143.rtc_foci` key in `.well-known/matrix/client`.
+- The client API endpoint `GET /_matrix/client/v1/rtc/transports`, also
+  served at `GET /_matrix/client/unstable/org.matrix.msc4143/rtc/transports`.
+
+`/versions` advertises the stable path as `org.matrix.msc4143.stable`;
+clients that do not look for that flag use the unstable path. Both
+paths return the same list, under `transports` on the stable path and
+`rtc_transports` on the unstable path.
+
+A client such as Element X that gets an empty transport list from the
+endpoint does not go on to read `.well-known`, which is why the
+transport belongs in `tuwunel.toml`.
 
 ### 3.1. .well-known served by Tuwunel
 
@@ -167,7 +178,7 @@ Otherwise follow Step 3.2.*
 livekit_url = "https://matrix-rtc.yourdomain.com"
 ```
 
-3. Ensure that you have `[global.well_known]` uncommented above this line.
+3. Check that `[global.well_known]` is uncommented above this line.
    `.well-known` will not be served correctly otherwise.
 
 ### 3.2. .well-known served independently
@@ -874,23 +885,29 @@ again once the script has restarted Livekit.
 
 ### Clients report that the server has no MatrixRTC transport
 
-Element X and Element Call read the server's transports from
-`GET /_matrix/client/unstable/org.matrix.msc4143/rtc/transports`, which
-Tuwunel builds from `livekit_url` and
-`[[global.well_known.rtc_transports]]` in `tuwunel.toml`. With neither
-set, the endpoint answers with an empty list and those clients report
-that no transport is available, even when `.well-known/matrix/client`
-carries a correct `org.matrix.msc4143.rtc_foci` key. This is the usual
-cause when something other than Tuwunel serves your `.well-known`.
+Element X and Element Call read the server's transports from the
+`rtc/transports` endpoint (step 3). Tuwunel builds the list from
+`livekit_url` and `[[global.well_known.rtc_transports]]` in
+`tuwunel.toml`, listing custom entries first.
 
-Check it directly (no access token is needed as of v1.8.2):
+With neither set, the endpoint answers with an empty list and those
+clients report that no transport is available, even when
+`.well-known/matrix/client` carries a correct
+`org.matrix.msc4143.rtc_foci` key. This is the usual cause when
+something other than Tuwunel serves your `.well-known`.
+
+Check the endpoint directly with a valid access token from an account
+on your server. Guest accounts work too. Replace `$TOKEN` below with
+your access token. A request without a token returns `M_MISSING_TOKEN`.
 
 ```bash
-curl -s https://matrix.yourdomain.com/_matrix/client/unstable/org.matrix.msc4143/rtc/transports
+curl -s -H "Authorization: Bearer $TOKEN" https://matrix.yourdomain.com/_matrix/client/v1/rtc/transports
 ```
 
-An empty `rtc_transports` array means `livekit_url` is unset. Add it per
-step 3.1 and restart Tuwunel.
+An empty `transports` array means neither `livekit_url` nor custom
+transports are configured. Set `livekit_url` as in step 3.1 and restart
+Tuwunel. Run the command again and check that `transports` includes your
+`livekit_service_url`.
 
 ### Element X fails every call with `OPEN_ID_ERROR`
 
@@ -907,10 +924,12 @@ wrong address (often the homeserver itself) while a separately served
 `rtc/transports` endpoint first and read `.well-known` only when the
 server does not implement it, so Tuwunel's answer wins. When Tuwunel
 serves `.well-known` itself, both come from the same settings and
-cannot disagree, so this applies to step 3.2 setups. Compare the two:
+cannot disagree, so this applies to step 3.2 setups. Compare the two.
+Replace `$TOKEN` with a valid access token from an account on your
+server, as in the check above.
 
 ```bash
-curl -s https://matrix.yourdomain.com/_matrix/client/unstable/org.matrix.msc4143/rtc/transports
+curl -s -H "Authorization: Bearer $TOKEN" https://matrix.yourdomain.com/_matrix/client/v1/rtc/transports
 curl -s https://yourdomain.com/.well-known/matrix/client
 ```
 

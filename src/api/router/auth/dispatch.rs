@@ -7,9 +7,7 @@ use ruma::{
 			AccessToken, AccessTokenOptional, AppserviceToken, AppserviceTokenOptional,
 			AuthScheme, NoAccessToken, NoAuthentication,
 		},
-		client::{
-			account::change_password, delayed_events::update_delayed_event, rtc::transports,
-		},
+		client::{account::change_password, delayed_events::update_delayed_event},
 		federation::authentication::ServerSignatures,
 	},
 };
@@ -126,13 +124,11 @@ impl AuthDispatch for AccessToken {
 /// Allow endpoints with a dedicated unauthenticated authorization path through
 /// the request authentication gate.
 ///
-/// Transport discovery exposes only configured public metadata. Password reset
-/// derives its target from a validated and bound email proof in the route. A
-/// delayed event action names its event by an unguessable `delay_id`, and the
-/// route refuses a missing token on its stable path.
+/// Password reset derives its target from a validated and bound email proof in
+/// the route. A delayed event action names its event by an unguessable
+/// `delay_id`, and the route refuses a missing token on its stable path.
 fn allows_missing_access_token(route: TypeId) -> bool {
-	route == TypeId::of::<transports::msc4143::Request>()
-		|| route == TypeId::of::<change_password::v3::Request>()
+	route == TypeId::of::<change_password::v3::Request>()
 		|| route == TypeId::of::<update_delayed_event::v1::Request>()
 }
 
@@ -253,17 +249,22 @@ fn expired_token() -> Result<Auth> {
 mod tests {
 	use ruma::api::client::{
 		delayed_events::update_delayed_event::msc4140_v1::Request as UpdateByBodyRequest,
-		discovery::get_supported_versions,
+		discovery::get_supported_versions, rtc::transports,
 	};
 
 	use super::*;
 
 	#[test]
 	fn dedicated_routes_bypass_access_token_auth() {
-		assert!(allows_missing_access_token(TypeId::of::<transports::msc4143::Request>()));
 		assert!(allows_missing_access_token(TypeId::of::<change_password::v3::Request>()));
 		assert!(allows_missing_access_token(TypeId::of::<update_delayed_event::v1::Request>()));
 		assert!(!allows_missing_access_token(TypeId::of::<get_supported_versions::Request>()));
 		assert!(!allows_missing_access_token(TypeId::of::<UpdateByBodyRequest>()));
+	}
+
+	#[test]
+	fn rtc_transports_require_an_access_token() {
+		assert!(!allows_missing_access_token(TypeId::of::<transports::v1::Request>()));
+		assert!(!allows_missing_access_token(TypeId::of::<transports::msc4143::Request>()));
 	}
 }
