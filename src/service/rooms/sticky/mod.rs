@@ -194,6 +194,30 @@ pub async fn indexed_unexpired(&self, event_id: &EventId, now: u64) -> bool {
 		.is_ok_and(|until| u64_from_bytes(&until).is_ok_and(|until| until > now))
 }
 
+/// Drops the sticky object from a copy of an event fetched by its id unless the
+/// event was accepted into the timeline (MSC4354).
+///
+/// An event held outside it, whether soft-failed, refused by a policy server
+/// or never weighed, was never delivered as sticky, so serving its object
+/// would present it as live; clients derive a remaining time from the object
+/// alone. A failed lookup reads as not accepted.
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+pub async fn strip_unaccepted(&self, pdu: PduEvent) -> PduEvent {
+	let accepted = pdu.sticky.is_none()
+		|| self
+			.services
+			.timeline
+			.non_outlier_pdu_exists(pdu.event_id())
+			.await
+			.is_ok();
+
+	match accepted {
+		| true => pdu,
+		| false => PduEvent { sticky: None, ..pdu },
+	}
+}
+
 /// Queues a room's unexpired local sticky events for a server that has just
 /// joined it (MSC4354).
 ///

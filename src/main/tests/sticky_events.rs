@@ -929,6 +929,15 @@ async fn waits_for_its_sender(&self, room: &RoomId) -> Result {
 		)?;
 	}
 
+	let fetched = alice
+		.get(&format!("rooms/{room}/event/{}", kept.0))
+		.await?;
+
+	require(
+		fetched.get(STICKY_KEY).is_none() && fetched["unsigned"].get(TTL).is_none(),
+		"a withheld event was served as sticky",
+	)?;
+
 	let weighed = services
 		.event_handler
 		.backoff_metrics()
@@ -959,6 +968,12 @@ async fn waits_for_its_sender(&self, room: &RoomId) -> Result {
 		poll_until(PROMOTION_DEADLINE, async || accepted_event(services, &kept.0).await).await;
 
 	require(promoted, "a withheld event was not accepted once its sender returned")?;
+
+	let fetched = alice
+		.get(&format!("rooms/{room}/event/{}", kept.0))
+		.await?;
+
+	require(fresh_copy(&fetched), "an accepted event was served without its sticky time")?;
 	require(
 		!accepted_event(services, &redacted.0).await,
 		"a withheld event redacted meanwhile was accepted",
