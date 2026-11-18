@@ -699,6 +699,7 @@ fn build_joined_room(args: BuildJoinedRoom, event_fields: Option<&[String]>) -> 
 		account_data: RoomAccountData { events: account_data_events },
 		ephemeral: Ephemeral { events: edus },
 		state,
+		sticky: Default::default(),
 		summary: RoomSummary {
 			joined_member_count: joined_member_count.map(ruma_from_u64),
 			invited_member_count: invited_member_count.map(ruma_from_u64),

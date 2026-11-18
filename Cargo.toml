@@ -405,6 +405,7 @@ features = [
     "unstable-msc4265",
     "unstable-msc4266",
     "unstable-msc4310",
+    "unstable-msc4354", # sticky events
     "unstable-msc4380",
     "unstable-msc4383",
     "unstable-msc4388",
@@ -412,6 +413,7 @@ features = [
     "unstable-msc4439",
     "unstable-msc4446",
     "unstable-msc4466",
+    "unstable-msc4480", # sliding sync sticky events extension
     "unstable-msc4502", # targeted room member queries
     "unstable-msc4512", # appservice path proxying and fed_proxy
 ]

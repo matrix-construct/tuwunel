@@ -98,6 +98,7 @@ pub(super) async fn handle(
 		to_device: to_device?,
 		e2ee,
 		profiles: Default::default(),
+		sticky_events: Default::default(),
 	};
 
 	Ok(Collected { response, typing: typing?, keys_changed })
