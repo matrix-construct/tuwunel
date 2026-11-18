@@ -463,6 +463,22 @@ The limits are in the `[global.rooms.delayed_events]` section of your
 Setting either to `0` disables delayed events and stops advertising them to
 clients, so callers who drop out stay listed in the call.
 
+### Sticky events
+
+Tuwunel supports sticky events with no setup.
+
+In its Matrix 2.0 mode, Element Call keeps call membership in
+[sticky events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354)
+rather than in room state.
+
+For up to an hour after each event is sent, Tuwunel makes it available to
+clients catching up after a gap and to members who join the room later.
+It also sends unexpired sticky events from local users to servers as they
+join the room.
+
+Clients renew their membership while a call runs, and the delayed leave
+described above ends it when a client disappears.
+
 ### Application service mode
 
 Use [application services](../appservices.md) if you want lk-jwt-service
