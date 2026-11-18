@@ -135,6 +135,12 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 
 	let soft_fail = soft_fail_pre || soft_fail_current_state;
 
+	// MSC4354: a sticky event redacted while withheld stays withheld.
+	if cleared && !soft_fail && self.sticky_stays_withheld(&incoming_pdu).await {
+		drop(state_lock);
+		return Ok(None);
+	}
+
 	// MSC4354: read before state preparation, which records the server as present.
 	let joining_server = self
 		.joining_server(room_id, &incoming_pdu, soft_fail)
@@ -217,6 +223,14 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 			.pdu_metadata
 			.mark_event_soft_failed(incoming_pdu.event_id());
 
+		// MSC4354: a change to the state that alone refused it weighs it again.
+		if soft_fail_current_state && !soft_fail_pre {
+			self.services
+				.sticky
+				.withhold(room_id, &incoming_pdu)
+				.await;
+		}
+
 		self.record_outcome(Context::Upgrade, incoming_pdu.event_id(), Disposition::Transient);
 
 		drop(state_lock);
@@ -256,6 +270,28 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	);
 
 	Ok(pdu_id.zip(Some(true)))
+}
+
+/// Whether a sticky event leaving the soft-failed set stays withheld, having
+/// been redacted meanwhile (MSC4354).
+///
+/// Its outcome is recorded when it does. The caller holds the room's state
+/// lock, as the redaction marker's writer does, so no redaction lands between
+/// this check and the promotion.
+#[implement(super::Service)]
+async fn sticky_stays_withheld(&self, pdu: &PduEvent) -> bool {
+	let refused = self
+		.services
+		.sticky
+		.promotion_refused(pdu.room_id(), pdu)
+		.await;
+
+	if refused {
+		self.record_outcome(Context::Upgrade, pdu.event_id(), Disposition::Transient);
+		debug!(event_id = %pdu.event_id(), "Redacted sticky event stays withheld.");
+	}
+
+	refused
 }
 
 /// The server of a remote user whose join brings it into the room for the

@@ -622,6 +622,7 @@ pub async fn append_to_state(&self, new_pdu: &PduEvent) -> Result<u64> {
 ///
 /// The guard proves that the caller owns the room state mutation path. Callers
 /// that change effective state must update the relevant caches separately.
+/// Withheld sticky events of the room are queued to be weighed again.
 #[implement(Service)]
 #[tracing::instrument(skip(self, _mutex_lock), level = "debug")]
 pub fn set_room_state(
@@ -636,6 +637,8 @@ pub fn set_room_state(
 	self.db
 		.roomid_shortstatehash
 		.raw_aput::<BUFSIZE, _, _>(room_id, shortstatehash);
+
+	self.services.sticky.state_changed(room_id);
 }
 
 /// Fetches the auth events required from a room's current state.

@@ -70,10 +70,11 @@ pub async fn server_can_see_event(
 /// Whether a server currently joined to the room may see a sticky event its
 /// history visibility hides (MSC4354).
 ///
-/// The event must be accepted with an unexpired index row, which a
-/// soft-failed or policy-refused event never has. It must also be unexpired by
-/// its own sticky object, which a redaction removes. It is loaded last, and
-/// only on this denial path.
+/// The event must be accepted with an unexpired index row, or withheld only by
+/// the room's current state as an unexpired candidate, since servers walk
+/// soft-failed events too; a policy refusal leaves neither. It must also be
+/// unexpired by its own sticky object, which a redaction removes. It is loaded
+/// last, and only on this denial path.
 #[implement(super::Service)]
 #[tracing::instrument(level = "trace", skip_all)]
 async fn server_sees_sticky(
@@ -84,10 +85,16 @@ async fn server_sees_sticky(
 ) -> bool {
 	let now = now_millis();
 
-	self.services
+	(self
+		.services
 		.sticky
 		.indexed_unexpired(event_id, now)
 		.await
+		|| self
+			.services
+			.sticky
+			.withheld_unexpired(room_id, event_id, now)
+			.await)
 		&& self
 			.services
 			.state_cache

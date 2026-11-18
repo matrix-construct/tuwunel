@@ -29,13 +29,13 @@
 
 | ✅ `yes` | 🟨 `part` | 🟥 `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 295 | 60 | 443 | 312 | 1110 |
+| 296 | 60 | 442 | 312 | 1110 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
-| merged | 192 | 20 | 12 | 57 | 281 |
+| merged | 193 | 20 | 11 | 57 | 281 |
 | open | 67 | 25 | 345 | 181 | 618 |
 | closed | 36 | 15 | 86 | 74 | 211 |
 
@@ -59,7 +59,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4380 | ✅ ● | 100/100 | Invite blocking | src/api/client/sync/{v3.rs,v5/selector.rs} suppress stored invites; createRoo... |
 | MSC4376 | ✅ ● | 100/100 | Remove /v1/send_join and /v1/send_leave | v1 send_join and v1 send_leave routes are not registered |
 | MSC4356 | ✅ ● | 100/100 | Recently used emoji | global account-data passthrough (2026-06-22 ruling); m.recent_emoji round-trips |
-| MSC4354 | 🟥 ● | 0/0 | Sticky Events | No sticky delivery or expiry paths; client ephemeral maps excluded |
+| MSC4354 | ✅ ● | 100/100 | Sticky Events | Send, v3 section, joiner push, hist-vis, soft-fail redo; expiry from origin ts |
 | MSC4341 | ✅ ● | 95/100 | Support for RFC 8628 Device Authorization Grant | src/api/oidc/device.rs:62; RFC 8628 device grant advertised, minted, polled |
 | MSC4335 | 🟥 ● | 0/0 | M_USER_LIMIT_EXCEEDED error code | M_USER_LIMIT_EXCEEDED error code not used |
 | MSC4326 | ✅ ● | 100/100 | Device masquerading for appservices | appservice query device_id asserted; M_UNKNOWN_DEVICE-equivalent on missing |
@@ -310,7 +310,6 @@ for spec compliance.
 | MSC3550 | 🟥 ◐ | 0/0 | 1.2 | Add HTTP 403 to possible profile lookup responses | CS /profile returns 403 M_FORBIDDEN when outbound profile lookup disabled |
 | MSC4183 | 🟥 ● | 0/0 | 1.18 | Additional Error Codes for submitToken endpoints | mixed MSC; the submit_url half is homeserver scope and we emit no submit_url |
 | MSC4335 | 🟥 ● | 0/0 | 1.18 | M_USER_LIMIT_EXCEEDED error code | M_USER_LIMIT_EXCEEDED error code not used |
-| MSC4354 | 🟥 ● | 0/0 | next | Sticky Events | No sticky delivery or expiry paths; client ephemeral maps excluded |
 
 ## Open
 

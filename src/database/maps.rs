@@ -394,6 +394,12 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
+		name: "roomid_softfailedsticky",
+		key_size_hint: Some(64),
+		val_size_hint: Some(8),
+		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
 		name: "roomid_spacehierarchy",
 		limit_size: 1024 * 1024 * 64,
 		ttl: 60 * 60 * 24 * 7, // above cache.space_hierarchy.ttl_max (18h default)

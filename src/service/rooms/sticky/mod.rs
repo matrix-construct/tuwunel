@@ -3,13 +3,21 @@
 //! Each accepted sticky event gets one row, keyed by its timeline position and
 //! valued with the instant it expires. Readers take the value as a prefilter
 //! and re-check the event itself, so a row outliving its event is harmless,
-//! and an hourly sweep deletes expired rows blind.
+//! and an hourly sweep deletes expired rows blind. Sticky events withheld by
+//! a soft failure are weighed again as room state changes (`withheld`).
 
-use std::{iter::once, sync::Arc};
+mod withheld;
+
+use std::{
+	collections::BTreeSet,
+	iter::once,
+	sync::{Arc, Mutex as StdMutex},
+};
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt, TryStreamExt};
-use ruma::{EventId, RoomId, ServerName};
+use loole::{Receiver, Sender, unbounded};
+use ruma::{EventId, OwnedEventId, OwnedRoomId, RoomId, ServerName};
 use tuwunel_core::{
 	Result, implement,
 	utils::{
@@ -20,7 +28,7 @@ use tuwunel_core::{
 	},
 	warn,
 };
-use tuwunel_database::{Map, Txn};
+use tuwunel_database::{Interfix, Map, Txn};
 use tuwunel_matrix::{
 	Event,
 	pdu::{PduCount, PduEvent, PduId, RawPduId},
@@ -31,14 +39,23 @@ use crate::{rooms::short::ShortRoomId, service::make_name};
 /// Indexes the sticky events of every room by timeline position.
 ///
 /// Each row maps an appended event's position to its expiry, staged in the
-/// append's transaction and swept once it lapses.
+/// append's transaction and swept once it lapses. The service also weighs
+/// again the sticky events only a room's current state refused.
 pub struct Service {
 	db: Data,
 	services: Arc<crate::services::OnceServices>,
+
+	/// Rooms whose installed state changed, for the withheld-event worker.
+	queue: (Sender<OwnedRoomId>, Receiver<OwnedRoomId>),
+
+	/// Withheld events the worker is weighing now, which it promotes only
+	/// while they are still sticky.
+	reevaluating: StdMutex<BTreeSet<OwnedEventId>>,
 }
 
 struct Data {
 	pduid_stickyuntil: Arc<Map>,
+	roomid_softfailedsticky: Arc<Map>,
 }
 
 #[async_trait]
@@ -47,9 +64,30 @@ impl crate::Service for Service {
 		Ok(Arc::new(Self {
 			db: Data {
 				pduid_stickyuntil: args.db["pduid_stickyuntil"].clone(),
+				roomid_softfailedsticky: args.db["roomid_softfailedsticky"].clone(),
 			},
 			services: args.services.clone(),
+			queue: unbounded(),
+			reevaluating: BTreeSet::new().into(),
 		}))
+	}
+
+	async fn worker(self: Arc<Self>) -> Result {
+		if self.services.db.is_read_only() {
+			return Ok(()); // Weighing an event again writes its outcome.
+		}
+
+		self.reevaluate_worker().await;
+
+		Ok(())
+	}
+
+	async fn interrupt(&self) {
+		let (sender, _) = &self.queue;
+
+		if !sender.is_closed() {
+			sender.close();
+		}
 	}
 
 	fn name(&self) -> &str { make_name(module_path!()) }
@@ -214,10 +252,11 @@ pub fn unexpired_ids(&self, now: u64) -> impl Stream<Item = RawPduId> + Send + '
 		.map(|(key, _)| RawPduId::from(key))
 }
 
-/// Deletes a room's rows from the index, as the room is purged.
+/// Deletes a room's rows from the index and from the withheld events, as the
+/// room is purged.
 ///
-/// The caller holds the room's state lock, as every writer of the index does,
-/// so no row for the room lands after this.
+/// The caller holds the room's state lock, as every writer of either column
+/// does, so no row for the room lands after this.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn delete_room(&self, room_id: &RoomId) {
@@ -226,9 +265,15 @@ pub async fn delete_room(&self, room_id: &RoomId) {
 	};
 
 	del_raw_prefix(&self.db.pduid_stickyuntil, shortroomid.to_be_bytes()).await;
+
+	self.db
+		.roomid_softfailedsticky
+		.del_prefix(&(shortroomid, Interfix))
+		.await;
 }
 
-/// Deletes the expired rows of the index, returning how many went.
+/// Deletes the expired rows of the index and of the withheld events,
+/// returning how many went.
 ///
 /// The value alone decides and the delete is blind, so a row whose event was
 /// redacted or purged earlier goes the same way once its time passes. An
@@ -240,7 +285,11 @@ pub async fn sweep(&self) -> usize {
 		return 0;
 	}
 
-	sweep_expired(&self.db.pduid_stickyuntil, now_millis()).await
+	let now = now_millis();
+	let index = sweep_expired(&self.db.pduid_stickyuntil, now).await;
+	let withheld = sweep_expired(&self.db.roomid_softfailedsticky, now).await;
+
+	index.saturating_add(withheld)
 }
 
 #[implement(Service)]

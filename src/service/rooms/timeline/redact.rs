@@ -71,6 +71,10 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 	let Ok(pdu_id) = self.get_pdu_id(event_id).await else {
 		// If event does not exist, just noop
 		// TODO this is actually wrong!
+		self.services
+			.sticky
+			.mark_redacted(shortroomid, event_id);
+
 		return Ok(());
 	};
 

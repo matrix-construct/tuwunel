@@ -52,7 +52,7 @@ pub struct Services {
 	pub state_cache: Arc<rooms::state_cache::Service>,
 	pub state_compressor: Arc<rooms::state_compressor::Service>,
 	pub storage: Arc<storage::Service>,
-	/// MSC4354 sticky events: their expiry index.
+	/// MSC4354 sticky events: their expiry index and withheld re-evaluation.
 	pub sticky: Arc<rooms::sticky::Service>,
 	pub threads: Arc<rooms::threads::Service>,
 	pub timeline: Arc<rooms::timeline::Service>,
