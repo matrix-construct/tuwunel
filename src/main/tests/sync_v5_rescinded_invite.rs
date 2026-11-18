@@ -212,7 +212,7 @@ async fn left_history(&self, History { joined, unreadable }: History) -> Result 
 		let state = &after["rooms"]["leave"][room_id.as_str()]["org.matrix.msc4222.state_after"]
 			["events"];
 
-		assert_eq!(has_event(state, &name), !bounded, "state bound: {after}");
+		assert_eq!(has_event(state, &name), joined && unreadable, "state bound: {after}");
 
 		let resumed = client
 			.sync_v3(Some(field(&reply, "next_batch")?))
