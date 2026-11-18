@@ -63,6 +63,7 @@ pub(crate) async fn send_message_event_or_delayed_route(
 		delay: Duration::from_millis(delay),
 		txn_id: Some(&body.txn_id),
 		timestamp: body.appservice_info.as_ref().and(body.timestamp),
+		sticky: body.sticky_duration_ms,
 		stable: false,
 	};
 
@@ -109,6 +110,7 @@ pub(crate) async fn send_state_event_or_delayed_route(
 		delay: Duration::from_millis(delay),
 		txn_id: None,
 		timestamp: body.appservice_info.as_ref().and(body.timestamp),
+		sticky: None,
 		stable: false,
 	};
 

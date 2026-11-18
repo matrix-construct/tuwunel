@@ -2,7 +2,8 @@ use std::{collections::BTreeMap, time::Duration};
 
 use ruma::{
 	EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, TransactionId, UserId,
-	api::client::filter::FilterDefinition, profile::ProfileFieldName, thirdparty::Medium,
+	api::client::filter::FilterDefinition, events::sticky::StickyDurationMs,
+	profile::ProfileFieldName, thirdparty::Medium,
 };
 use serde_json::Value as JsonValue;
 use tokio::time::Instant;
@@ -11,7 +12,10 @@ use tuwunel_core::{
 	utils::{string::str_from_bytes, time::millis},
 	warn,
 };
-use tuwunel_matrix::Event;
+use tuwunel_matrix::{
+	Event,
+	event::{STICKY_DURATION_MAX, Sticky},
+};
 use tuwunel_service::Services;
 
 use crate::Ruma;
@@ -54,6 +58,24 @@ pub(crate) async fn is_self_redaction(
 /// Every client read removes the ID for anyone but the sender.
 pub(crate) fn txnid_unsigned(txn_id: &TransactionId) -> BTreeMap<String, JsonValue> {
 	BTreeMap::from([("transaction_id".to_owned(), txn_id.as_str().into())])
+}
+
+/// The MSC4354 sticky object a send asks for, its duration bounded to an
+/// hour.
+///
+/// The duration must be strictly positive, so zero is refused. The bound keeps
+/// every client treating the event as sticky.
+pub(crate) fn requested_sticky(duration: Option<StickyDurationMs>) -> Result<Option<Sticky>> {
+	duration
+		.map(|duration| match u64::from(duration.get()) {
+			| 0 => Err!(Request(InvalidParam(
+				"org.matrix.msc4354.sticky_duration_ms must be a positive integer."
+			))),
+			| duration_ms => Ok(Sticky {
+				duration_ms: duration_ms.min(STICKY_DURATION_MAX),
+			}),
+		})
+		.transpose()
 }
 
 /// Decodes the event ID a room transaction stored as its response.
@@ -170,4 +192,38 @@ pub(crate) fn check_email_domain(services: &Services, email_canon: &str) -> Resu
 	}
 
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use http::StatusCode;
+	use ruma::{api::error::ErrorKind, events::sticky::StickyDurationMs};
+
+	use super::requested_sticky;
+
+	#[test]
+	fn requested_duration_is_bounded_to_an_hour() {
+		assert_eq!(requested(60_000), Some(60_000));
+		assert_eq!(requested(7_200_000), Some(3_600_000));
+	}
+
+	fn requested(duration_ms: u32) -> Option<u64> {
+		requested_sticky(Some(StickyDurationMs::new_clamped(duration_ms)))
+			.expect("a positive duration is accepted")
+			.map(|sticky| sticky.duration_ms)
+	}
+
+	#[test]
+	fn absent_duration_is_not_sticky() {
+		assert!(matches!(requested_sticky(None), Ok(None)));
+	}
+
+	#[test]
+	fn zero_duration_is_refused() {
+		let zero = StickyDurationMs::new_clamped(0_u32);
+		let error = requested_sticky(Some(zero)).expect_err("a zero duration is refused");
+
+		assert_eq!(error.kind(), ErrorKind::InvalidParam);
+		assert_eq!(error.status_code(), StatusCode::BAD_REQUEST);
+	}
 }

@@ -42,6 +42,7 @@ use tuwunel_core::{
 use tuwunel_database::{Deserialized, Ignore, Interfix, Json, Map};
 use tuwunel_matrix::{
 	StateKey,
+	event::Sticky,
 	pdu::{Content, DELAY_ID, PduBuilder},
 };
 
@@ -127,6 +128,12 @@ pub struct Event {
 	/// The outcome of a finalised event, absent while it is scheduled.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub finalised: Option<Finalized>,
+
+	/// The MSC4354 sticky duration the event is sent with, bounded to an hour.
+	///
+	/// Stickiness starts when the event is sent, not when it was scheduled.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub sticky_duration_ms: Option<u64>,
 }
 
 /// The limits a client is told about and held to.
@@ -518,7 +525,7 @@ async fn append(&self, delay_id: &str, event: &Event) -> Result<OwnedEventId> {
 		state_key: event.state_key.clone(),
 		redacts: event.redacts.clone(),
 		timestamp: event.timestamp,
-		sticky: None,
+		sticky: event.sticky(),
 	};
 
 	let state_lock = self.services.state.mutex.lock(room_id).await;
@@ -533,6 +540,17 @@ async fn append(&self, delay_id: &str, event: &Event) -> Result<OwnedEventId> {
 		.ok();
 
 	Ok(event_id)
+}
+
+/// The MSC4354 sticky object the event is sent with.
+///
+/// Only the requested duration is stored, so the object is rebuilt when the
+/// event is sent; an event stored without one is not sticky.
+#[implement(Event)]
+#[must_use]
+pub fn sticky(&self) -> Option<Sticky> {
+	self.sticky_duration_ms
+		.map(|duration_ms| Sticky { duration_ms })
 }
 
 /// Logs a failed send, at warning level only when the server is at fault.

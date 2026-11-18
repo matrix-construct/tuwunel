@@ -45,6 +45,7 @@ pub(crate) async fn send_delayed_event_route(
 		delay: body.delay_ms,
 		txn_id: Some(&body.txn_id),
 		timestamp: body.appservice_info.as_ref().and(body.ts),
+		sticky: body.sticky_duration_ms,
 		stable: is_stable(&path),
 	};
 

@@ -23,7 +23,7 @@ use tuwunel_service::{
 
 use crate::{
 	Ruma,
-	utils::{is_self_redaction, txnid_event_id, txnid_unsigned},
+	utils::{is_self_redaction, requested_sticky, txnid_event_id, txnid_unsigned},
 };
 
 #[derive(Deserialize)]
@@ -76,6 +76,7 @@ pub(crate) async fn send_message_event_route(
 		return Ok(existing_txnid);
 	}
 
+	let sticky = requested_sticky(body.sticky_duration_ms)?;
 	let content = from_str(body.body.body.json().get())
 		.map_err(|e| err!(Request(BadJson("Invalid JSON body: {e}"))))?;
 
@@ -85,6 +86,7 @@ pub(crate) async fn send_message_event_route(
 		unsigned: txnid_unsigned(&body.txn_id).into(),
 		timestamp: appservice_info.and(body.timestamp),
 		redacts: redacts_id,
+		sticky,
 		..Default::default()
 	};
 

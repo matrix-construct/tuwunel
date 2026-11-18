@@ -21,7 +21,7 @@ use ruma::{
 	DeviceId, MilliSecondsSinceUnixEpoch, RoomId, TransactionId, UserId,
 	events::{
 		AnyMessageLikeEventContent, AnyStateEventContent, MessageLikeEventType, StateEventType,
-		TimelineEventType,
+		TimelineEventType, sticky::StickyDurationMs,
 	},
 	serde::Raw,
 };
@@ -48,6 +48,7 @@ pub(crate) use self::{
 use crate::{
 	send::{check_send_content, check_send_policy},
 	state::{allowed_to_send_state_event, check_member_content_size},
+	utils::requested_sticky,
 };
 
 struct Schedule<'a> {
@@ -58,6 +59,10 @@ struct Schedule<'a> {
 	delay: Duration,
 	txn_id: Option<&'a TransactionId>,
 	timestamp: Option<MilliSecondsSinceUnixEpoch>,
+
+	/// The MSC4354 sticky duration the request asks for, checked only once no
+	/// earlier send of the transaction answers it.
+	sticky: Option<StickyDurationMs>,
 
 	/// Selects the stable error codes over the unstable ones.
 	stable: bool,
@@ -94,6 +99,7 @@ async fn schedule(
 		delay,
 		txn_id,
 		timestamp,
+		sticky,
 		stable,
 	}: Schedule<'_>,
 ) -> Result<DelayId> {
@@ -126,6 +132,13 @@ async fn schedule(
 		return Ok(delay_id);
 	}
 
+	if sticky.is_some() && kind.state_key().is_some() {
+		return Err!(Request(InvalidParam(
+			"org.matrix.msc4354.sticky_duration_ms cannot be combined with state_key."
+		)));
+	}
+
+	let sticky = requested_sticky(sticky)?;
 	let redacts = match kind {
 		| Kind::Message { event_type, content } =>
 			check_send_policy(services, sender, event_type, content).await?,
@@ -177,6 +190,7 @@ async fn schedule(
 		delay_ms,
 		due_ms: now_millis().saturating_add(delay_ms),
 		finalised: None,
+		sticky_duration_ms: sticky.map(|sticky| sticky.duration_ms),
 	};
 
 	check_room_auth(services, &event, &state_lock).await?;
@@ -261,7 +275,7 @@ async fn check_room_auth(
 		state_key: event.state_key.clone(),
 		redacts: event.redacts.clone(),
 		timestamp: event.timestamp,
-		sticky: None,
+		sticky: event.sticky(),
 	};
 
 	services
