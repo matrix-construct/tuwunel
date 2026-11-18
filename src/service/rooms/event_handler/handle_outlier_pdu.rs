@@ -11,6 +11,8 @@ use tuwunel_matrix::{
 	Event, PduEvent, event::TypeExt, room::state::resolution::auth_check, room_version,
 };
 
+use super::fetch_auth::AuthFetchBudget;
+
 #[implement(super::Service)]
 #[cfg_attr(unabridged, tracing::instrument(
     name = "outlier",
@@ -27,6 +29,7 @@ pub(super) async fn handle_outlier_pdu(
 	mut pdu_json: CanonicalJsonObject,
 	room_version: &RoomVersionId,
 	recursion_level: usize,
+	budget: &AuthFetchBudget,
 	auth_events_known: bool,
 ) -> Result<(PduEvent, CanonicalJsonObject)> {
 	debug!(?event_id, ?auth_events_known, %recursion_level, "handle outlier");
@@ -95,6 +98,7 @@ pub(super) async fn handle_outlier_pdu(
 			event.auth_events(),
 			room_version,
 			recursion_level,
+			budget,
 		))
 		.await?;
 	}

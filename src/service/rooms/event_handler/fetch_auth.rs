@@ -23,8 +23,8 @@ use super::backoff::{Context, Disposition};
 use crate::fetcher::{Op, Opts};
 
 /// Each root walk has a count limit; all roots in a lookup share a byte limit.
-struct AuthFetchBudget {
-	limit: usize,
+pub(super) struct AuthFetchBudget {
+	pub(super) limit: usize,
 	remaining: AtomicUsize,
 }
 
@@ -53,6 +53,18 @@ impl AuthFetchBudget {
 	}
 }
 
+#[implement(super::Service)]
+pub(super) fn auth_fetch_budget(&self) -> AuthFetchBudget {
+	AuthFetchBudget::new(
+		self.services
+			.server
+			.config
+			.federation
+			.history
+			.max_fetch_prev_events,
+	)
+}
+
 /// Find the event and auth it. Once the event is validated (steps 1 - 8)
 /// it is appended to the outliers Tree.
 ///
@@ -79,24 +91,15 @@ pub(super) async fn fetch_auth<'a, Events>(
 	events: Events,
 	room_version: &RoomVersionId,
 	recursion_level: usize,
+	budget: &AuthFetchBudget,
 ) -> Result<Vec<(PduEvent, Option<CanonicalJsonObject>)>>
 where
 	Events: Iterator<Item = &'a EventId> + Clone + Send,
 {
-	// Every walk keeps the events it fetched until all walks have ended, so they
-	// share one bound on the bytes they hold.
-	let budget = AuthFetchBudget::new(
-		self.services
-			.server
-			.config
-			.federation
-			.history
-			.max_fetch_prev_events,
-	);
 	let events_with_auth_events: Vec<_> = events
 		.stream()
 		.broad_then(|event_id| {
-			self.fetch_auth_chain(origin, room_id, event_id, room_version, &budget)
+			self.fetch_auth_chain(origin, room_id, event_id, room_version, budget)
 		})
 		.try_collect()
 		.boxed() // size firewall
@@ -144,6 +147,7 @@ where
 							value,
 							room_version,
 							expected!(recursion_level + 1),
+							budget,
 							true,
 						))
 						.await
