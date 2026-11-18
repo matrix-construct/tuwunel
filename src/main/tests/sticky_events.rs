@@ -98,6 +98,10 @@ const BRIEF_MS: u64 = 1_000;
 // How long the worker may take to weigh a withheld event once its room changes.
 const PROMOTION_DEADLINE: Duration = Duration::from_secs(10);
 
+// Long enough for the worker to weigh a queued room's withheld events, had a
+// message queued it.
+const SETTLE: Duration = Duration::from_secs(2);
+
 // The legacy and the MSC4143 membership types, each with a label for its transaction ids.
 const MEMBER_TYPES: [(&str, &str); 2] = [(CALL_MEMBER, "call"), (RTC_MEMBER, "rtc")];
 
@@ -892,7 +896,8 @@ async fn lapsed_and_redacted_events_lose_stickiness(
 /// that state lets its sender back in, unless it was redacted meanwhile.
 ///
 /// Carol's events are built while she is joined and delivered after Alice bans
-/// her; her return is the state change that weighs them again.
+/// her; her return is the state change that weighs them again. An ordinary
+/// message in between leaves the state as it was and weighs nothing.
 #[implement(Withheld, params = "<'_>")]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn waits_for_its_sender(&self, room: &RoomId) -> Result {
@@ -918,6 +923,25 @@ async fn waits_for_its_sender(&self, room: &RoomId) -> Result {
 			"a late event was not withheld",
 		)?;
 	}
+
+	let weighed = services
+		.event_handler
+		.backoff_metrics()
+		.upgrade
+		.lookups();
+
+	alice.send_text(room, "unweighed", "text").await?;
+
+	sleep(SETTLE).await;
+
+	let unweighed = services
+		.event_handler
+		.backoff_metrics()
+		.upgrade
+		.lookups()
+		.eq(&weighed);
+
+	require(unweighed, "an unchanged room state weighed a withheld event again")?;
 
 	alice
 		.put(&format!("rooms/{room}/redact/{}/redact-withheld", redacted.0), &json!({}))

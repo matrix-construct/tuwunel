@@ -477,6 +477,12 @@ async fn soft_fail_standing(
 		.compute_soft_fail(incoming_pdu, room_rules, pdu_json)
 		.await?
 	{
+		// MSC4354: refused before the state check, it no longer waits on state.
+		self.services
+			.sticky
+			.forfeit(incoming_pdu.room_id(), incoming_pdu)
+			.await;
+
 		self.record_outcome(Context::Upgrade, event_id, Disposition::Transient);
 
 		debug!(%event_id, "Still soft failed.");

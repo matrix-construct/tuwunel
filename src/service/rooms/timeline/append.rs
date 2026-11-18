@@ -300,7 +300,8 @@ where
 ///
 /// A local message supplies the snapshot the room already holds, which changes
 /// nothing a state projection depends on. An unreadable previous snapshot
-/// counts as replaced.
+/// counts as replaced, and a replacement queues the room's withheld sticky
+/// events to be weighed again.
 #[implement(super::Service)]
 async fn install_room_state(
 	&self,
@@ -319,7 +320,13 @@ async fn install_room_state(
 		.state
 		.set_room_state(room_id, shortstatehash, state_lock);
 
-	previous != Some(shortstatehash)
+	let replaced = previous != Some(shortstatehash);
+
+	if replaced {
+		self.services.sticky.state_changed(room_id);
+	}
+
+	replaced
 }
 
 /// Fill a state event's `unsigned` from the event it replaced, and find the

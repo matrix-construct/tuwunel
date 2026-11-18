@@ -76,14 +76,19 @@ use self::{
 	federation::send_as,
 	fixture::boot,
 	state_cache::membership_update,
+	sticky::a_refused_withheld_event_loses_its_visibility,
 };
 
 mod client;
 #[expect(dead_code)] // Membership routes are not driven here.
 mod federation;
 mod fixture;
+#[path = "fixture/sign.rs"]
+mod sign;
 #[path = "fixture/state_cache.rs"]
 mod state_cache;
+#[path = "policy_sign_window/sticky.rs"]
+mod sticky;
 
 const CERTIFICATE: &str = "../../nix/pkgs/complement/certificate.crt";
 const PRIVATE_KEY: &str = "../../nix/pkgs/complement/private_key.key";
@@ -180,7 +185,8 @@ type Stub = JoinSet<io::Result<()>>;
 /// it again under the lock. Messages in one room still take turns, a retried
 /// transaction waits for the first, a redaction keeps the room held, a refusal
 /// stores nothing and a copy relayed back during the window is not stored
-/// twice.
+/// twice. A sticky event withheld by the room's state loses its visibility
+/// once the policy server refuses it.
 #[test]
 fn policy_signing_leaves_the_room_unlocked() -> Result {
 	let options = STUB_OPTIONS
@@ -233,6 +239,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	a_redaction_keeps_the_room_held(&h, &h.room(6).await?).await?;
 	a_refusal_stores_nothing(&h, &h.room(7).await?).await?;
 	a_relayed_copy_is_stored_once(&h, &h.room(8).await?).await?;
+	a_refused_withheld_event_loses_its_visibility(&h, &h.room(10).await?).await?;
 
 	policy.all_authorized()
 }

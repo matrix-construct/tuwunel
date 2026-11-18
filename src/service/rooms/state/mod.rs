@@ -228,7 +228,8 @@ pub(crate) async fn prepare_force_state(
 /// Installs a prepared state snapshot and invalidates its hierarchy summary.
 ///
 /// Preparation and any required timeline append must have succeeded under
-/// the same room state guard before installation.
+/// the same room state guard before installation. Withheld sticky events of
+/// the room are queued to be weighed again.
 #[implement(Service)]
 pub(crate) fn install_force_state(
 	&self,
@@ -238,6 +239,7 @@ pub(crate) fn install_force_state(
 ) {
 	self.set_room_state(room_id, shortstatehash, state_lock);
 	self.services.spaces.cache_evict(room_id);
+	self.services.sticky.state_changed(room_id);
 }
 
 /// Record the membership transition a replayed `m.room.member` event carries.
@@ -622,7 +624,6 @@ pub async fn append_to_state(&self, new_pdu: &PduEvent) -> Result<u64> {
 ///
 /// The guard proves that the caller owns the room state mutation path. Callers
 /// that change effective state must update the relevant caches separately.
-/// Withheld sticky events of the room are queued to be weighed again.
 #[implement(Service)]
 #[tracing::instrument(skip(self, _mutex_lock), level = "debug")]
 pub fn set_room_state(
@@ -637,8 +638,6 @@ pub fn set_room_state(
 	self.db
 		.roomid_shortstatehash
 		.raw_aput::<BUFSIZE, _, _>(room_id, shortstatehash);
-
-	self.services.sticky.state_changed(room_id);
 }
 
 /// Fetches the auth events required from a room's current state.

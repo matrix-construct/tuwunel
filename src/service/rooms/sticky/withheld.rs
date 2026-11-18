@@ -3,8 +3,10 @@
 //! A sticky event refused only by the room's current state gets a candidate
 //! row, valued with its expiry. Each change to a room's installed state queues
 //! the room for the worker, which runs its unexpired candidates through the
-//! incoming-event pipeline again. A redaction of an event outside the timeline
-//! leaves a marker row, and the upgrade keeps a marked event withheld.
+//! incoming-event pipeline again. A candidate refused again before the state
+//! check, as by the room's policy server, loses its row. A redaction of an
+//! event outside the timeline leaves a marker row, and the upgrade keeps a
+//! marked event withheld.
 
 use std::{convert::identity, iter::once};
 
@@ -92,6 +94,28 @@ pub(crate) async fn withhold(&self, room_id: &RoomId, pdu: &PduEvent) {
 	self.db
 		.roomid_softfailedsticky
 		.put(candidate, until);
+}
+
+/// Drops the candidate row of a sticky event refused before the state check,
+/// as by its room's policy server.
+///
+/// MSC4354 treats an event its anti-spam checks refuse as a regular non-sticky
+/// one, so it no longer waits on the room's state nor keeps a sticky event's
+/// visibility. The row is deleted blind.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(crate) async fn forfeit(&self, room_id: &RoomId, pdu: &PduEvent) {
+	if pdu.sticky().is_none() {
+		return;
+	}
+
+	let Some(shortroomid) = self.shortroomid(room_id).await else {
+		return;
+	};
+
+	let candidate: Row<'_> = (shortroomid, pdu.event_id(), Kind::Candidate.into());
+
+	self.db.roomid_softfailedsticky.del(candidate);
 }
 
 /// Records a redaction of an event outside the timeline, so a sticky event
@@ -335,8 +359,9 @@ async fn reevaluate_room(&self, room_id: &RoomId) {
 ///
 /// The stored copy goes back to the form its origin delivered, which alone its
 /// signatures cover. An event the pipeline accepts, or finds already accepted,
-/// leaves the candidates, as does one whose stored copy is gone; one withheld
-/// again stays for the next change.
+/// leaves the candidates, as does one whose stored copy is gone or one the
+/// pipeline refuses before the state check; one the state still withholds stays
+/// for the next change.
 #[implement(Service)]
 #[tracing::instrument(
 	level = "debug",
