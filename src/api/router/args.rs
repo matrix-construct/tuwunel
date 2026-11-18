@@ -37,9 +37,8 @@ type PathArgs<'a> = SmallVec<[&'a str; 8]>;
 
 /// Extracts a typed Ruma request and its authentication context.
 ///
-/// Administrator-only routes defer JSON errors until authorization succeeds.
-/// Ordinary client routes reject malformed JSON before authentication. Signed routes
-/// parse their content during signature verification.
+/// Client routes parse JSON after authentication and any admin check. A
+/// server-signed route parses canonical content during signature verification.
 #[derive(Debug)]
 pub struct Args<T, const ADMIN: bool = false> {
 	/// Request struct body
@@ -141,12 +140,6 @@ where
 		let route = TypeId::of::<T>();
 		let scheme = T::Authentication::SCHEME;
 		let request = request_from(services, request).await?;
-		let json_body = match (scheme, ADMIN) {
-			| (Scheme::ServerSignatures, _) => Ok(None),
-			| (_, true) => parse_json(&request, route, scheme),
-			| (_, false) => Ok(parse_json(&request, route, scheme)?),
-		};
-
 		let (request, mut auth) = authenticate::<T>(request, services, route).await?;
 
 		_ = request
@@ -163,7 +156,10 @@ where
 			require_admin(services, sender).await?;
 		}
 
-		let json_body = auth.signed_content.take().or(json_body?);
+		let json_body = match scheme {
+			| Scheme::ServerSignatures => auth.signed_content.take(),
+			| _ => parse_json(&request, route, scheme)?,
+		};
 		make_args(services, request, json_body, auth, route)
 	}
 }
