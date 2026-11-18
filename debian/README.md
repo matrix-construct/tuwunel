@@ -8,9 +8,14 @@ referenced for other `apt`-based distros such as Ubuntu.
 We recommend the [generic deployment guide](https://matrix-construct.github.io/tuwunel/deploying/generic.html)
 for further deployment information.
 
-An `apt` repository serves the stable releases for `amd64` and `arm64`. The
-package is statically linked, so it works on any current Debian or Ubuntu
-release.
+An `apt` repository serves the stable releases for `amd64` and `arm64`.
+Since 1.9.4 the package needs glibc 2.39 or newer, so it installs on
+Debian 13 and Ubuntu 24.04 or later.
+
+On Debian 12 and Ubuntu 22.04, `apt` offers at most `1.9.3-1`, the last
+statically linked package; use the container image or a
+[static binary](https://matrix-construct.github.io/tuwunel/deploying/generic.html#static-prebuilt-binary)
+there instead.
 
 On the machine where you will run Tuwunel, install `ca-certificates` and
 `curl` if they are missing. Then run the commands below to add the repository
