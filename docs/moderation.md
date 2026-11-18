@@ -283,8 +283,14 @@ backfill.
 
 To clear the stored verdicts for a room, run
 `!admin rooms clear-soft-failed-events <room>` in the admin room. This also
-clears cached policy decisions and retry delays. Events are checked again
-when federation supplies them.
+clears cached policy decisions and the retry delays kept for each event.
+Events are checked again when federation supplies them.
+
+The command does not clear a retry time the policy server itself asked for.
+After a rate-limit answer, Tuwunel holds back every request to that server
+until the time it named, for up to 24 hours, and re-checks do not ask it
+until then. To clear that hold early, reset the server's connection through the
+admin API: `POST /_synapse/admin/v1/federation/destinations/<server>/reset_connection`.
 
 ### Privacy in encrypted rooms
 
