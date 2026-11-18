@@ -1,3 +1,5 @@
+use std::any::TypeId;
+
 use axum::RequestPartsExt;
 use axum_extra::{TypedHeader, headers::Authorization, typed_header::TypedHeaderRejectionReason};
 use http::uri::PathAndQuery;
@@ -11,12 +13,13 @@ use tuwunel_service::{
 	server_keys::{PubKeyMap, PubKeys},
 };
 
-use super::{Auth, Request};
+use super::{Auth, Request, Scheme};
+use crate::router::args::parse_json;
 
 pub(super) async fn auth_server(
 	services: &Services,
 	request: &mut Request,
-	body: Option<&CanonicalJsonValue>,
+	route: TypeId,
 ) -> Result<Auth> {
 	type Member = (CanonicalJsonName, CanonicalJsonValue);
 	type Object = CanonicalJsonObject;
@@ -27,6 +30,15 @@ pub(super) async fn auth_server(
 
 	let destination = services.globals.server_name();
 	let origin = &x_matrix.origin;
+	let key = services
+		.server_keys
+		.get_verify_key(origin, &x_matrix.key)
+		.await
+		.map_err(|e| {
+			err!(Request(Forbidden(debug_warn!("Failed to fetch signing keys: {e}"))))
+		})?;
+
+	let body = parse_json(request, route, Scheme::ServerSignatures)?;
 	let signature_uri = request
 		.parts
 		.uri
@@ -39,7 +51,7 @@ pub(super) async fn auth_server(
 
 	let signatures: [Member; 1] = [(origin.as_str().into(), Value::Object(signature.into()))];
 
-	let authorization: Object = if let Some(body) = body.cloned() {
+	let mut authorization: Object = if let Some(body) = body {
 		let authorization: [Member; 6] = [
 			("content".into(), body),
 			("destination".into(), Value::String(destination.into())),
@@ -62,14 +74,6 @@ pub(super) async fn auth_server(
 		authorization.into()
 	};
 
-	let key = services
-		.server_keys
-		.get_verify_key(origin, &x_matrix.key)
-		.await
-		.map_err(|e| {
-			err!(Request(Forbidden(debug_warn!("Failed to fetch signing keys: {e}"))))
-		})?;
-
 	let keys: PubKeys = [(x_matrix.key.as_str().into(), key.key)].into();
 	let keys: PubKeyMap = [(origin.as_str().into(), keys)].into();
 	if let Err(e) = ruma::signatures::verify_json(&keys, &authorization) {
@@ -86,6 +90,7 @@ pub(super) async fn auth_server(
 
 	Ok(Auth {
 		origin: origin.to_owned().into(),
+		signed_content: authorization.remove("content"),
 		..Auth::default()
 	})
 }
