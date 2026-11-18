@@ -10,7 +10,11 @@ use ruma::{
 	serde::JsonObject,
 };
 use tuwunel_core::{Err, Result, at, err, warn};
-use tuwunel_matrix::{event::gen_event_id_canonical_json, pdu::PduEvent, room_version};
+use tuwunel_matrix::{
+	event::gen_event_id_canonical_json,
+	pdu::{PduEvent, check_raw_size},
+	room_version,
+};
 
 use super::utils::require_known_room;
 use crate::Ruma;
@@ -54,6 +58,7 @@ pub(crate) async fn create_knock_event_v1_route(
 		return Err!(Request(Forbidden("Room version does not support knocking.")));
 	}
 
+	check_raw_size(&body.pdu)?;
 	let Ok((event_id, value)) = gen_event_id_canonical_json(&body.pdu, &room_version_id) else {
 		// Event could not be converted to canonical json
 		return Err!(Request(InvalidParam("Could not convert event to canonical json.")));

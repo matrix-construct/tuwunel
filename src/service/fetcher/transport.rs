@@ -25,8 +25,9 @@ use tuwunel_core::{
 	Result, err,
 	utils::{BoolExt, math::ruma_from_usize_saturating},
 };
+use tuwunel_matrix::pdu::MAX_SERVED_PDU_BYTES;
 
-use super::{Op, Opts, validate::MAX_SERVED_PDU_BYTES};
+use super::{Op, Opts};
 use crate::services::OnceServices;
 
 /// The served event and its federation response envelope.

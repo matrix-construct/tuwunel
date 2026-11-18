@@ -9,14 +9,9 @@
 use ruma::{CanonicalJsonObject, RoomVersionId};
 use serde::de::IgnoredAny;
 use tuwunel_core::{Err, Result, err, implement};
-use tuwunel_matrix::{event::gen_event_id, pdu::MAX_PDU_BYTES};
+use tuwunel_matrix::{event::gen_event_id, pdu::MAX_SERVED_PDU_BYTES};
 
 use super::{Op, Opts};
-
-/// Largest event response accepted before parsing. A server serves an event
-/// with its `unsigned` data, which can hold the previous state content and a
-/// thread's latest reply, so this allows several times the PDU size limit.
-pub(super) const MAX_SERVED_PDU_BYTES: usize = 4 * MAX_PDU_BYTES;
 
 /// Check the wire representation before parsing a served PDU, including its unsigned data.
 pub(crate) fn check_served_pdu_size(bytes: usize) -> Result {
