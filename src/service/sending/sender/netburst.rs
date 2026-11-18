@@ -1,12 +1,20 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+	collections::{BTreeMap, HashSet},
+	iter::once,
+	time::Duration,
+};
 
 use futures::StreamExt;
 use tuwunel_core::{
 	implement,
 	itertools::Itertools,
-	utils::{IterStream, ReadyExt, rand::secs as rand_secs, stream::TryIgnore},
+	utils::{
+		BoolExt, IterStream, ReadyExt, rand::secs as rand_secs, stream::TryIgnore,
+		time::now_millis,
+	},
 	warn,
 };
+use tuwunel_matrix::pdu::RawPduId;
 
 use super::{
 	SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue,
@@ -18,6 +26,7 @@ use crate::{
 };
 
 type Txns = BTreeMap<Destination, Vec<QueueItem>>;
+type StickyIds = HashSet<RawPduId>;
 
 const BOOT_ARM_PACE: Duration = Duration::from_secs(2);
 
@@ -39,6 +48,18 @@ pub(super) async fn startup_netburst<'a>(
 ) {
 	let netburst = self.server.config.sending.startup_netburst;
 	let keep = usize::try_from(self.server.config.sending.startup_netburst_keep).ok();
+	// Only an overflow consults it, and nothing overflows without a limit.
+	let sticky: StickyIds = keep
+		.is_some()
+		.then_async(|| {
+			self.services
+				.sticky
+				.unexpired_ids(now_millis())
+				.collect()
+		})
+		.await
+		.unwrap_or_default();
+
 	let txns = self
 		.db
 		.active_requests()
@@ -47,6 +68,11 @@ pub(super) async fn startup_netburst<'a>(
 			let len = txns.get(&dest).map_or(0, Vec::len);
 
 			match keep {
+				// MSC4354: an unexpired sticky event is never dropped for volume.
+				| Some(limit) if len >= limit && is_sticky(&event, &sticky) => {
+					self.db.demote(once(&(key, event)), None);
+					txns
+				},
 				| Some(limit) if len >= limit => {
 					warn!(?dest, key = %String::from_utf8_lossy(&key), "Dropping unsent event");
 					self.db.delete_active_request(&key);
@@ -188,6 +214,10 @@ pub(super) async fn arm_startup_wake(
 			index.saturating_add(1)
 		},
 	}
+}
+
+fn is_sticky(event: &SendingEvent, sticky: &StickyIds) -> bool {
+	matches!(event, SendingEvent::Pdu(pdu_id) if sticky.contains(pdu_id))
 }
 
 fn batched(mut txns: Txns, dest: Destination, item: QueueItem) -> Txns {

@@ -5,15 +5,15 @@
 //! and re-check the event itself, so a row outliving its event is harmless,
 //! and an hourly sweep deletes expired rows blind.
 
-use std::sync::Arc;
+use std::{iter::once, sync::Arc};
 
 use async_trait::async_trait;
-use futures::{Stream, TryStreamExt};
-use ruma::{EventId, RoomId};
+use futures::{Stream, StreamExt, TryStreamExt};
+use ruma::{EventId, RoomId, ServerName};
 use tuwunel_core::{
 	Result, implement,
 	utils::{
-		BoolExt,
+		BoolExt, IterStream,
 		stream::{ReadyExt, TryIgnore, TryReadyExt, WidebandExt},
 		time::now_millis,
 		u64_from_bytes,
@@ -154,6 +154,64 @@ pub async fn indexed_unexpired(&self, event_id: &EventId, now: u64) -> bool {
 		.get(&pdu_id)
 		.await
 		.is_ok_and(|until| u64_from_bytes(&until).is_ok_and(|until| until > now))
+}
+
+/// Queues a room's unexpired local sticky events for a server that has just
+/// joined it (MSC4354).
+///
+/// An erased sender's events are left out. Queueing an event the server
+/// already has queued is harmless, since the queue key is the server and the
+/// event; a failure to queue one is logged and the rest still go.
+#[implement(Service)]
+#[tracing::instrument(
+	level = "debug",
+	skip_all,
+	fields(
+		%room_id,
+		%server,
+	),
+)]
+pub async fn send_to_joined_server(&self, room_id: &RoomId, server: &ServerName) {
+	let Some(shortroomid) = self.shortroomid(room_id).await else {
+		return;
+	};
+
+	// Queued one at a time, so the server receives them in timeline order.
+	self.unexpired(shortroomid, 0, PduCount::max().into_unsigned(), now_millis())
+		.ready_filter(|(_, pdu)| self.services.globals.user_is_local(pdu.sender()))
+		.wide_filter_map(async |(count, pdu)| {
+			self.services
+				.users
+				.is_erased(pdu.sender())
+				.await
+				.is_false()
+				.then(|| RawPduId::from(PduId { shortroomid, count }))
+		})
+		.for_each(async |pdu_id| {
+			self.services
+				.sending
+				.send_pdu_servers(once(server).stream(), &pdu_id)
+				.await
+				.inspect_err(|error| {
+					warn!(%room_id, %server, ?pdu_id, %error, "Failed to queue a sticky event");
+				})
+				.ok();
+		})
+		.await;
+}
+
+/// Streams the timeline positions of every indexed event still sticky at
+/// `now`, read from the index alone.
+///
+/// A redacted or purged event may still appear; an unreadable row is skipped.
+#[implement(Service)]
+pub fn unexpired_ids(&self, now: u64) -> impl Stream<Item = RawPduId> + Send + '_ {
+	self.db
+		.pduid_stickyuntil
+		.raw_stream()
+		.ignore_err()
+		.ready_filter(move |(_, val)| u64_from_bytes(val).is_ok_and(|until| until > now))
+		.map(|(key, _)| RawPduId::from(key))
 }
 
 /// Deletes a room's rows from the index, as the room is purged.

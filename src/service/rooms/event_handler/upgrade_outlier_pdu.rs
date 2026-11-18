@@ -3,7 +3,7 @@ use std::{borrow::Borrow, collections::HashMap, iter::once, sync::Arc, time::Ins
 use futures::{FutureExt, StreamExt};
 use ruma::{
 	CanonicalJsonObject, EventId, OwnedEventId, RoomId, RoomVersionId, ServerName,
-	room_version_rules::RoomVersionRules,
+	events::room::member::MembershipState, room_version_rules::RoomVersionRules,
 };
 use tuwunel_core::{
 	Result, debug, debug_info, debug_warn, implement, is_equal_to, trace,
@@ -135,32 +135,18 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 
 	let soft_fail = soft_fail_pre || soft_fail_current_state;
 
-	let mut extremities = self
+	// MSC4354: read before state preparation, which records the server as present.
+	let joining_server = self
+		.joining_server(room_id, &incoming_pdu, soft_fail)
+		.await;
+
+	let extremities = self
 		.compute_remaining_extremities(room_id, &incoming_pdu)
 		.await;
 
-	let config = &self.services.server.config;
-	let max = config.rooms.extremities.max;
-	let len = extremities
-		.len()
-		.saturating_add(usize::from(!soft_fail));
-
-	if max > 0 && len > max {
-		let goal = prune_goal(
-			len,
-			max,
-			config.rooms.extremities.emergency_max,
-			config.rooms.extremities.prune_batch,
-		);
-
-		let summary = self
-			.services
-			.state
-			.prune_forward_extremities(room_id, &mut extremities, goal, Trigger::Receive)
-			.await;
-
-		debug!(?summary, "Pruned forward extremities over the cap.");
-	}
+	let extremities = self
+		.prune_extremities_over_cap(room_id, extremities, soft_fail)
+		.await;
 
 	trace!("Compressing state...");
 	let state_ids_compressed: Arc<CompressedState> = self
@@ -247,6 +233,14 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 
 	drop(state_lock);
 
+	if let Some(server) = joining_server {
+		self.services
+			.sticky
+			.send_to_joined_server(room_id, server)
+			.boxed() // cold arm
+			.await;
+	}
+
 	if cleared {
 		self.services
 			.pdu_metadata
@@ -262,6 +256,80 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	);
 
 	Ok(pdu_id.zip(Some(true)))
+}
+
+/// The server of a remote user whose join brings it into the room for the
+/// first time (MSC4354).
+///
+/// Read under the room's state lock, before state preparation records the
+/// server as present. A soft-failed join brings no server in.
+#[implement(super::Service)]
+async fn joining_server<'a>(
+	&self,
+	room_id: &RoomId,
+	pdu: &'a PduEvent,
+	soft_fail: bool,
+) -> Option<&'a ServerName> {
+	let server = pdu.sender().server_name();
+	let joining = !soft_fail
+		&& !self.services.globals.server_is_ours(server)
+		&& pdu.membership_for(pdu.sender()) == Some(MembershipState::Join);
+
+	joining
+		.then_async(async || {
+			self.services
+				.state_cache
+				.server_in_room(server, room_id)
+				.await
+				.is_false()
+				.then_some(server)
+		})
+		.await
+		.flatten()
+}
+
+/// Prunes the room's forward extremities over the configured cap, counting the
+/// incoming event among them unless it is soft-failed.
+///
+/// Extremities within the cap, or under no cap, come back as they went in.
+#[implement(super::Service)]
+async fn prune_extremities_over_cap(
+	&self,
+	room_id: &RoomId,
+	extremities: Vec<OwnedEventId>,
+	soft_fail: bool,
+) -> Vec<OwnedEventId> {
+	let config = &self.services.server.config.rooms.extremities;
+	let len = extremities
+		.len()
+		.saturating_add(usize::from(!soft_fail));
+
+	if config.max == 0 || len <= config.max {
+		return extremities;
+	}
+
+	let goal = prune_goal(len, config.max, config.emergency_max, config.prune_batch);
+
+	self.prune_extremities(room_id, extremities, goal)
+		.await
+}
+
+#[implement(super::Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn prune_extremities(
+	&self,
+	room_id: &RoomId,
+	mut extremities: Vec<OwnedEventId>,
+	goal: usize,
+) -> Vec<OwnedEventId> {
+	let summary = self
+		.services
+		.state
+		.prune_forward_extremities(room_id, &mut extremities, goal, Trigger::Receive)
+		.await;
+
+	debug!(?summary, "Pruned forward extremities over the cap.");
+	extremities
 }
 
 #[implement(super::Service)]
