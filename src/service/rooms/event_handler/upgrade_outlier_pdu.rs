@@ -96,6 +96,7 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 
 	trace!(format = ?room_rules.event_format, "Checking format");
 	check_rules(&pdu_json, &room_rules.event_format)?;
+	self.check_event_provenance(&incoming_pdu, &room_rules, Some(create_event_id))?;
 
 	let Standing::Evaluate(cleared) = self
 		.soft_fail_standing(&incoming_pdu, &room_rules, &mut pdu_json)
