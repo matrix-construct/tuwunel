@@ -9,19 +9,31 @@
 use ruma::{CanonicalJsonObject, RoomVersionId};
 use serde::de::IgnoredAny;
 use tuwunel_core::{Err, Result, err, implement};
-use tuwunel_matrix::event::gen_event_id;
+use tuwunel_matrix::{event::gen_event_id, pdu::MAX_PDU_BYTES};
 
 use super::{Op, Opts};
 
+/// Largest event response accepted before parsing. A server serves an event
+/// with its `unsigned` data, which can hold the previous state content and a
+/// thread's latest reply, so this allows several times the PDU size limit.
+const MAX_SERVED_PDU_BYTES: usize = 4 * MAX_PDU_BYTES;
+
 /// Applies poison detection before a fetched response is accepted.
 ///
-/// When `check_conforms` is enabled, malformed JSON rolls over to the next
+/// When `check_conforms` is enabled, an event or auth-event response larger
+/// than `MAX_SERVED_PDU_BYTES` and malformed JSON roll over to the next
 /// candidate; Backfill also rejects an empty batch while MissingEvents accepts
 /// one. Deep validation is limited to event and auth-event operations.
 #[implement(super::Service)]
 #[tracing::instrument(name = "validate", level = "trace", skip_all)]
 pub(super) async fn validate(&self, opts: &Opts, bytes: &[u8]) -> Result {
 	if opts.check_conforms {
+		if matches!(opts.op, Op::Event | Op::AuthEvent) && bytes.len() > MAX_SERVED_PDU_BYTES {
+			return Err!(BadServerResponse(
+				"PDU is larger than maximum of {MAX_SERVED_PDU_BYTES} bytes"
+			));
+		}
+
 		match opts.op {
 			| Op::Backfill => serde_json::from_slice(bytes)
 				.map(|pdus: Vec<IgnoredAny>| !pdus.is_empty())
