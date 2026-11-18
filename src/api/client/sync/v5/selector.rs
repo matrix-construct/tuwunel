@@ -4,6 +4,7 @@ use futures::{
 	FutureExt, StreamExt,
 	future::{join, join3},
 };
+use itertools::Itertools;
 use ruma::{
 	OwnedRoomId, RoomId, UInt, api::client::sync::sync_events::v5::ListId,
 	events::room::member::MembershipState, uint,
@@ -18,7 +19,10 @@ use tuwunel_core::{
 	},
 };
 use tuwunel_matrix::PduCount;
-use tuwunel_service::{sync::Connection, users::InviteFilter};
+use tuwunel_service::{
+	sync::{Connection, Lists},
+	users::InviteFilter,
+};
 
 use super::{
 	super::invite_permitted_room,
@@ -345,27 +349,9 @@ async fn window<'a, Rooms>(
 where
 	Rooms: Iterator<Item = &'a WindowRoom> + Clone + Send + Sync,
 {
-	static FULL_RANGE: (UInt, UInt) = (UInt::MIN, UInt::MAX);
-
 	let SyncInfo { services, sender_user, .. } = sync_info;
-
-	let selections = conn
-		.lists
-		.iter()
-		.flat_map(|(id, list)| {
-			let full_range = list
-				.ranges
-				.is_empty()
-				.then_some(&FULL_RANGE)
-				.into_iter();
-
-			list.ranges
-				.iter()
-				.chain(full_range)
-				.map(apply!(2, usize_from_ruma))
-				.map(move |range| (id, range))
-		})
-		.flat_map(|(id, (start, end))| select_list_range(rooms.clone(), id, start, end).cloned())
+	let selections = list_selections(&conn.lists, rooms.clone())
+		.cloned()
 		.stream();
 
 	let indexed_subscriptions = (conn.subscriptions.len() > 1).then(|| {
@@ -455,6 +441,32 @@ where
 
 fn detached_room(room: WindowRoom) -> WindowRoom { WindowRoom { lists: ListIds::new(), ..room } }
 
+/// Borrow each room selected by any list range once, before copying it into the window.
+fn list_selections<'a>(
+	lists: &Lists,
+	rooms: impl Iterator<Item = &'a WindowRoom> + Clone,
+) -> impl Iterator<Item = &'a WindowRoom> {
+	static FULL_RANGE: (UInt, UInt) = (UInt::MIN, UInt::MAX);
+
+	lists
+		.iter()
+		.flat_map(|(id, list)| {
+			let full_range = list
+				.ranges
+				.is_empty()
+				.then_some(&FULL_RANGE)
+				.into_iter();
+
+			list.ranges
+				.iter()
+				.chain(full_range)
+				.map(apply!(2, usize_from_ruma))
+				.map(move |range| (id, range))
+		})
+		.flat_map(move |(id, (start, end))| select_list_range(rooms.clone(), id, start, end))
+		.unique_by(|&room| &room.room_id)
+}
+
 fn select_list_range<'a, Rooms>(
 	rooms: Rooms,
 	id: &ListId,
@@ -479,8 +491,8 @@ mod tests {
 	};
 
 	use super::{
-		ActivityCounts, ListIds, WindowRoom, activity_counts, detached_room, response_lists,
-		room_sort, select_list_range,
+		ActivityCounts, ListIds, WindowRoom, activity_counts, detached_room, list_selections,
+		response_lists, room_sort, select_list_range,
 	};
 
 	const NEXT_BATCH: u64 = 10;
@@ -569,6 +581,34 @@ mod tests {
 			room_id!("!stale:example.com").to_owned(),
 			room_id!("!fresh:example.com").to_owned(),
 		]);
+	}
+
+	#[test]
+	fn overlapping_ranges_select_each_room_once() {
+		use ruma::api::client::sync::sync_events::v5::request::List;
+
+		let main = ListId::from("main");
+		let other = ListId::from("other");
+		let mut first = room(room_id!("!first:example.com").to_owned(), 2, 2, None);
+		let mut second = room(room_id!("!second:example.com").to_owned(), 1, 1, None);
+		first.lists.extend([main.clone(), other.clone()]);
+		second.lists.push(main.clone());
+		let rooms = [first, second];
+		let lists = [
+			(main, List {
+				ranges: [(uint!(0), uint!(1)), (uint!(0), uint!(0))]
+					.into_iter()
+					.collect(),
+				..Default::default()
+			}),
+			(other, List::default()),
+		]
+		.into();
+
+		let selected: Vec<_> = list_selections(&lists, rooms.iter())
+			.map(|room| &room.room_id)
+			.collect();
+		assert_eq!(selected, [&rooms[0].room_id, &rooms[1].room_id]);
 	}
 
 	#[test]
