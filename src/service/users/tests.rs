@@ -548,9 +548,10 @@ async fn device_removal_keeps_its_connections() -> Result {
 
 	create_devices(users, user_id, &[device_id]).await?;
 
-	let (mut conn, ()) = sync.admit_connection(&key, |_| Ok(())).await?;
+	let mut conn = sync.admit_connection(&key, |_| Ok(())).await?;
 	conn.next_batch = next_batch;
-	sync.store_connection(&key, tokio::sync::OwnedMutexGuard::mutex(&conn), &conn).await?;
+	sync.store_connection(&key, tokio::sync::OwnedMutexGuard::mutex(&conn), &conn)
+		.await?;
 	drop(conn);
 
 	users.remove_device(user_id, device_id).await;
@@ -561,7 +562,7 @@ async fn device_removal_keeps_its_connections() -> Result {
 		.create_device(user_id, Some(device_id), (None, None), None, None, None)
 		.await?;
 
-	let (resumed, ()) = sync.admit_connection(&key, |_| Ok(())).await?;
+	let resumed = sync.admit_connection(&key, |_| Ok(())).await?;
 
 	assert_eq!(resumed.next_batch, next_batch);
 

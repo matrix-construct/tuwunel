@@ -254,15 +254,20 @@ pub async fn drop_connection(&self, key: &ConnectionKey) {
 /// connection while holding the cache lock: a sync stores under the opposite order.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self, check))]
-pub async fn admit_connection<T>(
-	&self, key: &ConnectionKey, check: impl FnOnce(&Connection) -> Result<T> + Send,
-) -> Result<(OwnedMutexGuard<Connection>, T)> {
+pub async fn admit_connection<F>(
+	&self,
+	key: &ConnectionKey,
+	check: F,
+) -> Result<OwnedMutexGuard<Connection>>
+where
+	F: FnOnce(&Connection) -> Result + Send,
+{
 	let mut cache = self.connections.lock().await;
 	if let Some(conn) = cache.get(key).cloned() {
 		drop(cache);
 		let guard = conn.lock_owned().await;
-		let admitted = check(&guard)?;
-		return Ok((guard, admitted));
+		check(&guard)?;
+		return Ok(guard);
 	}
 
 	// A removed device's connection stays fresh and cannot be stored.
@@ -270,13 +275,24 @@ pub async fn admit_connection<T>(
 	let conn = if removed {
 		Connection::default()
 	} else {
-		self.db.userdeviceconnid_conn.qry(key).await.deserialized().map(|Cbor(conn)| conn).unwrap_or_default()
+		self.db
+			.userdeviceconnid_conn
+			.qry(key)
+			.await
+			.deserialized()
+			.map(|Cbor(conn)| conn)
+			.unwrap_or_default()
 	};
-	let admitted = check(&conn)?;
+	check(&conn)?;
 	let handle = Arc::new(TokioMutex::new(conn));
-	let guard = handle.clone().try_lock_owned().expect("new connection is unlocked");
-	if !removed { cache.insert(key.clone(), handle); }
-	Ok((guard, admitted))
+	let guard = handle
+		.clone()
+		.try_lock_owned()
+		.expect("new connection is unlocked");
+	if !removed {
+		cache.insert(key.clone(), handle);
+	}
+	Ok(guard)
 }
 
 #[implement(Service)]

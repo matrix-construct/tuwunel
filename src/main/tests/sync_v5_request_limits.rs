@@ -17,7 +17,11 @@ const CONN: &str = "limits";
 
 #[test]
 fn oversized_requests_leave_live_and_stored_connection_unchanged() -> Result {
-	fixture::boot("sync-request-limits", ["logging.enable=false", "presence.allow_local=true"], exercise)
+	fixture::boot(
+		"sync-request-limits",
+		["logging.enable=false", "presence.allow_local=true"],
+		exercise,
+	)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {
@@ -34,10 +38,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let pos = field(&opened, "pos")?;
 	let (user, device, _) = services.users.find_from_token(TOKEN).await?;
 	let key = into_connection_key(user.clone(), Some(device.clone()), Some(CONN));
-	let conn = services
-		.sync
-		.get_loaded_connection(&key)
-		.await?;
+	let conn = services.sync.get_loaded_connection(&key).await?;
 	let stored = services.db.get("userdeviceconnid_conn")?;
 	let before = to_value(&*conn.lock().await)?;
 	let bytes = stored.qry(&key).await?.to_vec();
@@ -70,7 +71,16 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let reply = client.post_url(&url, &rejected).await?;
 	assert_eq!(reply.status(), StatusCode::BAD_REQUEST);
 	assert_eq!(reply.json::<Value>().await?["errcode"], "M_INVALID_PARAM");
-	assert_eq!((services.sync.is_connection_loaded(&cold_key).await, presence.get(user.as_bytes()).await?.to_vec()), (false, presence_before));
+	assert_eq!(
+		(
+			services
+				.sync
+				.is_connection_loaded(&cold_key)
+				.await,
+			presence.get(user.as_bytes()).await?.to_vec()
+		),
+		(false, presence_before)
+	);
 	let resumed = client
 		.sliding_sync(Some(pos), 0, &json!({"conn_id": CONN}))
 		.await?;
