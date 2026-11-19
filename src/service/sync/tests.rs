@@ -1018,9 +1018,9 @@ async fn dropping_connections_deletes_only_the_matches() -> Result {
 	};
 
 	for key in &keys {
-		let conn = sync.load_or_init_connection(key).await?;
+		let (conn, ()) = sync.admit_connection(key, |_| Ok(())).await?;
 
-		sync.store_connection(key, &conn, &*conn.lock().await)
+		sync.store_connection(key, tokio::sync::OwnedMutexGuard::mutex(&conn), &conn)
 			.await?;
 
 		assert_eq!(presence(key).await, (true, true), "{key:?}");

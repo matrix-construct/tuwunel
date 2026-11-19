@@ -19,7 +19,7 @@ use ruma::{
 	profile::ProfileFieldName,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::{Mutex as TokioMutex, OwnedMutexGuard};
 use tuwunel_core::{
 	Result, at, debug, err, implement, is_equal_to,
 	smallvec::SmallVec,
@@ -249,39 +249,34 @@ pub async fn drop_connection(&self, key: &ConnectionKey) {
 	cache.remove(key);
 }
 
-/// Returns the connection for a key, from the cache or else from storage.
-///
-/// An uncached connection for a removed device is returned fresh and left
-/// uncached, and a device that cannot be read fails the load. Otherwise the
-/// stored state, or a default when none is stored, is cached.
+/// Locks a connection and checks admission against the state the request will use.
+/// A cold connection is not published until it passes. Never wait on a warm
+/// connection while holding the cache lock: a sync stores under the opposite order.
 #[implement(Service)]
-#[tracing::instrument(level = "debug", skip(self))]
-pub async fn load_or_init_connection(&self, key: &ConnectionKey) -> Result<ConnectionVal> {
+#[tracing::instrument(level = "debug", skip(self, check))]
+pub async fn admit_connection<T>(
+	&self, key: &ConnectionKey, check: impl FnOnce(&Connection) -> Result<T> + Send,
+) -> Result<(OwnedMutexGuard<Connection>, T)> {
 	let mut cache = self.connections.lock().await;
-
-	if let Some(conn) = cache.get(key) {
-		return Ok(conn.clone());
+	if let Some(conn) = cache.get(key).cloned() {
+		drop(cache);
+		let guard = conn.lock_owned().await;
+		let admitted = check(&guard)?;
+		return Ok((guard, admitted));
 	}
 
-	// Left uncached, a removed device's connection can never be stored.
-	if self.device_removed(key).await? {
-		return Ok(ConnectionVal::default());
-	}
-
-	let conn: ConnectionVal = self
-		.db
-		.userdeviceconnid_conn
-		.qry(key)
-		.await
-		.deserialized()
-		.map(|Cbor(conn)| conn)
-		.map(TokioMutex::new)
-		.map(Arc::new)
-		.unwrap_or_default();
-
-	cache.insert(key.clone(), conn.clone());
-
-	Ok(conn)
+	// A removed device's connection stays fresh and cannot be stored.
+	let removed = self.device_removed(key).await?;
+	let conn = if removed {
+		Connection::default()
+	} else {
+		self.db.userdeviceconnid_conn.qry(key).await.deserialized().map(|Cbor(conn)| conn).unwrap_or_default()
+	};
+	let admitted = check(&conn)?;
+	let handle = Arc::new(TokioMutex::new(conn));
+	let guard = handle.clone().try_lock_owned().expect("new connection is unlocked");
+	if !removed { cache.insert(key.clone(), handle); }
+	Ok((guard, admitted))
 }
 
 #[implement(Service)]

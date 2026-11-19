@@ -17,7 +17,7 @@ const CONN: &str = "limits";
 
 #[test]
 fn oversized_requests_leave_live_and_stored_connection_unchanged() -> Result {
-	fixture::boot("sync-request-limits", ["logging.enable=false"], exercise)
+	fixture::boot("sync-request-limits", ["logging.enable=false", "presence.allow_local=true"], exercise)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {
@@ -33,10 +33,10 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 	let pos = field(&opened, "pos")?;
 	let (user, device, _) = services.users.find_from_token(TOKEN).await?;
-	let key = into_connection_key(user, Some(device), Some(CONN));
+	let key = into_connection_key(user.clone(), Some(device.clone()), Some(CONN));
 	let conn = services
 		.sync
-		.load_or_init_connection(&key)
+		.get_loaded_connection(&key)
 		.await?;
 	let stored = services.db.get("userdeviceconnid_conn")?;
 	let before = to_value(&*conn.lock().await)?;
@@ -58,6 +58,19 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		assert_eq!(to_value(&*conn.lock().await)?, before);
 		assert_eq!(stored.qry(&key).await?.as_ref(), bytes.as_slice());
 	}
+	// Copy the persisted state to a connection that has never been loaded.
+	let cold = "cold";
+	let cold_key = into_connection_key(user.clone(), Some(device), Some(cold));
+	stored.put_raw(&cold_key, &bytes);
+	let presence = services.db.get("userid_presenceid")?;
+	let presence_before = presence.get(user.as_bytes()).await?.to_vec();
+	let mut rejected = extra.clone();
+	rejected["conn_id"] = json!(cold);
+	let url = format!("{}&set_presence=offline", client.sliding_sync_url(Some(pos), 0));
+	let reply = client.post_url(&url, &rejected).await?;
+	assert_eq!(reply.status(), StatusCode::BAD_REQUEST);
+	assert_eq!(reply.json::<Value>().await?["errcode"], "M_INVALID_PARAM");
+	assert_eq!((services.sync.is_connection_loaded(&cold_key).await, presence.get(user.as_bytes()).await?.to_vec()), (false, presence_before));
 	let resumed = client
 		.sliding_sync(Some(pos), 0, &json!({"conn_id": CONN}))
 		.await?;
