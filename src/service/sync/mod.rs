@@ -598,13 +598,11 @@ fn update_cache_lists(request: &Request, cached: &mut Self) -> bool {
 		.lists
 		.iter()
 		.fold(false, |changed, (list_id, request_list)| {
-			let list_changed = match cached.lists.get_mut(list_id) {
-				| Some(cached_list) => Self::update_cache_list(request_list, cached_list),
-				| None => {
-					cached
-						.lists
-						.insert(list_id.clone(), request_list.clone());
-
+			let list_changed = match cached.lists.entry(list_id.clone()) {
+				| Entry::Occupied(mut entry) =>
+					Self::update_cache_list(request_list, entry.get_mut()),
+				| Entry::Vacant(entry) => {
+					Self::update_cache_list(request_list, entry.insert(request::List::default()));
 					true
 				},
 			};
@@ -615,14 +613,16 @@ fn update_cache_lists(request: &Request, cached: &mut Self) -> bool {
 
 #[implement(Connection)]
 fn update_cache_list(request: &request::List, cached: &mut request::List) -> bool {
-	let ranges_changed = request.ranges != cached.ranges;
+	let ranges = distinct(&request.ranges);
+	let ranges_changed = ranges != cached.ranges.as_slice();
 	let timeline_limit_changed =
 		request.room_details.timeline_limit != cached.room_details.timeline_limit;
 
 	let required_state_changed = !request.room_details.required_state.is_empty()
 		&& request.room_details.required_state != cached.room_details.required_state;
 
-	let filters_changed = request.filters.as_ref().is_some_and(|request| {
+	let filters = request.filters.as_ref().map(distinct_filters);
+	let filters_changed = filters.as_ref().is_some_and(|request| {
 		cached
 			.filters
 			.as_ref()
@@ -633,7 +633,7 @@ fn update_cache_list(request: &request::List, cached: &mut request::List) -> boo
 		ranges_changed || timeline_limit_changed || required_state_changed || filters_changed;
 
 	if ranges_changed {
-		cached.ranges.clone_from(&request.ranges);
+		cached.ranges = ranges.into();
 	}
 
 	cached.room_details.timeline_limit = request.room_details.timeline_limit;
@@ -646,7 +646,7 @@ fn update_cache_list(request: &request::List, cached: &mut request::List) -> boo
 	}
 
 	if filters_changed {
-		cached.filters.clone_from(&request.filters);
+		cached.filters = filters;
 	}
 
 	changed
@@ -678,6 +678,34 @@ fn subscriptions_are_equal(request: &Subscriptions, cached: &Subscriptions) -> b
 fn list_config_is_equal(request: &request::ListConfig, cached: &request::ListConfig) -> bool {
 	request.timeline_limit == cached.timeline_limit
 		&& request.required_state == cached.required_state
+}
+
+/// The entries of a list in their first order, each kept once.
+fn distinct<T: Clone + PartialEq>(entries: &[T]) -> Vec<T> {
+	entries
+		.iter()
+		.fold(Vec::new(), |mut kept, entry| {
+			if !kept.contains(entry) {
+				kept.push(entry.clone());
+			}
+
+			kept
+		})
+}
+
+/// A list's filters with each entry kept once, in its first order.
+#[must_use]
+pub fn distinct_filters(filters: &request::ListFilters) -> request::ListFilters {
+	request::ListFilters {
+		is_dm: filters.is_dm,
+		is_encrypted: filters.is_encrypted,
+		is_invite: filters.is_invite,
+		room_types: distinct(&filters.room_types),
+		not_room_types: distinct(&filters.not_room_types),
+		tags: distinct(&filters.tags),
+		not_tags: distinct(&filters.not_tags),
+		spaces: distinct(&filters.spaces),
+	}
 }
 
 fn list_filters_are_equal(request: &request::ListFilters, cached: &request::ListFilters) -> bool {

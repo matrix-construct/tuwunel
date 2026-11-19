@@ -34,21 +34,18 @@ pub(super) fn check(request: &Request, cached: Option<&Connection>) -> Result {
 	for (i, (id, list, previous)) in updated.chain(retained).enumerate() {
 		bounded("list count", i.saturating_add(1), LISTS_MAX)?;
 		bounded("list ID length in bytes", id.len(), LIST_ID_BYTES_MAX)?;
-		bounded("ranges per list", list.ranges.len(), RANGES_MAX)?;
-		if let Some(filters) = list
+		bounded_distinct("ranges per list", &list.ranges, RANGES_MAX)?;
+		let filters = list
 			.filters
 			.as_ref()
-			.or_else(|| previous?.filters.as_ref())
-		{
-			for (name, count) in [
-				("spaces", filters.spaces.len()),
-				("tags", filters.tags.len()),
-				("not_tags", filters.not_tags.len()),
-				("room_types", filters.room_types.len()),
-				("not_room_types", filters.not_room_types.len()),
-			] {
-				bounded(name, count, FILTER_ENTRIES_MAX)?;
-			}
+			.or_else(|| previous?.filters.as_ref());
+
+		if let Some(filters) = filters {
+			bounded_distinct("spaces", &filters.spaces, FILTER_ENTRIES_MAX)?;
+			bounded_distinct("tags", &filters.tags, FILTER_ENTRIES_MAX)?;
+			bounded_distinct("not_tags", &filters.not_tags, FILTER_ENTRIES_MAX)?;
+			bounded_distinct("room_types", &filters.room_types, FILTER_ENTRIES_MAX)?;
+			bounded_distinct("not_room_types", &filters.not_room_types, FILTER_ENTRIES_MAX)?;
 		}
 
 		// An empty required_state on a list update keeps its previous selection.
@@ -118,6 +115,19 @@ fn check_scope<T: AsRef<str>>(
 		}
 	}
 	bounded("rooms per extension", rooms.map_or(0, <[_]>::len), EXTENSION_ROOMS_MAX)
+}
+
+/// Refuses more than `max` distinct entries, stopping at the first distinct entry past it.
+fn bounded_distinct<T: PartialEq>(field: &str, entries: &[T], max: usize) -> Result {
+	let mut seen = Vec::new();
+	for entry in entries {
+		if !seen.contains(&entry) {
+			seen.push(entry);
+			bounded(field, seen.len(), max)?;
+		}
+	}
+
+	Ok(())
 }
 
 fn bounded(field: &str, count: usize, max: usize) -> Result {

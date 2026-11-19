@@ -173,3 +173,12 @@ fn extension_scopes_have_the_same_limits_including_sticky_events() {
 		assert!(check(&config(vec!["x".repeat(65)], 0), None).is_err(), "{extension}: list ID");
 	}
 }
+
+#[test]
+fn repeated_ranges_and_predicates_do_not_consume_slots() {
+	let request = list(json!({"ranges": vec![[0, 0]; 17], "filters": {
+		"not_tags": vec!["u.hide"; 17], "tags": vec!["u.show"; 17], "spaces": vec!["!s:example.com"; 17],
+		"room_types": vec!["m.space"; 17], "not_room_types": vec!["other"; 17]
+	}}));
+	check(&request, None).expect("one distinct range and one term in each filter");
+}

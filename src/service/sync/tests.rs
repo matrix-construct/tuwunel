@@ -495,6 +495,32 @@ fn update_cache_detects_changed_required_state() {
 }
 
 #[test]
+fn repeated_ranges_and_filters_keep_their_first_order() {
+	let list = |tags: &[&str], ranges: &[(u64, u64)]| List {
+		ranges: ranges_from_u64(ranges),
+		filters: Some(ListFilters {
+			not_tags: tags
+				.iter()
+				.map(|name| (*name).to_owned().into())
+				.collect(),
+			..Default::default()
+		}),
+		..Default::default()
+	};
+	let mut conn = Connection::default();
+	let unique = list(&["u.b", "u.a"], &[(4, 6), (0, 2)]);
+	let repeated = list(&["u.b", "u.a", "u.b"], &[(4, 6), (0, 2), (4, 6)]);
+	assert!(conn.update_cache(&request_with_list(repeated.clone())));
+	assert_cached_ranges(&conn, &[(4, 6), (0, 2)]);
+	assert_eq!(
+		cached_filters(&conn).not_tags,
+		unique.filters.as_ref().expect("filter").not_tags
+	);
+	assert!(!conn.update_cache(&request_with_list(unique)));
+	assert!(!conn.update_cache(&request_with_list(repeated)));
+}
+
+#[test]
 fn update_cache_detects_new_default_list() {
 	let mut conn = Connection::default();
 
