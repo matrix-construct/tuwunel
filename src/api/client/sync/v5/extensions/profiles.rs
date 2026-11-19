@@ -20,7 +20,7 @@ use tuwunel_core::{
 use tuwunel_service::{Services, sync::Connection};
 
 use super::{
-	super::{range::Results, rooms::merged_room_details, selection::ListSelections},
+	super::{range::Results, rooms::merged_room_details},
 	SyncInfo, Window, selector,
 };
 use crate::sync::profiles::{Changes, Fields, fold_change, read_field, visible};
@@ -35,14 +35,13 @@ pub(super) async fn collect(
 	conn: &Connection,
 	window: &Window,
 	ranges: &Results,
-	selections: &ListSelections<'_>,
 ) -> Result<Profiles> {
 	let requested = conn.extensions.profiles.fields.as_deref();
 	if requested.is_some_and(<[_]>::is_empty) {
 		return Ok(Profiles::default());
 	}
 
-	let bases = room_bases(services, conn, window, ranges, selections).await?;
+	let bases = room_bases(services, conn, window, ranges).await?;
 	let changes = bases
 		.chain(
 			conn.own_profile_owed()
@@ -107,7 +106,6 @@ async fn room_bases(
 	conn: &Connection,
 	window: &Window,
 	ranges: &Results,
-	selections: &ListSelections<'_>,
 ) -> Result<impl Iterator<Item = OwnedUserId>> {
 	let config = &conn.extensions.profiles;
 
@@ -131,7 +129,7 @@ async fn room_bases(
 			return Ok(bases);
 		};
 
-		let (_, state) = merged_room_details(conn, selections, &selected.lists, room_id);
+		let (_, state) = merged_room_details(conn, &selected.lists, room_id);
 		let lazy = state
 			.iter()
 			.any(|(kind, key)| kind == &StateEventType::RoomMember && key == "$LAZY");
