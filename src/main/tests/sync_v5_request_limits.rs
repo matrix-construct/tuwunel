@@ -91,3 +91,48 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert!(fresh["lists"].get("keep").is_none());
 	Ok(())
 }
+
+/// A resume that updates two lists no one room can match, without restating
+/// their sticky filters, is budgeted by the filters they inherit.
+#[test]
+fn resume_budgets_lists_by_their_inherited_filters() -> Result {
+	fixture::boot("sync-request-limits-inherited", ["logging.enable=false"], exercise_inherited)
+}
+
+async fn exercise_inherited(services: &Services, base: &str) -> Result {
+	register(services, "inherited", TOKEN).await?;
+	let client = Client { services, base, token: TOKEN };
+	let list = |is_dm: Option<bool>, prefix: &str, n: usize| {
+		let keys: Vec<_> = (0..n)
+			.map(|i| json!(["m.room.member", format!("{prefix}{i}")]))
+			.collect();
+		let mut list = json!({"ranges": [], "timeline_limit": 0, "required_state": keys});
+		if let Some(is_dm) = is_dm {
+			list["filters"] = json!({"is_dm": is_dm});
+		}
+		list
+	};
+	let opened = client
+		.sliding_sync(
+			None,
+			0,
+			&json!({
+				"conn_id": CONN,
+				"lists": {"dm": list(Some(true), "d", 1), "rooms": list(Some(false), "r", 1)},
+			}),
+		)
+		.await?;
+	let pos = field(&opened, "pos")?;
+	let resumed = client
+		.sliding_sync(
+			Some(pos),
+			0,
+			&json!({
+				"conn_id": CONN,
+				"lists": {"dm": list(None, "e", 256), "rooms": list(None, "s", 1)},
+			}),
+		)
+		.await?;
+	assert!(resumed["lists"].get("dm").is_some());
+	Ok(())
+}

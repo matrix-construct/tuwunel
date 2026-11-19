@@ -20,6 +20,7 @@ use ruma::{
 		UnreadNotificationsCount,
 		v5::{
 			DisplayName,
+			request::ListConfig,
 			response::{Heroes, Room as ResponseRoom},
 		},
 	},
@@ -66,8 +67,9 @@ use super::{
 		load_sticky_events, load_timeline_fallible, own_departure, stand_in_leave,
 		strip_state_unsigned,
 	},
-	Connection, ListIds, SyncInfo, WindowRoom, departed, joined_since, stripped_content,
-	stripped_state,
+	Connection, ListIds, SyncInfo, WindowRoom, departed, joined_since,
+	selection::ListSelections,
+	stripped_content, stripped_state,
 };
 use crate::{ignored_filter, with_membership};
 
@@ -437,29 +439,29 @@ async fn leave_or_ban_response(
 	})
 }
 
+/// The timeline limit and required state a window room is delivered with: the
+/// union of its lists' prepared selections and its subscription's.
 pub(super) fn merged_room_details(
 	conn: &Connection,
+	selections: &ListSelections<'_>,
 	lists: &ListIds,
 	room_id: &RoomId,
 ) -> RoomDetails {
-	lists
-		.iter()
-		.filter_map(|list_id| conn.lists.get(list_id))
-		.map(|list| &list.room_details)
-		.chain(conn.subscriptions.get(room_id))
-		.fold((0_usize, HashSet::new()), |mut details, config| {
-			details.0 = details.0.max(usize_from_ruma_bounded(
-				config.timeline_limit,
-				TIMELINE_LIMIT_MAX,
-				TIMELINE_LIMIT_MAX,
-			));
+	let (limit, mut required_state) = selections.merge(lists);
+	let limit = conn
+		.subscriptions
+		.get(room_id)
+		.map_or(limit, |config| {
+			required_state.extend(config.required_state.iter().cloned());
 
-			details
-				.1
-				.extend(config.required_state.iter().cloned());
+			limit.max(timeline_limit(config))
+		});
 
-			details
-		})
+	(limit, required_state)
+}
+
+pub(super) fn timeline_limit(config: &ListConfig) -> usize {
+	usize_from_ruma_bounded(config.timeline_limit, TIMELINE_LIMIT_MAX, TIMELINE_LIMIT_MAX)
 }
 
 pub(super) fn room_config((timeline_limit, required_state): &RoomDetails) -> RoomConfig {

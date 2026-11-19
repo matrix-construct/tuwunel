@@ -175,10 +175,62 @@ fn extension_scopes_have_the_same_limits_including_sticky_events() {
 }
 
 #[test]
+fn disjoint_dm_lists_have_separate_budgets_on_open_and_resume() {
+	let keys = selectors(256);
+	let mut request = list(json!({"required_state": keys, "filters": {"is_dm": true}}));
+	let other =
+		list(json!({"required_state": [["m.room.name", ""]], "filters": {"is_dm": false}}));
+	let other = other
+		.lists
+		.into_values()
+		.next()
+		.expect("one list");
+	request.lists.insert("other".into(), other);
+	check(&request, None).expect("a room cannot be both direct and non-direct");
+	let mut conn = Connection::default();
+	conn.update_cache(&request);
+	check(&Request::new(), Some(&conn)).expect("retained disjoint lists");
+	let update = list(json!({"filters": {}}));
+	assert!(
+		check(&update, Some(&conn)).is_err(),
+		"removing the filter makes the lists overlap"
+	);
+}
+
+#[test]
 fn repeated_ranges_and_predicates_do_not_consume_slots() {
 	let request = list(json!({"ranges": vec![[0, 0]; 17], "filters": {
 		"not_tags": vec!["u.hide"; 17], "tags": vec!["u.show"; 17], "spaces": vec!["!s:example.com"; 17],
 		"room_types": vec!["m.space"; 17], "not_room_types": vec!["other"; 17]
 	}}));
 	check(&request, None).expect("one distinct range and one term in each filter");
+}
+
+#[test]
+fn filter_groups_budget_tags_types_and_boolean_dimensions() {
+	let cases = [
+		(json!({"is_invite": false}), json!({"is_invite": true}), true),
+		(json!({"is_encrypted": true}), json!({"is_encrypted": false}), true),
+		(json!({"tags": ["m.favourite"]}), json!({"not_tags": ["m.favourite"]}), true),
+		(json!({"room_types": [null]}), json!({"room_types": ["m.space"]}), true),
+		(json!({"room_types": ["m.space"]}), json!({"not_room_types": ["m.space"]}), true),
+		(
+			json!({"tags": ["m.favourite", "u.work"]}),
+			json!({"not_tags": ["m.favourite"]}),
+			false,
+		),
+	];
+	for (one, two, fits) in cases {
+		let mut request = list(json!({"required_state": selectors(256), "filters": one}));
+		let second = list(json!({"required_state": [["m.room.name", ""]], "filters": two}));
+		request.lists.insert(
+			"other".into(),
+			second
+				.lists
+				.into_values()
+				.next()
+				.expect("one list"),
+		);
+		assert_eq!(check(&request, None).is_ok(), fits, "{one}, {two}");
+	}
 }

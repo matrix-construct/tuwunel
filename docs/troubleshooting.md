@@ -46,8 +46,9 @@ conversation to a newly created room is the only remedy.
 
 #### Sliding sync returns `M_INVALID_PARAM` for a list or extension selection
 
-Tuwunel refuses the whole request instead of silently dropping selectors,
-list ranges or filters. The previous connection and `pos` remain usable.
+Tuwunel refuses the whole request with HTTP 400 instead of dropping selectors,
+ranges or filters. Refusal does not cache a cold connection, ping presence,
+acknowledge to-device messages or change the previous `pos`.
 Reduce the selection and retry. To replace all sticky lists, start a valid
 request without `pos`.
 
@@ -55,17 +56,30 @@ request without `pos`.
 | --- | --- |
 | Sticky lists on one connection | 64 |
 | List ID, including IDs in extension filters | 64 UTF-8 bytes |
-| Ranges on one list | 16 |
-| `spaces`, `tags`, `not_tags`, `room_types`, `not_room_types` on one list | 16 entries each |
+| Ranges on one list | 16 distinct |
+| `spaces`, `tags`, `not_tags`, `room_types`, `not_room_types` on one list | 16 distinct entries each |
 | `required_state` on one list or one room subscription | 256 entries |
-| Distinct `required_state` selectors across all lists plus any one room subscription | 256 |
-| `lists` and `rooms` on each account data, receipts, typing, profiles or sticky events extension | 64 list IDs and 256 rooms |
+| Distinct `required_state` selectors across the lists one room can match, plus any one room subscription | 256 |
+| `lists` and `rooms` on each account data, receipts, typing, profiles or MSC4480 sticky events extension | 64 list IDs and 256 rooms |
 
-Per-field limits count entries as sent, including repeats. The combined
-`required_state` budget counts a selector only once across lists, even when
-their windows do not overlap today. A room can enter another list on a later
-sync. Two different rooms' subscriptions are not added together. On a resumed connection, omitted sticky settings still
-count. An empty list `required_state` also keeps the previous selection.
+Ranges and filter entries count each distinct entry once, and the connection
+keeps their first-occurrence order. Per-list and per-subscription
+`required_state` and extension scopes count entries as sent. The
+combined `required_state` budget counts a selector only once, across every
+list a room might match, even when their windows do not overlap today: a room
+can enter another list on a later sync. Lists no one room can match are
+budgeted apart: those requiring opposite `is_dm`, `is_encrypted` or
+`is_invite`, and those where one requires a tag or room type the other
+excludes or does not admit. The check compares lists in pairs, so three lists
+can still share one budget when no room matches all three, for example an
+unfiltered list next to a `tags: [m.favourite]` list and a
+`not_tags: [m.favourite]` list. Two different rooms' subscriptions are not
+added together.
+
+On resume, an update that omits a list's filters uses its saved filters. An
+empty list `required_state` also keeps the previous selection. A connection
+stored by an older server can hold selections that are now refused; a valid
+request without `pos` replaces them, but the new selection must itself fit.
 
 ## General potential issues
 

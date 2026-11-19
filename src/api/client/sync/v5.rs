@@ -3,6 +3,7 @@ mod filter;
 mod limits;
 mod range;
 mod rooms;
+mod selection;
 mod selector;
 
 #[cfg(test)]
@@ -138,14 +139,16 @@ pub(crate) async fn sync_events_v5_route(
 		.and_then(|string| string.parse().ok())
 		.unwrap_or(0);
 
+	limits::check_wire(request, since != 0)?;
+
 	let timeout = poll_timeout(request, services.config.client.sync.timeout_max);
 
 	let conn_key = into_connection_key(sender_user, sender_device, request.conn_id.as_deref());
 	let mut conn = services
 		.sync
 		.admit_connection(&conn_key, |conn| {
-			limits::check(request, (since != 0).then_some(conn))?;
 			if since != 0 {
+				limits::check(request, Some(conn))?;
 				check_profile_selection(services, request, conn)?;
 				if conn.next_batch == 0 {
 					return Err!(Request(UnknownPos(warn!(
@@ -255,13 +258,15 @@ pub(crate) async fn sync_events_v5_route(
 		(window, response.lists) = selector(&mut conn, sync_info).await;
 
 		if conn.globalsince < conn.next_batch {
-			let ranges = collect_ranges(sync_info, &conn, &window);
+			let selections = selection::ListSelections::new(&conn);
+			let ranges = collect_ranges(sync_info, &conn, &window, &selections);
 			let extensions = handle_extensions(sync_info, &conn, &window);
 			let (mut ranges, extensions) = join(ranges, extensions).await;
 
 			let mut extensions = extensions?;
 
-			apply_profiles(sync_info, &conn, &window, &ranges, &mut extensions).await?;
+			apply_profiles(sync_info, &conn, &window, &ranges, &selections, &mut extensions)
+				.await?;
 			apply_ranges(&conn, &window, &mut ranges, &mut extensions);
 			conn.update_rooms_epilogue(since, ranges.room_updates());
 			conn.update_profiles_epilogue();

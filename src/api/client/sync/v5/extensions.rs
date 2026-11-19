@@ -38,7 +38,10 @@ pub(super) use self::{
 		pending as to_device_pending,
 	},
 };
-use super::{SyncInfo, Window, WindowRoom, joined_since, range::Results, share_encrypted_room};
+use super::{
+	SyncInfo, Window, WindowRoom, joined_since, range::Results, selection::ListSelections,
+	share_encrypted_room,
+};
 
 pub(super) struct Collected {
 	response: Extensions,
@@ -129,10 +132,12 @@ pub(super) async fn apply_profiles(
 	conn: &Connection,
 	window: &Window,
 	ranges: &Results,
+	selections: &ListSelections<'_>,
 	extensions: &mut Collected,
 ) -> Result {
 	if conn.extensions.profiles.enabled.unwrap_or(false) {
-		extensions.response.profiles = collect_profiles(sync_info, conn, window, ranges).await?;
+		extensions.response.profiles =
+			collect_profiles(sync_info, conn, window, ranges, selections).await?;
 	}
 
 	Ok(())

@@ -16,6 +16,7 @@ use ruma::{
 use tuwunel_matrix::pdu::PduCount;
 
 use super::{
+	super::selection::ListSelections,
 	Candidate, Collected, Connection, ListIds, StateMode, TIMELINE_LIMIT_MAX, UnreadState,
 	collected::{recorded_snapshot, unread_state},
 	fingerprints_cover, membership_allows_required_state, merged_room_details,
@@ -261,7 +262,9 @@ fn timeline_limit_is_capped() {
 		};
 
 		let lists: ListIds = once(list).collect();
-		let (timeline_limit, required_state) = merged_room_details(&conn, &lists, room_id);
+		let selections = ListSelections::new(&conn);
+		let (timeline_limit, required_state) =
+			merged_room_details(&conn, &selections, &lists, room_id);
 		let expected_state = HashSet::from([
 			(StateEventType::RoomName, "".into()),
 			(StateEventType::RoomTopic, "".into()),
@@ -270,6 +273,30 @@ fn timeline_limit_is_capped() {
 		assert_eq!(timeline_limit, expected);
 		assert_eq!(required_state, expected_state);
 	}
+}
+
+#[test]
+fn overlapping_lists_materialize_each_selector_once() {
+	let lists: ListIds = ["first", "second"]
+		.map(ListId::from)
+		.into_iter()
+		.collect();
+	let mut conn = Connection::default();
+	for (id, keys) in lists.iter().zip([["a", "b"], ["b", "c"]]) {
+		conn.lists
+			.entry(id.clone())
+			.or_default()
+			.room_details
+			.required_state = keys
+			.map(|key| (StateEventType::RoomMember, key.into()))
+			.into();
+	}
+	let room = room_id!("!room:example.com");
+	let selections = ListSelections::new(&conn);
+	let (_, merged) = merged_room_details(&conn, &selections, &lists, room);
+	assert_eq!(selections.distinct(), 3);
+	let expected = ["a", "b", "c"].map(|key| (StateEventType::RoomMember, key.into()));
+	assert_eq!(merged, expected.into_iter().collect());
 }
 
 #[test]
