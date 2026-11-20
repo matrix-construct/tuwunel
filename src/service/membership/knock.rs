@@ -119,11 +119,7 @@ pub async fn knock<'a>(
 		return Err!(Request(Forbidden("You cannot knock on a room you are banned from.")));
 	}
 
-	let local_knock = server_in_room
-		|| servers.is_empty()
-		|| (servers.len() == 1 && self.services.globals.server_is_ours(&servers[0]));
-
-	if local_knock {
+	if server_in_room || self.no_remote_server(&servers) {
 		self.knock_room_helper_local(sender_user, room_id, reason, &servers, state_lock)
 			.await
 	} else {
@@ -175,9 +171,7 @@ async fn knock_room_helper_local(
 		return Ok(());
 	};
 
-	if servers.is_empty()
-		|| (servers.len() == 1 && self.services.globals.server_is_ours(&servers[0]))
-	{
+	if self.no_remote_server(servers) {
 		return Err(error);
 	}
 

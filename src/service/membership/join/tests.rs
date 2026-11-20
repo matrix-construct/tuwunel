@@ -1,15 +1,22 @@
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, RoomId, RoomVersionId,
-	api::error::ErrorKind, events::room::member::RoomMemberEventContent, room_id,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedServerName, RoomId, RoomVersionId,
+	UserId,
+	api::error::ErrorKind,
+	events::room::{
+		create::RoomCreateEventContent,
+		join_rules::{JoinRule, RoomJoinRulesEventContent},
+		member::{MembershipState, RoomMemberEventContent},
+	},
+	room_id, user_id,
 };
 use serde_json::{Value, from_value, json, to_vec, value::to_raw_value};
 use tuwunel_core::{Error, Result, config::Figment};
-use tuwunel_matrix::room_version::rules as room_version_rules;
+use tuwunel_matrix::{pdu::PduBuilder, room_version::rules as room_version_rules};
 
-use super::merge_member_content;
+use super::{Join, merge_member_content};
 use crate::{
 	Services,
-	test_utils::{keyed_fixture, pdu_id, signed_state, with_field},
+	test_utils::{fixture, keyed_fixture, pdu_id, signed_state, with_field},
 };
 
 const MAX_BYTES: usize = 4096;
@@ -101,6 +108,162 @@ async fn a_send_join_event_replaces_only_an_altered_outlier() -> Result {
 	assert_eq!(outlier_content(&forged_id).await?, genuine_avatar);
 
 	Ok(())
+}
+
+/// A join to a room this server holds nothing of, with no remote server to
+/// ask, is refused as not found.
+///
+/// A room ID naming no server leaves no server at all, and one naming this
+/// server leaves only this server. Neither builds an event here.
+#[tokio::test]
+async fn a_join_to_an_unknown_room_without_a_remote_server_is_not_found() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let joiner = user_id!("@joiner:localhost");
+	let serverless = room_id!("!-HH3sxQGfqUqDC6KpDhKmpQuC2xuCnHBvGewVIrkkBk");
+	let ours = [services.globals.server_name().to_owned()];
+	let cases: [(&RoomId, &[OwnedServerName]); 3] =
+		[(serverless, &[]), (serverless, &ours), (room_id!("!unknown:localhost"), &[])];
+
+	for (room_id, servers) in cases {
+		let error = services
+			.membership
+			.join(join_request(joiner, room_id, servers))
+			.await
+			.expect_err("a join with no server to go through must fail");
+
+		let built = services
+			.state
+			.has_forward_extremities(room_id)
+			.await;
+
+		assert!(
+			matches!(error.kind(), ErrorKind::NotFound),
+			"{room_id} via {servers:?}: {error}"
+		);
+		assert!(!built, "{room_id} via {servers:?} built an event");
+	}
+
+	Ok(())
+}
+
+fn join_request<'a>(
+	sender_user: &'a UserId,
+	room_id: &'a RoomId,
+	servers: &'a [OwnedServerName],
+) -> Join<'a> {
+	Join {
+		sender_user,
+		room_id,
+		orig_room_id: None,
+		reason: None,
+		servers,
+		is_appservice: false,
+		extra_content: None,
+	}
+}
+
+/// A join with no remote server to ask is built on the state this server
+/// holds, while it is in the room and after it has left.
+///
+/// The room ID names this server and no `via` is given, so no remote server
+/// is asked. Once every member has left, this server is no longer resident
+/// and the join is built on the room's last state.
+#[tokio::test]
+async fn a_join_without_a_remote_server_builds_on_held_state() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room_id = room_id!("!held:localhost");
+	let creator = user_id!("@creator:localhost");
+	let member = user_id!("@member:localhost");
+
+	public_room(services, room_id, creator).await?;
+	services
+		.membership
+		.join(join_request(member, room_id, &[]))
+		.await?;
+
+	let joined = services
+		.state_cache
+		.is_joined(member, room_id)
+		.await;
+
+	assert!(joined, "a resident server builds the join");
+
+	for user_id in [creator, member] {
+		leave(services, room_id, user_id).await?;
+	}
+
+	let resident = services
+		.state_cache
+		.server_in_room(services.globals.server_name(), room_id)
+		.await;
+
+	assert!(!resident, "every member has left");
+
+	services
+		.membership
+		.join(join_request(creator, room_id, &[]))
+		.await?;
+
+	let rejoined = services
+		.state_cache
+		.is_joined(creator, room_id)
+		.await;
+
+	assert!(rejoined, "a server that left builds the join on its last state");
+
+	Ok(())
+}
+
+/// Creates a public room whose creator is its only member.
+///
+/// Its join rule is public, so any local user may join it.
+async fn public_room(services: &Services, room_id: &RoomId, creator: &UserId) -> Result {
+	let _shortroomid = services
+		.short
+		.get_or_create_shortroomid(room_id)
+		.await;
+
+	let state_lock = services.state.mutex.lock(room_id).await;
+	let create = RoomCreateEventContent {
+		room_version: RoomVersionId::V11,
+		..RoomCreateEventContent::new_v11()
+	};
+
+	let join = RoomMemberEventContent::new(MembershipState::Join);
+	let rules = RoomJoinRulesEventContent::new(JoinRule::Public);
+
+	for builder in [
+		PduBuilder::state("", &create),
+		PduBuilder::state(creator.as_str(), &join),
+		PduBuilder::state("", &rules),
+	] {
+		services
+			.timeline
+			.build_and_append_pdu(builder, creator, room_id, &state_lock)
+			.await?;
+	}
+
+	Ok(())
+}
+
+async fn leave(services: &Services, room_id: &RoomId, user_id: &UserId) -> Result {
+	let state_lock = services.state.mutex.lock(room_id).await;
+	let content = RoomMemberEventContent::new(MembershipState::Leave);
+	let builder = PduBuilder::state(user_id.as_str(), &content);
+
+	services
+		.timeline
+		.build_and_append_pdu(builder, user_id, room_id, &state_lock)
+		.await
+		.map(drop)
 }
 
 /// A stored profile avatar past its limit rides along a join with small extras.

@@ -257,10 +257,19 @@ async fn lock_join(
 	(Some(federation_lock), state_lock)
 }
 
+/// Whether this server builds the join itself rather than asking a remote one.
+///
+/// A resident server builds it. With no remote server to ask, a server that
+/// left builds it on the last state it held, which needs a forward extremity
+/// to reference; a room unknown here has none, so the remote branch refuses it.
 #[implement(Service)]
 async fn is_local_join(&self, room_id: &RoomId, servers: &[OwnedServerName]) -> bool {
-	servers.is_empty()
-		|| (servers.len() == 1 && self.services.globals.server_is_ours(&servers[0]))
+	(self.no_remote_server(servers)
+		&& self
+			.services
+			.state
+			.has_forward_extremities(room_id)
+			.await)
 		|| self
 			.services
 			.state_cache
@@ -324,6 +333,13 @@ async fn join_remote(
 	state_lock: RoomMutexGuard,
 	extra_content: Option<CanonicalJsonObject>,
 ) -> Result {
+	if self.no_remote_server(servers) {
+		return Err!(Request(NotFound(
+			"Room is unknown to this server and no servers were provided to join it over \
+			 federation."
+		)));
+	}
+
 	info!("Joining {room_id} over federation.");
 
 	let (make_join_response, remote_server) = self
@@ -880,10 +896,7 @@ async fn join_local(
 		return Ok(());
 	};
 
-	if restriction_rooms.is_empty()
-		&& (servers.is_empty()
-			|| servers.len() == 1 && self.services.globals.server_is_ours(&servers[0]))
-	{
+	if restriction_rooms.is_empty() && self.no_remote_server(servers) {
 		return Err(error);
 	}
 
