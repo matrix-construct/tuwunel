@@ -179,12 +179,19 @@ async fn handle_left_room(
 		.map(PduCount::into_unsigned)
 		.unwrap_or(left_count);
 
+	let sees_room_state = services
+		.state_cache
+		.once_joined(sender_user, room_id)
+		.or(services.state_accessor.is_world_readable(room_id))
+		.await;
+
 	load_left_room(
 		services,
 		sender_user,
 		room_id,
 		since,
 		horizon,
+		sees_room_state,
 		full_state,
 		state_after,
 		filter,
@@ -235,6 +242,7 @@ async fn load_left_room(
 	room_id: &RoomId,
 	since: u64,
 	horizon: u64,
+	sees_room_state: bool,
 	full_state: bool,
 	state_after: StateAfter,
 	filter: &FilterDefinition,
@@ -350,6 +358,7 @@ async fn load_left_room(
 		.filter(|pdu| filter.room.state.matches(pdu))
 		.filter(|pdu| timeline_limit > 0 || has_departure || !is_sender_membership(pdu))
 		.chain(timeline_sender_member)
+		.filter(left_state_filter(sender_user, sees_room_state))
 		.stream()
 		.wide_then(|pdu| with_membership(services, pdu, sender_user, encrypted))
 		.map(|pdu| strip_state_unsigned(pdu, sender_user, &in_timeline))
@@ -408,6 +417,12 @@ async fn load_left_room(
 	}))
 }
 
+/// A user who never joined a non-world-readable room gets only the state
+/// describing their own membership, including when the timeline limit is zero.
+fn left_state_filter(sender_user: &UserId, sees_room_state: bool) -> impl Fn(&PduEvent) -> bool {
+	move |pdu| sees_room_state || pdu.is_type_and_state_key(&RoomMember, sender_user.as_str())
+}
+
 async fn late_departure(
 	services: &Services,
 	sender_user: &UserId,
@@ -463,5 +478,38 @@ pub(super) fn in_timeline(
 		timeline_ids
 			.iter()
 			.any(is_equal_to!(event.event_id()))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::user_id;
+	use serde_json::{from_value, json};
+
+	use super::*;
+
+	#[test]
+	fn left_state_without_room_access_keeps_only_own_membership() {
+		let user = user_id!("@member:example.org");
+		let event = |kind, key| {
+			from_value(json!({
+				"event_id": "$state:example.org", "room_id": "!r:example.org",
+				"sender": user, "type": kind, "state_key": key, "content": {},
+				"origin_server_ts": 1, "depth": 1, "prev_events": [], "auth_events": [],
+				"hashes": {"sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
+			}))
+			.expect("state fixture")
+		};
+		let events = [
+			event("m.room.member", user.as_str()),
+			event("m.room.member", "@other:example.org"),
+			event("m.room.topic", ""),
+		];
+
+		let own_only = left_state_filter(user, false);
+		assert!(own_only(&events[0]));
+		assert!(!own_only(&events[1]));
+		assert!(!own_only(&events[2]));
+		assert!(events.iter().all(left_state_filter(user, true)));
 	}
 }
