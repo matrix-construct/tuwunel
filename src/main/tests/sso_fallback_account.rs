@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 mod admin;
+mod appservice;
 
 #[expect(
 	dead_code,
@@ -31,7 +32,11 @@ use tracing::{
 	subscriber::set_global_default,
 };
 use tracing_subscriber::fmt::{MakeWriter, fmt, format::FmtSpan};
-use tuwunel_core::{Err, Result, err, result::NotFound, ruma::OwnedUserId};
+use tuwunel_core::{
+	Err, Result, err,
+	result::NotFound,
+	ruma::{OwnedUserId, api::error::ErrorKind},
+};
 use tuwunel_service::{
 	Services,
 	oauth::{Deletions, Session, UserInfo, fallback_localpart, unique_id_sub},
@@ -279,6 +284,28 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	assert_unlogged(&session);
+
+	let bridge = appservice::Bridge {
+		id: "names",
+		token: "test-names-token",
+		sender_localpart: "names",
+		users: "^@reserved_.*:localhost$",
+		aliases: None,
+	};
+	appservice::register_appservice(services, &bridge).await?;
+	assert_eq!(
+		services
+			.oauth
+			.candidate_user_id("ordinary")
+			.await?
+			.localpart(),
+		"ordinary"
+	);
+	let reserved = services
+		.oauth
+		.candidate_user_id("reserved_example")
+		.await;
+	assert_eq!(reserved.expect_err("reserved candidate").kind(), ErrorKind::Exclusive);
 
 	Ok(())
 }
