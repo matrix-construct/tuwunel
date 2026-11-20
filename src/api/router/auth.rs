@@ -178,7 +178,7 @@ async fn find_token(services: &Services, token: Option<&str>) -> Result<Token> {
 
 	let user_token = services
 		.users
-		.find_from_token(token)
+		.find_from_access_token(token)
 		.map_ok(Token::User);
 
 	let appservice_token = services
