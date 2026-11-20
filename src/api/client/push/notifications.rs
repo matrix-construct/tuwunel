@@ -46,8 +46,7 @@ pub(crate) async fn get_notifications_route(
 		.as_deref()
 		.is_some_and(|only| only.contains("highlight"));
 
-	let mut next_token: Option<u64> = None;
-	let notifications = services
+	let mut notifications = services
 		.pusher
 		.get_notifications(sender_user, from)
 		.ready_filter(|(_, notify)| {
@@ -89,16 +88,21 @@ pub(crate) async fn get_notifications_route(
 
 			Some((count, notification))
 		})
-		.take(limit)
-		.inspect(|(count, _)| {
-			next_token.replace(*count);
-		})
-		.map(at!(1))
+		// One notification past the page shows whether another page follows.
+		.take(limit.saturating_add(1))
 		.collect::<Vec<_>>()
 		.await;
 
+	let more = notifications.len() > limit;
+	notifications.truncate(limit);
+
 	Ok(get_notifications::v3::Response {
-		next_token: next_token.map(to_small_string),
-		notifications,
+		next_token: notifications
+			.last()
+			.filter(|_| more)
+			.map(at!(0))
+			.map(to_small_string),
+
+		notifications: notifications.into_iter().map(at!(1)).collect(),
 	})
 }
