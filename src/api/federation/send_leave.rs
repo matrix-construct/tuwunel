@@ -8,7 +8,7 @@ use ruma::{
 	},
 };
 use tuwunel_core::{Err, Result, at, err};
-use tuwunel_matrix::event::gen_event_id_canonical_json;
+use tuwunel_matrix::{event::gen_event_id_canonical_json, pdu::check_raw_size};
 
 use super::utils::require_known_room;
 use crate::Ruma;
@@ -30,6 +30,7 @@ pub(crate) async fn create_leave_event_v2_route(
 	// We do not add the event_id field to the pdu here because of signature and
 	// hashes checks
 	let room_version_id = services.state.get_room_version(room_id).await?;
+	check_raw_size(&body.pdu)?;
 	let Ok((event_id, value)) = gen_event_id_canonical_json(&body.pdu, &room_version_id) else {
 		// Event could not be converted to canonical json
 		return Err!(Request(BadJson("Could not convert event to canonical json.")));

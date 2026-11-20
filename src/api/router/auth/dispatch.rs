@@ -1,15 +1,12 @@
 use std::any::TypeId;
 
-use ruma::{
-	CanonicalJsonValue,
-	api::{
-		auth_scheme::{
-			AccessToken, AccessTokenOptional, AppserviceToken, AppserviceTokenOptional,
-			AuthScheme, NoAccessToken, NoAuthentication,
-		},
-		client::{account::change_password, delayed_events::update_delayed_event},
-		federation::authentication::ServerSignatures,
+use ruma::api::{
+	auth_scheme::{
+		AccessToken, AccessTokenOptional, AppserviceToken, AppserviceTokenOptional, AuthScheme,
+		NoAccessToken, NoAuthentication,
 	},
+	client::{account::change_password, delayed_events::update_delayed_event},
+	federation::authentication::ServerSignatures,
 };
 use tuwunel_core::{Err, Error, Result};
 use tuwunel_service::Services;
@@ -43,7 +40,6 @@ pub(in crate::router) trait AuthDispatch: AuthScheme {
 	fn dispatch(
 		services: &Services,
 		request: &mut Request,
-		json_body: Option<&CanonicalJsonValue>,
 		token: Token,
 		route: TypeId,
 	) -> impl Future<Output = Result<Auth>> + Send;
@@ -55,12 +51,10 @@ impl AuthDispatch for NoAccessToken {
 	async fn dispatch(
 		services: &Services,
 		request: &mut Request,
-		json_body: Option<&CanonicalJsonValue>,
 		token: Token,
 		route: TypeId,
 	) -> Result<Auth> {
-		<NoAuthentication as AuthDispatch>::dispatch(services, request, json_body, token, route)
-			.await
+		<NoAuthentication as AuthDispatch>::dispatch(services, request, token, route).await
 	}
 }
 
@@ -70,7 +64,6 @@ impl AuthDispatch for NoAuthentication {
 	async fn dispatch(
 		_services: &Services,
 		_request: &mut Request,
-		_json_body: Option<&CanonicalJsonValue>,
 		token: Token,
 		_route: TypeId,
 	) -> Result<Auth> {
@@ -100,7 +93,6 @@ impl AuthDispatch for AccessToken {
 	async fn dispatch(
 		services: &Services,
 		request: &mut Request,
-		_json_body: Option<&CanonicalJsonValue>,
 		token: Token,
 		route: TypeId,
 	) -> Result<Auth> {
@@ -138,7 +130,6 @@ impl AuthDispatch for AccessTokenOptional {
 	async fn dispatch(
 		_services: &Services,
 		_request: &mut Request,
-		_json_body: Option<&CanonicalJsonValue>,
 		token: Token,
 		_route: TypeId,
 	) -> Result<Auth> {
@@ -166,7 +157,6 @@ impl AuthDispatch for AppserviceToken {
 	async fn dispatch(
 		_services: &Services,
 		_request: &mut Request,
-		_json_body: Option<&CanonicalJsonValue>,
 		token: Token,
 		_route: TypeId,
 	) -> Result<Auth> {
@@ -190,7 +180,6 @@ impl AuthDispatch for AppserviceTokenOptional {
 	async fn dispatch(
 		_services: &Services,
 		_request: &mut Request,
-		_json_body: Option<&CanonicalJsonValue>,
 		token: Token,
 		_route: TypeId,
 	) -> Result<Auth> {
@@ -218,16 +207,15 @@ impl AuthDispatch for ServerSignatures {
 	async fn dispatch(
 		services: &Services,
 		request: &mut Request,
-		json_body: Option<&CanonicalJsonValue>,
 		token: Token,
-		_route: TypeId,
+		route: TypeId,
 	) -> Result<Auth> {
 		match token {
 			| Token::Invalid => unknown_token(),
 			| Token::Expired => expired_token(),
 			| Token::Appservice(_) | Token::User(_) =>
 				Err!(Request(Unauthorized("Server signatures must be used on this endpoint."))),
-			| Token::None => Ok(auth_server(services, request, json_body).await?),
+			| Token::None => auth_server(services, request, route).await,
 		}
 	}
 }

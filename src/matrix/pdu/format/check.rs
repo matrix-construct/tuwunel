@@ -2,10 +2,24 @@ use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, ID_MAX_BYTES, RoomId, int,
 	room_version_rules::EventFormatRules,
 };
-use serde_json::to_string as to_json_string;
+use serde_json::{to_string as to_json_string, value::RawValue as RawJsonValue};
 use tuwunel_core::{Err, Result, err};
 
-use super::super::{MAX_AUTH_EVENTS, MAX_PDU_BYTES, MAX_PREV_EVENTS, Pdu};
+use super::super::{MAX_AUTH_EVENTS, MAX_PDU_BYTES, MAX_PREV_EVENTS, MAX_SERVED_PDU_BYTES, Pdu};
+
+/// Rejects a PDU from another server longer than [`MAX_SERVED_PDU_BYTES`].
+///
+/// Callers check before parsing, since the parsed tree is many times the size
+/// of its JSON.
+pub fn check_raw_size(pdu: &RawJsonValue) -> Result {
+	if pdu.get().len() > MAX_SERVED_PDU_BYTES {
+		return Err!(Request(TooLarge(
+			"PDU is larger than maximum of {MAX_SERVED_PDU_BYTES} bytes"
+		)));
+	}
+
+	Ok(())
+}
 
 /// Verifies that a parsed PDU belongs to the expected room.
 ///
@@ -216,6 +230,19 @@ mod tests {
 	use serde_json::{from_value as from_json_value, json};
 
 	use super::check_rules as check_pdu_format;
+
+	#[test]
+	fn served_pdu_size_counts_raw_bytes() {
+		use super::{MAX_SERVED_PDU_BYTES, check_raw_size};
+		let at_limit = serde_json::to_string(&"x".repeat(MAX_SERVED_PDU_BYTES.saturating_sub(2)))
+			.expect("serializes");
+		let over_limit =
+			serde_json::to_string(&"x".repeat(MAX_SERVED_PDU_BYTES.saturating_sub(1)))
+				.expect("serializes");
+		let raw = |text| serde_json::value::RawValue::from_string(text).expect("valid JSON");
+		check_raw_size(&raw(at_limit)).expect("exact limit is accepted");
+		check_raw_size(&raw(over_limit)).expect_err("one byte over the limit");
+	}
 
 	/// Construct a PDU valid for the event format of room v1.
 	fn pdu_v1() -> CanonicalJsonObject {
