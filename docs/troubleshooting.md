@@ -44,6 +44,12 @@ Upgrading the room is not a workaround either: the replacement room inherits
 `m.federate` from its predecessor, as it does on Synapse. Moving the
 conversation to a newly created room is the only remedy.
 
+#### A key upload returns `M_TOO_LARGE`
+
+Tuwunel accepts up to 64 KiB of JSON per device key object, including the
+keys of a dehydrated device, and per cross-signing key object. The limit
+applies to each object, not to their combined size in the request.
+
 ## General potential issues
 
 #### Potential DNS issues when using Docker

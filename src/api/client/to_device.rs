@@ -20,18 +20,11 @@ use tuwunel_core::{
 };
 use tuwunel_service::{sending::EduBuf, users::device::MAX_DEVICE_ID_LENGTH};
 
-use crate::Ruma;
+use crate::{MAX_EDU_CONTENT_BYTES, Ruma};
 
 /// Recipient devices of one `AllDevices` to-device send paired with their
 /// inbox counts.
 type Deliveries = SmallVec<[(OwnedDeviceId, u64); 1]>;
-
-/// Largest serialized content of one to-device message.
-///
-/// Synapse refuses larger content with the same limit, measured the same way on
-/// canonical JSON. Together with the cap on recipient device IDs it keeps the
-/// EDU carrying a message for a remote device far inside a peer's request limit.
-const MAX_CONTENT_BYTES: usize = 65_536;
 
 /// # `PUT /_matrix/client/r0/sendToDevice/{eventType}/{txnId}`
 ///
@@ -177,11 +170,11 @@ pub(crate) async fn send_event_to_device_route(
 
 /// Whether one message is too large to queue.
 ///
-/// Its content may not pass `MAX_CONTENT_BYTES`. No device can have an ID past
+/// Its content may not pass `MAX_EDU_CONTENT_BYTES`. No device can have an ID past
 /// `MAX_DEVICE_ID_LENGTH`, so neither may its recipient.
 fn too_large((target, event): (&DeviceIdOrAllDevices, &Raw<AnyToDeviceEventContent>)) -> bool {
 	let long_id = |device_id: &DeviceId| device_id.as_str().len() > MAX_DEVICE_ID_LENGTH;
 
-	event.json().get().len() > MAX_CONTENT_BYTES
+	event.json().get().len() > MAX_EDU_CONTENT_BYTES
 		|| matches!(target, DeviceIdOrAllDevices::DeviceId(device_id) if long_id(device_id))
 }

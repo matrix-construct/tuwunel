@@ -2,7 +2,7 @@ use axum::extract::State;
 use ruma::api::client::dehydrated_device::put_dehydrated_device::msc3814::{Request, Response};
 use tuwunel_core::Result;
 
-use crate::{ClientIp, Ruma};
+use crate::{ClientIp, Ruma, keys::check_key_size};
 
 /// # `PUT /_matrix/client/../dehydrated_device`
 ///
@@ -26,6 +26,8 @@ pub(crate) async fn put_dehydrated_device_route(
 		.sender_user
 		.as_deref()
 		.expect("AccessToken authentication required");
+
+	check_key_size(&body.body.device_keys)?;
 
 	let device_id = body.body.device_id.clone();
 
