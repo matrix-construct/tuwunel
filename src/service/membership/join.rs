@@ -8,8 +8,8 @@ use std::{
 
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join};
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedServerName, OwnedUserId, RoomId,
-	RoomOrAliasId, RoomVersionId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedServerName, OwnedUserId,
+	RoomId, RoomOrAliasId, RoomVersionId, UserId,
 	api::{error::ErrorKind, federation},
 	canonical_json::to_canonical_value,
 	events::{
@@ -402,8 +402,19 @@ async fn join_remote(
 		)
 		.await;
 
+	let create = self
+		.services
+		.event_handler
+		.known_create_id(room_id)
+		.await?;
 	let state = self
-		.ingest_send_join_state(room_id, &room_version_id, &room_version_rules, &response.state)
+		.ingest_send_join_state(
+			room_id,
+			&room_version_id,
+			&room_version_rules,
+			&response.state,
+			create.as_deref(),
+		)
 		.await;
 
 	self.ingest_send_join_auth_chain(
@@ -411,6 +422,7 @@ async fn join_remote(
 		&room_version_id,
 		&room_version_rules,
 		&response.auth_chain,
+		create.as_deref(),
 	)
 	.await;
 
@@ -673,11 +685,12 @@ async fn ingest_send_join_state(
 	room_version_id: &RoomVersionId,
 	room_version_rules: &RoomVersionRules,
 	state_pdus: &[Box<RawJsonValue>],
+	create: Option<&EventId>,
 ) -> HashMap<u64, OwnedEventId> {
 	info!(events = state_pdus.len(), "Going through send_join response room_state...");
 	let cork = self.services.db.cork_and_flush();
 	let state = self
-		.verified_pdus(room_id, room_version_id, room_version_rules, state_pdus, "state")
+		.verified_pdus(room_id, room_version_id, room_version_rules, state_pdus, "state", create)
 		.then(async |(event_id, pdu, value, verified)| {
 			self.services
 				.timeline
@@ -715,10 +728,18 @@ fn verified_pdus<'a>(
 	room_version_rules: &'a RoomVersionRules,
 	pdus: &'a [Box<RawJsonValue>],
 	list: &'static str,
+	create: Option<&'a EventId>,
 ) -> impl Stream<Item = VerifiedPdu> + Send + 'a {
 	pdus.iter()
 		.stream()
 		.wide_then(|pdu| self.verified_pdu(room_id, room_version_id, room_version_rules, pdu))
+		.map(move |result| -> Result<_> {
+			let verified = result?;
+			self.services
+				.event_handler
+				.check_event_provenance(&verified.1, room_version_rules, create)?;
+			Ok(verified)
+		})
 		.inspect_err(move |error| debug_error!(?error, list, "Invalid send_join event."))
 		.ready_filter_map(Result::ok)
 }
@@ -730,18 +751,26 @@ async fn ingest_send_join_auth_chain(
 	room_version_id: &RoomVersionId,
 	room_version_rules: &RoomVersionRules,
 	auth_chain: &[Box<RawJsonValue>],
+	create: Option<&EventId>,
 ) {
 	info!(events = auth_chain.len(), "Going through send_join response auth_chain...");
 	let cork = self.services.db.cork_and_flush();
 
-	self.verified_pdus(room_id, room_version_id, room_version_rules, auth_chain, "auth_chain")
-		.for_each(async |(event_id, _, value, verified)| {
-			self.services
-				.timeline
-				.add_verified_outlier(&event_id, &value, &verified)
-				.await;
-		})
-		.await;
+	self.verified_pdus(
+		room_id,
+		room_version_id,
+		room_version_rules,
+		auth_chain,
+		"auth_chain",
+		create,
+	)
+	.for_each(async |(event_id, _, value, verified)| {
+		self.services
+			.timeline
+			.add_verified_outlier(&event_id, &value, &verified)
+			.await;
+	})
+	.await;
 
 	drop(cork);
 }

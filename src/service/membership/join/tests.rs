@@ -242,6 +242,7 @@ async fn ingest(services: &Services, room_id: &RoomId, events: &[Value]) -> Resu
 			&version,
 			&room_version_rules(&version)?,
 			&auth_chain,
+			None,
 		)
 		.await;
 
