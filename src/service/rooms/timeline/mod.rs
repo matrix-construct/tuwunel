@@ -192,26 +192,28 @@ pub async fn replace_pdu(&self, pdu_id: &RawPduId, pdu_json: &CanonicalJsonObjec
 	Ok(())
 }
 
-/// Replaces a redacted event and its optional thread root in one batch.
+/// Replaces a redacted event and the rows it changes in one batch.
 ///
-/// The caller retains the room guard through this write. The root's thread
-/// index changes are part of the same batch.
+/// Those rows are its thread root and the state event that replaced it. The
+/// caller retains the room guard through this write. The root's thread index
+/// changes are part of the same batch.
 #[implement(Service)]
-#[tracing::instrument(skip(self, pdu, root), level = "debug")]
+#[tracing::instrument(skip(self, pdu, root, successor), level = "debug")]
 pub(super) async fn replace_redacted_pdu(
 	&self,
 	pdu_id: &RawPduId,
 	pdu: &CanonicalJsonObject,
 	root: Option<RedactedRoot>,
+	successor: Option<(RawPduId, CanonicalJsonObject)>,
 ) -> Result {
 	self.require_pdu(pdu_id).await?;
-	self.redaction_txn(pdu_id, pdu, root.as_ref())
+	self.redaction_txn(pdu_id, pdu, root.as_ref(), successor.as_ref())
 		.execute();
 
 	Ok(())
 }
 
-/// Stages a redacted event after its thread root.
+/// Stages a redacted event after its thread root and its successor.
 ///
 /// The redacted row comes last so it wins when a reply names itself as its root.
 #[implement(Service)]
@@ -220,6 +222,7 @@ fn redaction_txn(
 	pdu_id: &RawPduId,
 	pdu: &CanonicalJsonObject,
 	root: Option<&RedactedRoot>,
+	successor: Option<&(RawPduId, CanonicalJsonObject)>,
 ) -> Txn {
 	let mut txn = self.db.db.txn();
 
@@ -227,6 +230,10 @@ fn redaction_txn(
 		self.services
 			.threads
 			.stage_redacted_root(&mut txn, root);
+	}
+
+	if let Some((successor_id, successor)) = successor {
+		self.stage_replace_pdu(&mut txn, successor_id, successor);
 	}
 
 	self.stage_replace_pdu(&mut txn, pdu_id, pdu);
