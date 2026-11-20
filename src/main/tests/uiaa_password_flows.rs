@@ -7,7 +7,11 @@ use reqwest::StatusCode;
 use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{Err, Result, ruma::UserId};
-use tuwunel_service::{Services, oauth::Session, users::PASSWORD_SENTINEL};
+use tuwunel_service::{
+	Services,
+	oauth::{Session, UserInfo},
+	users::PASSWORD_SENTINEL,
+};
 
 use self::{client::wait_until_ready, fixture::boot, uiaa_signing::exercise as exercise_signing};
 
@@ -306,15 +310,23 @@ async fn exercise_linked(services: &Services, base: &str) -> Result {
 	let password = json!({"stages": ["m.login.password"]});
 	let sso = json!({"stages": ["m.login.sso"]});
 
+	let alpha = ("alpha", true);
+	let beta = ("beta", true);
+	let gamma = ("gamma", true);
+	let pending_gamma = ("gamma", false);
+	let gamma_brand = ("gamma-brand", true);
+
 	// Session ids sort in list order, so `ordered` stores beta's session first.
 	for (localpart, credential, tag, linked, bound) in [
-		("brand", PASSWORD_SENTINEL, None, &["beta-brand"][..], Some("beta")),
-		("default", PASSWORD_SENTINEL, None, &["alpha", "gamma"][..], Some("gamma")),
-		("ordered", PASSWORD_SENTINEL, None, &["beta", "alpha"][..], Some("alpha")),
-		("tagged", PASSWORD_SENTINEL, Some("alpha"), &["gamma"][..], Some("alpha")),
+		("brand", PASSWORD_SENTINEL, None, &[("beta-brand", true)][..], Some("beta")),
+		("default", PASSWORD_SENTINEL, None, &[alpha, gamma][..], Some("gamma")),
+		("ordered", PASSWORD_SENTINEL, None, &[beta, alpha][..], Some("alpha")),
+		("tagged", PASSWORD_SENTINEL, Some("alpha"), &[gamma][..], Some("alpha")),
+		("pending", PASSWORD_SENTINEL, None, &[beta, pending_gamma][..], Some("beta")),
+		("exact", PASSWORD_SENTINEL, None, &[beta, gamma_brand][..], Some("beta")),
 		("unlinked", PASSWORD_SENTINEL, None, &[][..], None),
-		("unconfigured", PASSWORD_SENTINEL, None, &["gone"][..], None),
-		("password", "test-password", None, &["beta"][..], Some("beta")),
+		("unconfigured", PASSWORD_SENTINEL, None, &[("gone", true)][..], None),
+		("password", "test-password", None, &[beta][..], Some("beta")),
 	] {
 		let user_id = UserId::parse_with_server_name(localpart, services.globals.server_name())?;
 
@@ -323,11 +335,15 @@ async fn exercise_linked(services: &Services, base: &str) -> Result {
 			.create(&user_id, Some(credential), Some("sso"))
 			.await?;
 
-		for (index, &idp_id) in linked.iter().enumerate() {
+		for (index, &(idp_id, completed)) in linked.iter().enumerate() {
 			let session = Session {
 				idp_id: Some(idp_id.to_owned()),
 				sess_id: Some(format!("{localpart}-{index}")),
 				user_id: Some(user_id.clone()),
+				user_info: completed.then(|| UserInfo {
+					sub: format!("{localpart}-{index}"),
+					..Default::default()
+				}),
 				..Default::default()
 			};
 

@@ -104,9 +104,14 @@ and the account is an SSO account on a server with exactly one provider,
 Tuwunel uses that provider.
 
 If neither case applies, Tuwunel chooses from the account's linked providers
-that are still configured on the server. It uses the default provider if the
-account is linked to it. If not, it uses the first linked provider in
-configuration order.
+that are still configured on the server. A provider is linked once the account
+has finished a sign-in there. Tuwunel uses the default provider if the account
+is linked to it. If not, it uses the first linked provider in configuration
+order.
+
+A finished sign-in records its provider's `client_id`. When no recorded ID is a
+configured `client_id`, a recorded ID that is the `brand` of exactly one
+provider links that provider instead.
 
 ### User ID mapping
 
