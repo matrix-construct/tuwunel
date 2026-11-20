@@ -14,7 +14,7 @@ use ruma::{
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_api_client::calculate_heroes;
 use tuwunel_core::{
-	Err, Result, at, err,
+	Err, Result, err,
 	itertools::Itertools,
 	utils::{
 		BoolExt,
@@ -188,13 +188,19 @@ async fn create_join_event(
 		.lock(room_id)
 		.await;
 
-	let pdu_id = services
+	let (pdu_id, appended) = services
 		.event_handler
 		.handle_incoming_pdu(&origin, room_id, &event_id, value.clone(), true)
 		.await?
-		.map(at!(0))
 		.ok_or_else(|| err!(Request(Forbidden("Could not accept as timeline event."))))?;
 
+	check_join_result(
+		appended,
+		services
+			.state_cache
+			.try_is_joined(&joining_user, room_id),
+	)
+	.await?;
 	drop(mutex_lock);
 
 	// Wait for state gather which the remaining operations depend on.
@@ -245,6 +251,15 @@ async fn create_join_event(
 		event,
 		..Default::default()
 	})
+}
+
+/// A new join has already been authorized. A retry needs current membership.
+async fn check_join_result(appended: bool, joined: impl Future<Output = Result<bool>>) -> Result {
+	if !appended && !joined.await? {
+		return Err!(Request(Forbidden("The user of this join event is no longer joined.")));
+	}
+
+	Ok(())
 }
 
 async fn validate_join_event_shape(
@@ -381,4 +396,25 @@ async fn validate_restricted_join(
 	}
 
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use std::future::ready;
+
+	use ruma::api::error::ErrorKind;
+	use tuwunel_core::Result;
+
+	use super::check_join_result;
+
+	#[tokio::test]
+	async fn only_join_retries_require_current_membership() -> Result {
+		check_join_result(true, async { panic!("a new join needs no second lookup") }).await?;
+		check_join_result(false, ready(Ok(true))).await?;
+		let refusal = check_join_result(false, ready(Ok(false)))
+			.await
+			.expect_err("a retry requires current membership");
+		assert_eq!(refusal.kind(), ErrorKind::Forbidden);
+		Ok(())
+	}
 }
