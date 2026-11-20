@@ -245,6 +245,38 @@ async fn departed_member_reads_the_state_after_their_leave_event() -> Result {
 			.await
 	);
 
+	// A later membership notification changes the delivery cursor, not the
+	// departure snapshot, even for a selector positioned beyond the departure.
+	let knock = event_id!("$knock:localhost");
+	let withdrawal = event_id!("$withdrawal:localhost");
+	store_state(services, shortroomid, room, member, &[
+		(7, knock, "m.room.member", member_key, json!({ "membership": "knock" })),
+		(8, withdrawal, "m.room.member", member_key, json!({ "membership": "leave" })),
+	]);
+	let knocked = compress_state(services, &StateEventType::RoomMember, member_key, knock).await;
+	let withdrawn =
+		compress_state(services, &StateEventType::RoomMember, member_key, withdrawal).await;
+	services
+		.state
+		.set_event_state(knock, room, Arc::new([created, kicked, named].into()))
+		.await?;
+	services
+		.state
+		.set_event_state(withdrawal, room, Arc::new([created, knocked, named].into()))
+		.await?;
+	save_room_state(services, room, Arc::new([created, withdrawn, named].into())).await?;
+	set_memberships(services, member, [
+		(room, member, MembershipState::Knock, 7),
+		(room, member, MembershipState::Leave, 8),
+	])
+	.await?;
+
+	assert_eq!(accessor.departure_count(member, room).await?, Some(PduCount::Normal(4)));
+	let since_knock = accessor
+		.user_visible_shortstatehash(member, room, Some(PduCount::Normal(7)))
+		.await?;
+	assert_eq!(since_knock, Some(visible));
+
 	services.state_cache.forget(room, member).await?;
 
 	let forgotten = accessor
@@ -326,6 +358,19 @@ async fn snapshotless_event_is_judged_by_current_state() -> Result {
 	let state = compress_states(services, &state_events).await;
 
 	save_room_state(services, room, Arc::new(state)).await?;
+
+	let member_join = event_id!("$member-join:localhost");
+	let before = with_state_key(
+		pdu_json(member_join, room, member, "m.room.member", &json!({ "membership": "join" })),
+		member_key,
+	);
+	outlier(services, member_join, &before);
+	let joined =
+		compress_state(services, &StateEventType::RoomMember, member_key, member_join).await;
+	services
+		.state
+		.set_event_state(leave, room, Arc::new([joined].into()))
+		.await?;
 
 	let memberships = [
 		(room, member, MembershipState::Join, 2),

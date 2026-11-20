@@ -138,7 +138,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	accounts.forgotten_member().await?;
 	accounts.recorded_ban_stays_a_ban().await?;
 	accounts
-		.missing_snapshot_keeps_the_timeline()
+		.missing_snapshot_keeps_the_notification()
 		.await?;
 
 	accounts
@@ -196,7 +196,7 @@ async fn left_history(&self, History { joined, unreadable }: History) -> Result 
 		let timeline = &room["timeline"]["events"];
 
 		assert!(room.is_object(), "left room missing: {reply}");
-		assert_eq!(has_event(timeline, &message), !bounded, "history bound: {reply}");
+		assert_eq!(has_event(timeline, &message), !joined, "history bound: {reply}");
 		if bounded && position == &before {
 			assert_eq!(timeline.as_array().unwrap().last().unwrap()["event_id"], leave.as_str());
 		}
@@ -212,7 +212,7 @@ async fn left_history(&self, History { joined, unreadable }: History) -> Result 
 		let state = &after["rooms"]["leave"][room_id.as_str()]["org.matrix.msc4222.state_after"]
 			["events"];
 
-		assert_eq!(has_event(state, &name), !bounded, "state bound: {after}");
+		assert!(!has_event(state, &name), "state bound: {after}");
 
 		let resumed = client
 			.sync_v3(Some(field(&reply, "next_batch")?))
@@ -662,12 +662,9 @@ async fn ban_in_v3(&self, room_id: &RoomId, since: &str, section: &str) -> Resul
 	Ok(())
 }
 
-/// An event with no snapshot after the client's position is still an event.
-///
-/// So the departure is a recorded one, and the room stays with the ordinary
-/// loader, which serves its timeline without that snapshot.
+/// Without its predecessor snapshot only the departure notification is safe.
 #[implement(Accounts, params = "<'_>")]
-async fn missing_snapshot_keeps_the_timeline(&self) -> Result {
+async fn missing_snapshot_keeps_the_notification(&self) -> Result {
 	let &Self { services, invitee, .. } = self;
 	let room_id = self.joined_room().await?;
 	let joined = self.position().await?;
@@ -679,7 +676,7 @@ async fn missing_snapshot_keeps_the_timeline(&self) -> Result {
 
 	services.db["shorteventid_shortstatehash"].del(shorteventid);
 
-	self.left_section(&room_id, &joined, "timeline")
+	self.left_section(&room_id, &joined, "state")
 		.await
 		.map(drop)
 }
