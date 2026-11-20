@@ -25,8 +25,8 @@ use ruma::{
 };
 use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
 use tuwunel_core::{
-	Err, Result, async_noinline, at, debug, debug_error, debug_info, debug_warn, err, error,
-	implement, info, trace,
+	Err, Error, Result, async_noinline, at, debug, debug_error, debug_info, debug_warn, err,
+	error, implement, info, trace,
 	utils::{
 		self, BoolExt, IterStream, ReadyExt, json::serialized_len, math::Expected, shuffle,
 		stream::WidebandExt,
@@ -257,10 +257,23 @@ async fn lock_join(
 	(Some(federation_lock), state_lock)
 }
 
+/// Whether this server builds the join itself rather than asking a remote one.
+///
+/// A resident server builds it. With no remote server to ask, a server that
+/// left builds it on the last state it held, which needs a forward extremity
+/// to reference; a room unknown here has none, so the remote branch refuses it.
+/// An unreadable frontier takes the local branch, which re-reads it and refuses
+/// to build on an empty one.
 #[implement(Service)]
 async fn is_local_join(&self, room_id: &RoomId, servers: &[OwnedServerName]) -> bool {
-	servers.is_empty()
-		|| (servers.len() == 1 && self.services.globals.server_is_ours(&servers[0]))
+	(self.no_remote_server(servers)
+		&& self
+			.services
+			.state
+			.has_forward_extremities(room_id)
+			.inspect_err(|error| warn!(%room_id, %error, "Unreadable forward extremities."))
+			.unwrap_or_else(|_| true)
+			.await)
 		|| self
 			.services
 			.state_cache
@@ -324,6 +337,10 @@ async fn join_remote(
 	state_lock: RoomMutexGuard,
 	extra_content: Option<CanonicalJsonObject>,
 ) -> Result {
+	if self.no_remote_server(servers) {
+		return Err(self.serverless_refusal(room_id).await);
+	}
+
 	info!("Joining {room_id} over federation.");
 
 	let (make_join_response, remote_server) = self
@@ -459,6 +476,33 @@ async fn join_remote(
 	);
 
 	Ok(())
+}
+
+/// The error for a join with no remote server to ask and no frontier here.
+///
+/// A room this server holds no state for is not found. A room whose state is
+/// stored but whose frontier is empty is damaged here rather than unknown, and
+/// a failed read of its state is returned as it is.
+#[implement(Service)]
+async fn serverless_refusal(&self, room_id: &RoomId) -> Error {
+	match self
+		.services
+		.state
+		.get_room_shortstatehash(room_id)
+		.await
+	{
+		| Ok(_) => {
+			let message = "no forward extremities to join on; join through a server in the room";
+			let room_id = room_id.to_owned();
+
+			err!(InconsistentRoomState(message, room_id))
+		},
+		| Err(error) if !error.is_not_found() => error,
+		| Err(_) => err!(Request(NotFound(
+			"Room is unknown to this server and no servers were provided to join it over \
+			 federation."
+		))),
+	}
 }
 
 #[implement(Service)]
@@ -880,10 +924,7 @@ async fn join_local(
 		return Ok(());
 	};
 
-	if restriction_rooms.is_empty()
-		&& (servers.is_empty()
-			|| servers.len() == 1 && self.services.globals.server_is_ours(&servers[0]))
-	{
+	if restriction_rooms.is_empty() && self.no_remote_server(servers) {
 		return Err(error);
 	}
 

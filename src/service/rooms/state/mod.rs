@@ -14,6 +14,7 @@ use std::{
 	fmt::Write,
 	iter::once,
 	ops::Bound::{Excluded, Unbounded},
+	pin::pin,
 	sync::Arc,
 };
 
@@ -1096,6 +1097,22 @@ pub async fn collapse_forward_extremities(
 		.await;
 
 	extremities.len().saturating_sub(1)
+}
+
+/// Reports whether a room has at least one forward extremity stored.
+///
+/// Only the create event can be built here without one, so a room this server
+/// never held or has purged reports `false`. A failed cursor read is returned
+/// as the error, never mistaken for an empty frontier.
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip(self))]
+pub async fn has_forward_extremities(&self, room_id: &RoomId) -> Result<bool> {
+	let prefix = (room_id, Interfix);
+
+	pin!(self.db.roomid_pduleaves.keys_prefix_raw(&prefix))
+		.next()
+		.map(|next| next.transpose().map(|key| key.is_some()))
+		.await
 }
 
 #[implement(Service)]

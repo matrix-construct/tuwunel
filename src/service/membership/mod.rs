@@ -13,7 +13,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use loole::{Receiver, Sender, unbounded};
 use ruma::{
-	CanonicalJsonObject, OwnedEventId, RoomId, RoomVersionId, UserId,
+	CanonicalJsonObject, OwnedEventId, OwnedServerName, RoomId, RoomVersionId, UserId,
 	events::room::member::MembershipState, room_version_rules::RoomVersionRules,
 	signatures::Verified,
 };
@@ -87,6 +87,16 @@ async fn banned_from_resident_room(&self, user_id: &UserId, room_id: &RoomId) ->
 			.get_member(room_id, user_id)
 			.await
 			.is_ok_and(|content| content.membership == MembershipState::Ban)
+}
+
+/// Whether a join or knock has no remote server to go through.
+///
+/// An empty list and a list naming only this server both qualify.
+#[implement(Service)]
+fn no_remote_server(&self, servers: &[OwnedServerName]) -> bool {
+	servers
+		.iter()
+		.all(|server| self.services.globals.server_is_ours(server))
 }
 
 /// Verifies a federation event and binds it to the room as a PDU.
