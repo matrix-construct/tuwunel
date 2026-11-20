@@ -167,7 +167,8 @@ pub struct Opts {
 	/// For Event and AuthEvent, reject a response whose calculated event ID differs; other operations ignore this flag.
 	pub check_event_id: bool,
 
-	/// Reject a response that is not well-formed JSON.
+	/// Reject a response that is not well-formed JSON, or an event response
+	/// too large to be a PDU served with its `unsigned` data.
 	pub check_conforms: bool,
 
 	/// Requests combined event verification for Event and AuthEvent responses.

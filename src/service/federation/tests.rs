@@ -382,7 +382,7 @@ async fn assert_refused_without_a_record(fixture: &Fixture, dest: &ServerName) {
 	refused("execute", result).await;
 
 	let result = federation
-		.execute_on_allow_self(client, dest, VersionRequest {})
+		.execute_on_allow_self(client, dest, VersionRequest {}, None)
 		.await;
 
 	refused("execute_on_allow_self", result).await;
@@ -420,7 +420,7 @@ async fn failed_request_records_peer_status() -> Result {
 		.expect_err("nothing listens on port 1");
 
 	federation
-		.execute_on_allow_self(client, &allow_self, VersionRequest {})
+		.execute_on_allow_self(client, &allow_self, VersionRequest {}, None)
 		.await
 		.expect_err("nothing listens on port 2");
 
@@ -882,5 +882,30 @@ async fn the_allow_self_entry_point_can_ask_this_server() -> Result {
 	assert!(refused.to_string().contains(refusal), "{refused}");
 	assert!(!attempted.to_string().contains(refusal), "{attempted}");
 
+	Ok(())
+}
+
+#[tokio::test]
+async fn federation_event_response_limit() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else { return Ok(()) };
+	let federation = &fixture.services.federation;
+	let global = federation.response_limit(None);
+	assert_eq!(
+		federation.response_limit(Some(usize::MAX)),
+		global,
+		"never raise the global limit"
+	);
+
+	// Use a six-byte response so the test exercises the cap without a network peer.
+	let response = || http::Response::new(reqwest::Body::from("abcdef")).into();
+	let at_limit =
+		crate::client::read_response_capped(response(), federation.response_limit(Some(6)))
+			.await?;
+	assert_eq!(&*at_limit, b"abcdef", "exactly the requested size fits");
+	let error =
+		crate::client::read_response_capped(response(), federation.response_limit(Some(5)))
+			.await
+			.expect_err("the per-request limit is enforced while reading");
+	assert!(error.to_string().contains("5 byte limit"), "{error}");
 	Ok(())
 }
