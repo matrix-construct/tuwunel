@@ -206,10 +206,10 @@ where
 		move |dest, request| async move {
 			match record {
 				| Record::Observe =>
-					self.execute_uncounted_allow_self(client, &dest, request)
+					self.execute_uncounted_allow_self(client, &dest, request, None)
 						.await,
 				| Record::Contribute =>
-					self.execute_on_allow_self(client, &dest, request)
+					self.execute_on_allow_self(client, &dest, request, None)
 						.await,
 			}
 		},

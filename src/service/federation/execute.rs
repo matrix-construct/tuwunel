@@ -51,7 +51,7 @@ where
 	T::PathBuilder: FedPath,
 {
 	let client = &self.services.client.federation;
-	self.execute_on(client, dest, request).await
+	self.execute_on(client, dest, request, None).await
 }
 
 /// Sends a federation request that may name this server as its destination.
@@ -73,7 +73,7 @@ where
 {
 	let client = &self.services.client.federation;
 
-	self.execute_on_allow_self(client, dest, request)
+	self.execute_on_allow_self(client, dest, request, None)
 		.await
 }
 
@@ -107,7 +107,7 @@ where
 
 	let client = &self.services.client.federation;
 
-	match timeout(timeout_dur, self.execute_uncounted(client, dest, request)).await {
+	match timeout(timeout_dur, self.execute_uncounted(client, dest, request, None)).await {
 		| Ok(result) => result,
 		| Err(_elapsed) => Err!("{dest} key lookup exceeded {}s", timeout_dur.as_secs()),
 	}
@@ -130,11 +130,12 @@ where
 	T::PathBuilder: FedPath,
 {
 	let client = &self.services.client.synapse;
-	self.execute_on(client, dest, request).await
+	self.execute_on(client, dest, request, None).await
 }
 
 /// Sends through a supplied client and records the peer outcome.
 ///
+/// `limit` can lower but never raise the configured response body limit.
 /// The destination's resolved route picks the direct or SRV half of the client.
 /// A successful response clears every stored failure row for the destination.
 /// A request refused because federation is disabled or the server is forbidden
@@ -146,6 +147,7 @@ pub async fn execute_on<T>(
 	client: &Federation,
 	dest: &ServerName,
 	request: T,
+	limit: Option<usize>,
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
@@ -153,7 +155,7 @@ where
 	T::PathBuilder: FedPath,
 {
 	let result = self
-		.execute_uncounted(client, dest, request)
+		.execute_uncounted(client, dest, request, limit)
 		.await;
 
 	self.record_outcome(dest, result.as_ref().err())
@@ -197,6 +199,7 @@ pub(super) async fn execute_on_allow_self<T>(
 	client: &Federation,
 	dest: &ServerName,
 	request: T,
+	limit: Option<usize>,
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
@@ -204,7 +207,7 @@ where
 	T::PathBuilder: FedPath,
 {
 	let result = self
-		.execute_uncounted_allow_self(client, dest, request)
+		.execute_uncounted_allow_self(client, dest, request, limit)
 		.await;
 
 	self.record_outcome(dest, result.as_ref().err())
@@ -228,6 +231,7 @@ pub(super) async fn execute_uncounted<T>(
 	client: &Federation,
 	dest: &ServerName,
 	request: T,
+	limit: Option<usize>,
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
@@ -242,7 +246,7 @@ where
 		.await?;
 	let request = self.prepare(&actual, dest, request)?;
 
-	self.perform::<T>(&actual, dest, request, client)
+	self.perform::<T>(&actual, dest, request, client, limit)
 		.await
 }
 
@@ -257,6 +261,7 @@ pub(super) async fn execute_uncounted_allow_self<T>(
 	client: &Federation,
 	dest: &ServerName,
 	request: T,
+	limit: Option<usize>,
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
@@ -271,7 +276,7 @@ where
 		.await?;
 	let request = self.prepare(&actual, dest, request)?;
 
-	self.perform::<T>(&actual, dest, request, client)
+	self.perform::<T>(&actual, dest, request, client, limit)
 		.await
 }
 
@@ -316,13 +321,7 @@ pub async fn execute_raw(
 				.expect_err("always returns error")),
 	};
 
-	let limit = self
-		.services
-		.server
-		.config
-		.network
-		.http
-		.max_response_size;
+	let limit = self.response_limit(None);
 
 	let status = response.status();
 	let body = read_response_capped(response, limit).await?;
@@ -381,6 +380,7 @@ async fn perform<T>(
 	dest: &ServerName,
 	request: Request,
 	client: &Federation,
+	limit: Option<usize>,
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
@@ -391,13 +391,7 @@ where
 	let method = request.method().clone();
 
 	debug!(?method, ?url, "Sending request");
-	let limit = self
-		.services
-		.server
-		.config
-		.network
-		.http
-		.max_response_size;
+	let limit = self.response_limit(limit);
 
 	match client.for_srv(actual.srv).execute(request).await {
 		| Ok(response) => handle_response::<T>(actual, dest, &method, &url, response, limit)
@@ -436,6 +430,19 @@ pub(super) fn validate_url(&self, url: &Url) -> Result {
 	}
 
 	Ok(())
+}
+
+/// The per-call cap can only narrow the configured ceiling.
+#[implement(super::Service)]
+pub(super) fn response_limit(&self, cap: Option<usize>) -> usize {
+	let global = self
+		.services
+		.server
+		.config
+		.network
+		.http
+		.max_response_size;
+	cap.map_or(global, |n| n.min(global))
 }
 
 async fn handle_response<T>(
