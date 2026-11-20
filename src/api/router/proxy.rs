@@ -20,11 +20,8 @@ use http::{
 };
 use itertools::Itertools;
 use reqwest::{Body as ReqwestBody, Response as ReqwestResponse};
-use ruma::{
-	CanonicalJsonValue,
-	api::{
-		auth_scheme::AccessToken, error::ErrorKind, federation::authentication::ServerSignatures,
-	},
+use ruma::api::{
+	auth_scheme::AccessToken, error::ErrorKind, federation::authentication::ServerSignatures,
 };
 use tuwunel_core::{
 	Err, Error, Result, err,
@@ -40,8 +37,8 @@ use tuwunel_service::{
 use url::form_urlencoded::parse as parse_query;
 
 use super::{
-	args::{parse_json, record_auth_context, serialize_body},
-	auth::{Auth, AuthDispatch, Scheme, auth},
+	args::{record_auth_context, serialize_body},
+	auth::{Auth, auth},
 	request::{PathParams, Request, from_parts},
 };
 
@@ -98,13 +95,13 @@ pub async fn proxy(services: &Services, request: HttpRequest<Body>) -> Result<Re
 
 	let (parts, body) = request.with_limited_body().into_parts();
 	let request = from_parts(services, parts, body, Path(PathParams::new())).await?;
-	let (request, auth, signed) = authenticate(services, request, root).await?;
+	let (request, auth) = authenticate(services, request, root).await?;
 
 	if let Some(span) = request.parts.extensions.get::<tracing::Span>() {
 		record_auth_context(span, &auth);
 	}
 
-	let upstream = upstream_request(request, root, &auth, signed.as_ref())?;
+	let upstream = upstream_request(request, root, &auth)?;
 	let response = services
 		.appservice
 		.send_proxied(&appservice, upstream)
@@ -160,37 +157,14 @@ fn not_found() -> Error {
 #[tracing::instrument(level = "debug", skip_all)]
 async fn authenticate(
 	services: &Services,
-	request: Request,
-	root: Root,
-) -> Result<(Request, Auth, Option<CanonicalJsonValue>)> {
-	let route = TypeId::of::<Proxied>();
-
-	match root {
-		| Root::Client => {
-			let (request, auth) =
-				authenticated::<AccessToken>(services, request, None, route).await?;
-
-			Ok((request, auth, None))
-		},
-		| Root::Federation => {
-			let signed = parse_json(&request, route, Scheme::ServerSignatures)?;
-			let (request, auth) =
-				authenticated::<ServerSignatures>(services, request, signed.as_ref(), route)
-					.await?;
-
-			Ok((request, auth, signed))
-		},
-	}
-}
-
-async fn authenticated<A: AuthDispatch>(
-	services: &Services,
 	mut request: Request,
-	json_body: Option<&CanonicalJsonValue>,
-	route: TypeId,
+	root: Root,
 ) -> Result<(Request, Auth)> {
-	let auth = auth::<A>(services, &mut request, json_body, route).await?;
-
+	let route = TypeId::of::<Proxied>();
+	let auth = match root {
+		| Root::Client => auth::<AccessToken>(services, &mut request, route).await?,
+		| Root::Federation => auth::<ServerSignatures>(services, &mut request, route).await?,
+	};
 	Ok((request, auth))
 }
 
@@ -202,12 +176,7 @@ async fn authenticated<A: AuthDispatch>(
 /// access token, cookies, other headers and any header its `Connection`
 /// names stay here; the identity it authenticated as rides in an MSC4512
 /// header.
-fn upstream_request(
-	request: Request,
-	root: Root,
-	auth: &Auth,
-	signed: Option<&CanonicalJsonValue>,
-) -> Result<HttpRequest<Bytes>> {
+fn upstream_request(request: Request, root: Root, auth: &Auth) -> Result<HttpRequest<Bytes>> {
 	let identity = match root {
 		| Root::Client => auth
 			.sender_user
@@ -224,7 +193,11 @@ fn upstream_request(
 
 	let body = match root {
 		| Root::Client => request.body,
-		| Root::Federation => signed.map(serialize_body).unwrap_or_default(),
+		| Root::Federation => auth
+			.signed_content
+			.as_ref()
+			.map(serialize_body)
+			.unwrap_or_default(),
 	};
 
 	let headers = &request.parts.headers;

@@ -37,8 +37,8 @@ type PathArgs<'a> = SmallVec<[&'a str; 8]>;
 
 /// Extracts a typed Ruma request and its authentication context.
 ///
-/// Administrator-only routes defer JSON errors until authorization succeeds.
-/// Ordinary routes reject malformed JSON before authentication.
+/// Client routes parse JSON after authentication and any admin check. A
+/// server-signed route parses canonical content during signature verification.
 #[derive(Debug)]
 pub struct Args<T, const ADMIN: bool = false> {
 	/// Request struct body
@@ -140,13 +140,7 @@ where
 		let route = TypeId::of::<T>();
 		let scheme = T::Authentication::SCHEME;
 		let request = request_from(services, request).await?;
-		let json_body = match ADMIN {
-			| true => parse_json(&request, route, scheme),
-			| false => Ok(parse_json(&request, route, scheme)?),
-		};
-
-		let json = json_body.as_ref().ok().and_then(Option::as_ref);
-		let (request, auth) = authenticate::<T>(request, services, json, route).await?;
+		let (request, mut auth) = authenticate::<T>(request, services, route).await?;
 
 		_ = request
 			.parts
@@ -162,7 +156,11 @@ where
 			require_admin(services, sender).await?;
 		}
 
-		make_args(services, request, json_body?, auth, route)
+		let json_body = match scheme {
+			| Scheme::ServerSignatures => auth.signed_content.take(),
+			| _ => parse_json(&request, route, scheme)?,
+		};
+		make_args(services, request, json_body, auth, route)
 	}
 }
 
@@ -243,19 +241,16 @@ fn takes_raw_body(route: TypeId) -> bool {
 }
 
 /// Authenticates a request while retaining the headers consumed by extraction.
-///
-/// The parsed canonical body remains available to federation authentication.
 async fn authenticate<T>(
 	mut request: Request,
 	services: &State,
-	json_body: Option<&CanonicalJsonValue>,
 	route: TypeId,
 ) -> Result<(Request, Auth)>
 where
 	T: IncomingRequest + Debug + Send + Sync + 'static,
 	T::Authentication: AuthDispatch,
 {
-	let auth = auth::<T::Authentication>(services, &mut request, json_body, route).await?;
+	let auth = auth::<T::Authentication>(services, &mut request, route).await?;
 
 	Ok((request, auth))
 }
