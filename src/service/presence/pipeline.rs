@@ -12,7 +12,7 @@ use ruma::{
 };
 use tokio::time::sleep;
 use tuwunel_core::{
-	Error, Result, debug,
+	Err, Error, Result, debug,
 	debug::INFO_SPAN_LEVEL,
 	error,
 	result::LogErr,
@@ -24,6 +24,11 @@ use super::{
 	Ping, Service, TimerFired,
 	aggregate::{self, StatusMsg},
 };
+
+/// Longest presence status message accepted, in bytes.
+///
+/// Clients sharing a room with the sender receive this text in presence updates.
+const MAX_STATUS_MSG_BYTES: usize = 4_096;
 
 impl Service {
 	fn device_key(device_id: Option<&DeviceId>, is_remote: bool) -> aggregate::DeviceKey {
@@ -280,6 +285,8 @@ impl Service {
 	}
 
 	/// Applies an explicit presence update for a local device.
+	///
+	/// A status message longer than `MAX_STATUS_MSG_BYTES` is refused.
 	pub async fn set_presence_for_device(
 		&self,
 		user_id: &UserId,
@@ -287,6 +294,15 @@ impl Service {
 		state: &PresenceState,
 		status_msg: Option<String>,
 	) -> Result {
+		if status_msg
+			.as_ref()
+			.is_some_and(|msg| msg.len() > MAX_STATUS_MSG_BYTES)
+		{
+			return Err!(Request(TooLarge(
+				"Status message cannot be longer than {MAX_STATUS_MSG_BYTES} bytes."
+			)));
+		}
+
 		let currently_active = *state == PresenceState::Online;
 		self.apply_device_presence_update(
 			user_id,
@@ -301,6 +317,9 @@ impl Service {
 	}
 
 	/// Applies a presence update received over federation.
+	///
+	/// A status message longer than `MAX_STATUS_MSG_BYTES` is dropped; the
+	/// rest of the update still applies.
 	pub async fn set_presence_from_federation(
 		&self,
 		user_id: &UserId,
@@ -309,6 +328,8 @@ impl Service {
 		last_active_ago: UInt,
 		status_msg: Option<String>,
 	) -> Result {
+		let status_msg = status_msg.filter(|msg| msg.len() <= MAX_STATUS_MSG_BYTES);
+
 		self.apply_device_presence_update(
 			user_id,
 			Self::device_key(None, true),

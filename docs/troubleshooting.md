@@ -18,6 +18,13 @@ argument once to invite yourself to the admin room on startup
 - Or specify the `emergency_password` config option to allow you to temporarily
 log into the server account (`@conduit`) from a web client
 
+#### A presence status update returns `M_TOO_LARGE`
+
+`status_msg` in a client presence update can contain up to 4 KiB of UTF-8
+text. Shorten the message before retrying. For an incoming federated
+presence update, Tuwunel drops a longer message but still applies the
+presence state.
+
 #### A room created with federation disabled cannot federate later
 
 `m.federate` lives in the room's `m.room.create` event, so it is fixed for the
