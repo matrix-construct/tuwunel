@@ -909,7 +909,7 @@ async fn join_local(
 
 	let room_version_id = self.require_supported_remote_room_version(&make_join_response)?;
 	let room_version_rules = room_version::rules(&room_version_id)?;
-	let (join_event, event_id, _) = self
+	let (join_event, event_id, authoriser) = self
 		.create_join_event(
 			room_id,
 			sender_user,
@@ -920,6 +920,10 @@ async fn join_local(
 			extra_content,
 		)
 		.await?;
+
+	if !self.fallback_authoriser_allowed(authoriser.as_deref()) {
+		return Err(error);
+	}
 
 	let send_join_response = self
 		.execute_send_join(&remote_server, room_id, &event_id, join_event, &room_version_id)
@@ -951,6 +955,12 @@ async fn join_local(
 	drop(federation_lock);
 
 	Ok(())
+}
+
+/// A fallback can obtain remote authority, but cannot grant local authority.
+#[implement(Service)]
+fn fallback_authoriser_allowed(&self, authoriser: Option<&UserId>) -> bool {
+	authoriser.is_none_or(|user| !self.services.globals.user_is_local(user))
 }
 
 #[implement(Service)]

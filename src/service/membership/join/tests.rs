@@ -14,6 +14,22 @@ use crate::{
 
 const MAX_BYTES: usize = 4096;
 
+#[tokio::test]
+async fn fallback_authority_must_not_be_local() -> Result {
+	use ruma::user_id;
+
+	use crate::test_utils::fixture;
+
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+	let membership = &fixture.services.membership;
+	assert!(membership.fallback_authoriser_allowed(None));
+	assert!(membership.fallback_authoriser_allowed(Some(user_id!("@member:example.test"))));
+	assert!(!membership.fallback_authoriser_allowed(Some(user_id!("@member:localhost"))));
+	Ok(())
+}
+
 /// A send_join event is stored without its `unsigned` data, and redacted when
 /// its content no longer matches its hash.
 ///
