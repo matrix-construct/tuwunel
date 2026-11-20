@@ -547,13 +547,13 @@ async fn handle_edu_receipt_room_user(
 	}
 
 	if !services
-		.state_cache
-		.server_in_room(origin, room_id)
+		.read_receipt
+		.accepts_federated_context(room_id, user_id, &user_updates.data.thread)
 		.await
 	{
 		debug_warn!(
 			%user_id, %room_id, %origin,
-			"received read receipt EDU from server who does not have a member in the room",
+			"received read receipt EDU outside the reader's membership or thread context",
 		);
 		return;
 	}
