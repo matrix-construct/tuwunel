@@ -13,7 +13,7 @@ use ruma::{
 	api::{error::ErrorKind, federation},
 	canonical_json::to_canonical_value,
 	events::{
-		StateEventType,
+		StateEventType, TimelineEventType,
 		room::{
 			create::RoomCreateEventContent,
 			join_rules::RoomJoinRulesEventContent,
@@ -26,7 +26,9 @@ use ruma::{
 use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
 use tuwunel_core::{
 	Err, Result, async_noinline, at, debug, debug_error, debug_info, debug_warn, err, error,
-	implement, info, trace,
+	implement, info,
+	result::NotFound,
+	trace,
 	utils::{
 		self, BoolExt, IterStream, ReadyExt, json::serialized_len, math::Expected, shuffle,
 		stream::WidebandExt,
@@ -403,16 +405,15 @@ async fn join_remote(
 		.await;
 
 	let state = self
-		.ingest_send_join_state(room_id, &room_version_id, &room_version_rules, &response.state)
-		.await;
-
-	self.ingest_send_join_auth_chain(
-		room_id,
-		&room_version_id,
-		&room_version_rules,
-		&response.auth_chain,
-	)
-	.await;
+		.ingest_send_join_events(
+			room_id,
+			sender_user,
+			&room_version_id,
+			&room_version_rules,
+			&response.auth_chain,
+			&response.state,
+		)
+		.await?;
 
 	debug!("Running send_join auth check...");
 	state_res::auth_check(
@@ -666,41 +667,180 @@ fn merge_restricted_signature(
 	Ok(())
 }
 
+/// Admit each verified event only after its auth dependencies from this
+/// response have passed. A stored event is not evidence that this response
+/// contains an authorized chain. Lists need not be in dependency order.
 #[implement(Service)]
-async fn ingest_send_join_state(
+async fn ingest_send_join_events(
 	&self,
 	room_id: &RoomId,
+	joining: &UserId,
 	room_version_id: &RoomVersionId,
 	room_version_rules: &RoomVersionRules,
+	auth_chain: &[Box<RawJsonValue>],
 	state_pdus: &[Box<RawJsonValue>],
-) -> HashMap<u64, OwnedEventId> {
-	info!(events = state_pdus.len(), "Going through send_join response room_state...");
-	let cork = self.services.db.cork_and_flush();
-	let state = self
-		.verified_pdus(room_id, room_version_id, room_version_rules, state_pdus, "state")
-		.then(async |(event_id, pdu, value, verified)| {
-			self.services
-				.timeline
-				.add_verified_outlier(&event_id, &value, &verified)
-				.await;
+) -> Result<HashMap<u64, OwnedEventId>> {
+	let auth = self.verified_pdus(
+		room_id,
+		room_version_id,
+		room_version_rules,
+		auth_chain,
+		"auth_chain",
+	);
+	let state =
+		self.verified_pdus(room_id, room_version_id, room_version_rules, state_pdus, "state");
+	let mut incoming = std::pin::pin!(
+		auth.map(|pdu| (pdu, false))
+			.chain(state.map(|pdu| (pdu, true)))
+	);
+	let implicit_create = room_version_rules
+		.authorization
+		.room_create_event_id_as_room_id
+		.then(|| room_id.as_event_id())
+		.transpose()?;
 
-			(event_id, pdu)
-		})
-		.wide_filter_map(async |(event_id, pdu)| {
-			let state_key = pdu.state_key.as_ref()?;
-			let shortstatekey = self
+	let mut waiting: HashMap<OwnedEventId, Vec<(VerifiedPdu, bool)>> = HashMap::new();
+	let mut ready = Vec::new();
+	let mut accepted = HashSet::new();
+	let mut state = self.local_member_state(room_id, joining).await?;
+	let anchored: HashSet<_> = state.keys().copied().collect();
+	let mut lineage: HashMap<_, _> = state
+		.iter()
+		.map(|(&key, id)| (id.clone(), key))
+		.collect();
+	let _cork = self.services.db.cork_and_flush();
+	loop {
+		let ((event_id, pdu, value, verified), in_state) = match ready.pop() {
+			| Some(event) => event,
+			| None => match incoming.next().await {
+				| Some(event) => event,
+				| None => break,
+			},
+		};
+		let create = pdu.kind == TimelineEventType::RoomCreate;
+		if !create
+			&& let Some(missing) = pdu
+				.auth_events
+				.iter()
+				.chain(&implicit_create)
+				.find(|id| !accepted.contains(*id))
+		{
+			waiting
+				.entry(missing.clone())
+				.or_default()
+				.push(((event_id, pdu, value, verified), in_state));
+			continue;
+		}
+
+		let allowed = self
+			.services
+			.event_handler
+			.auth_check_by_auth_events(&pdu, room_version_rules)
+			.await
+			.inspect_err(|error| debug_warn!(?event_id, %error, "Rejected send_join event."))
+			.is_ok();
+		if create
+			&& !(allowed
+				&& state_res::events::RoomCreateEvent::new(&pdu)
+					.room_version()
+					.is_ok_and(|version| version == *room_version_id))
+		{
+			return Err!(BadServerResponse(
+				"Invalid create event for the send_join room version."
+			));
+		}
+		if !allowed {
+			continue;
+		}
+
+		self.services
+			.timeline
+			.add_verified_outlier(&event_id, &value, &verified)
+			.await;
+		accepted.insert(event_id.clone());
+		if let Some(children) = waiting.remove(&event_id) {
+			ready.extend(children);
+		}
+		let Some(key) = pdu.state_key.as_deref() else {
+			continue;
+		};
+		let other_local =
+			pdu.kind == TimelineEventType::RoomMember && self.other_local_member(joining, key);
+		if !in_state && !other_local {
+			continue;
+		}
+		if other_local
+			&& state_res::events::RoomMemberEvent::new(&pdu).membership()?
+				== MembershipState::Join
+		{
+			// Keep the outlier for authorization, not as a new local membership.
+			continue;
+		}
+		let short = self
+			.services
+			.short
+			.get_or_create_shortstatekey(&pdu.kind.to_cow_str().as_ref().into(), key)
+			.await;
+		if other_local && anchored.contains(&short) {
+			if !pdu
+				.auth_events
+				.iter()
+				.any(|id| lineage.get(id) == Some(&short))
+			{
+				continue;
+			}
+			// Intermediate transitions establish ancestry. Only an event in the
+			// state list may replace the retained event in current state.
+			lineage.insert(event_id.clone(), short);
+		}
+		if in_state {
+			state.insert(short, event_id);
+		}
+	}
+	Ok(state)
+}
+
+/// Start the replacement snapshot with other local users' existing memberships.
+/// A first join has no snapshot; a failed read from an existing snapshot must
+/// not be treated as an empty room.
+#[implement(Service)]
+async fn local_member_state(
+	&self,
+	room_id: &RoomId,
+	joining: &UserId,
+) -> Result<HashMap<u64, OwnedEventId>> {
+	let Some(hash) = self
+		.services
+		.state
+		.get_room_shortstatehash(room_id)
+		.await
+		.present()?
+	else {
+		return Ok(HashMap::new());
+	};
+	let members = self
+		.services
+		.state_accessor
+		.state_keys_with_ids(hash, &StateEventType::RoomMember);
+	let mut members = std::pin::pin!(members);
+	let mut state = HashMap::new();
+	while let Some((key, id)) = members.try_next().await? {
+		if self.other_local_member(joining, &key) {
+			let short = self
 				.services
 				.short
-				.get_or_create_shortstatekey(&pdu.kind.to_cow_str().as_ref().into(), state_key)
-				.await;
+				.get_shortstatekey(&StateEventType::RoomMember, &key)
+				.await?;
+			state.insert(short, id);
+		}
+	}
+	Ok(state)
+}
 
-			Some((shortstatekey, event_id))
-		})
-		.collect()
-		.await;
-
-	drop(cork);
-	state
+#[implement(Service)]
+fn other_local_member(&self, joining: &UserId, key: &str) -> bool {
+	key != joining.as_str()
+		&& <&UserId>::try_from(key).is_ok_and(|user| self.services.globals.user_is_local(user))
 }
 
 /// Verifies the events of one send_join response list, dropping each that fails.
@@ -721,29 +861,6 @@ fn verified_pdus<'a>(
 		.wide_then(|pdu| self.verified_pdu(room_id, room_version_id, room_version_rules, pdu))
 		.inspect_err(move |error| debug_error!(?error, list, "Invalid send_join event."))
 		.ready_filter_map(Result::ok)
-}
-
-#[implement(Service)]
-async fn ingest_send_join_auth_chain(
-	&self,
-	room_id: &RoomId,
-	room_version_id: &RoomVersionId,
-	room_version_rules: &RoomVersionRules,
-	auth_chain: &[Box<RawJsonValue>],
-) {
-	info!(events = auth_chain.len(), "Going through send_join response auth_chain...");
-	let cork = self.services.db.cork_and_flush();
-
-	self.verified_pdus(room_id, room_version_id, room_version_rules, auth_chain, "auth_chain")
-		.for_each(async |(event_id, _, value, verified)| {
-			self.services
-				.timeline
-				.add_verified_outlier(&event_id, &value, &verified)
-				.await;
-		})
-		.await;
-
-	drop(cork);
 }
 
 #[implement(Service)]

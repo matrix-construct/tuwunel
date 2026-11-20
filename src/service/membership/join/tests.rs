@@ -1,15 +1,21 @@
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, RoomId, RoomVersionId,
-	api::error::ErrorKind, events::room::member::RoomMemberEventContent, room_id,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, RoomId, RoomVersionId,
+	api::error::ErrorKind,
+	event_id,
+	events::{StateEventType, room::member::RoomMemberEventContent},
+	room_id, user_id,
 };
 use serde_json::{Value, from_value, json, to_vec, value::to_raw_value};
 use tuwunel_core::{Error, Result, config::Figment};
-use tuwunel_matrix::room_version::rules as room_version_rules;
+use tuwunel_matrix::{event::gen_event_id, room_version::rules as room_version_rules};
 
 use super::merge_member_content;
 use crate::{
 	Services,
-	test_utils::{keyed_fixture, pdu_id, signed_state, with_field},
+	test_utils::{
+		keyed_fixture, pdu_id, pdu_json, save_room_state, signed_state, store_outlier,
+		with_field, with_state_key,
+	},
 };
 
 const MAX_BYTES: usize = 4096;
@@ -26,17 +32,21 @@ async fn an_altered_send_join_event_is_stored_redacted() -> Result {
 
 	let services = &fixture.services;
 	let room_id = room_id!("!join:localhost");
+	let [(create_id, create), (join_id, join)] = room(services, room_id)?;
+	let auth_events = [&create_id, &join_id];
 	let topic = json!({"topic": "signed"});
 	let name = json!({"name": "signed"});
-	let (topic_id, topic_event) = signed_state(services, room_id, "m.room.topic", "", &topic)?;
-	let (name_id, name_event) = signed_state(services, room_id, "m.room.name", "", &name)?;
+	let (topic_id, topic_event) =
+		state_event(services, room_id, "m.room.topic", "", &topic, &auth_events)?;
+	let (name_id, name_event) =
+		state_event(services, room_id, "m.room.name", "", &name, &auth_events)?;
 	let (foreign_id, foreign) =
 		signed_state(services, room_id!("!other:localhost"), "m.room.topic", "", &topic)?;
 
 	let altered = with_field(topic_event, "content", json!({"topic": "altered"}));
 	let annotated = with_field(name_event, "unsigned", json!({"age": 1}));
 
-	ingest(services, room_id, &[altered, annotated, foreign]).await?;
+	ingest(services, room_id, &[create, join, altered, annotated, foreign]).await?;
 
 	let altered: Value = services.timeline.get_outlier(&topic_id).await?;
 	let annotated: Value = services.timeline.get_outlier(&name_id).await?;
@@ -63,7 +73,9 @@ async fn a_send_join_event_replaces_only_an_altered_outlier() -> Result {
 
 	let services = &fixture.services;
 	let room_id = room_id!("!join:localhost");
-	let signed = |kind, content| signed_state(services, room_id, kind, "", &content);
+	let [(create_id, create), (join_id, join)] = room(services, room_id)?;
+	let auth_events = [&create_id, &join_id];
+	let signed = |kind, content| state_event(services, room_id, kind, "", &content, &auth_events);
 	let known_topic = json!({"topic": "known"});
 	let genuine_avatar = json!({"url": "mxc://localhost/genuine"});
 	let (accepted_id, accepted) = signed("m.room.name", json!({"name": "accepted"}))?;
@@ -81,7 +93,7 @@ async fn a_send_join_event_replaces_only_an_altered_outlier() -> Result {
 
 	let altered = with_field(known, "content", json!({"topic": "altered"}));
 
-	ingest(services, room_id, &[accepted, altered, genuine]).await?;
+	ingest(services, room_id, &[create, join, accepted, altered, genuine]).await?;
 
 	let outlier_content = async |event_id| {
 		services
@@ -228,6 +240,82 @@ fn reserved_join_keys_are_dropped_from_the_extras() -> Result {
 	Ok(())
 }
 
+/// A complete room name is usable once its dependencies arrive. Receiving the
+/// name on its own does not admit it to outlier storage.
+#[tokio::test]
+async fn a_send_join_event_needs_its_auth_chain() -> Result {
+	let Some(fixture) = keyed_fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+	let services = &fixture.services;
+	let room_id = room_id!("!room:localhost");
+	let [(create_id, create), (join_id, join)] = room(services, room_id)?;
+	let auth = [&create_id, &join_id];
+	let content = json!({"name": "Example"});
+	let (name_id, name) = state_event(services, room_id, "m.room.name", "", &content, &auth)?;
+
+	ingest(services, room_id, std::slice::from_ref(&name)).await?;
+	assert!(!services.timeline.pdu_exists(&name_id).await);
+	let version = RoomVersionId::V11;
+	let state_pdus = [to_raw_value(&name)?, to_raw_value(&join)?, to_raw_value(&create)?];
+	let state = services
+		.membership
+		.ingest_send_join_events(
+			room_id,
+			user_id!("@bob:localhost"),
+			&version,
+			&room_version_rules(&version)?,
+			&[],
+			&state_pdus,
+		)
+		.await?;
+	assert!(state.values().any(|id| id == &name_id));
+	assert!(services.timeline.pdu_exists(&name_id).await);
+	Ok(())
+}
+
+#[tokio::test]
+async fn send_join_keeps_a_local_leave_missing_from_the_response() -> Result {
+	let Some(fixture) = keyed_fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+	let services = &fixture.services;
+	let room_id = room_id!("!room:localhost");
+	let alice = user_id!("@alice:localhost");
+	let leave = event_id!("$leave");
+	let member = StateEventType::RoomMember;
+	let content = json!({ "membership": "leave" });
+	let leave_pdu = pdu_json(leave, room_id, alice, &member, &content);
+	let entry = store_outlier(
+		services,
+		&member,
+		alice.as_str(),
+		leave,
+		with_state_key(leave_pdu, alice.as_str()),
+	)
+	.await?;
+	save_room_state(services, room_id, std::sync::Arc::new([entry].into())).await?;
+	let key = services
+		.short
+		.get_shortstatekey(&member, alice.as_str())
+		.await?;
+	let [(_, create), (_, join)] = room(services, room_id)?;
+	let version = RoomVersionId::V11;
+	let state = services
+		.membership
+		.ingest_send_join_events(
+			room_id,
+			user_id!("@bob:localhost"),
+			&version,
+			&room_version_rules(&version)?,
+			&[],
+			&[to_raw_value(&create)?, to_raw_value(&join)?],
+		)
+		.await?;
+	assert_eq!(state.get(&key).map(AsRef::as_ref), Some(leave));
+	Ok(())
+}
+
 async fn ingest(services: &Services, room_id: &RoomId, events: &[Value]) -> Result {
 	let version = RoomVersionId::V11;
 	let auth_chain = events
@@ -237,13 +325,15 @@ async fn ingest(services: &Services, room_id: &RoomId, events: &[Value]) -> Resu
 
 	services
 		.membership
-		.ingest_send_join_auth_chain(
+		.ingest_send_join_events(
 			room_id,
+			user_id!("@bob:localhost"),
 			&version,
 			&room_version_rules(&version)?,
 			&auth_chain,
+			&[],
 		)
-		.await;
+		.await?;
 
 	Ok(())
 }
@@ -259,6 +349,65 @@ fn put_accepted(services: &Services, event_id: &EventId, event: &Value) -> Resul
 	services.db["pduid_pdu"].insert(pdu_id.as_bytes(), to_vec(event)?);
 
 	Ok(())
+}
+
+/// The create event of a v11 room and the join of its creator,
+/// `@bob:localhost`.
+fn room(services: &Services, room_id: &RoomId) -> Result<[(OwnedEventId, Value); 2]> {
+	let create = state_event(
+		services,
+		room_id,
+		"m.room.create",
+		"",
+		&json!({ "room_version": "11" }),
+		&[],
+	)?;
+	let join = state_event(
+		services,
+		room_id,
+		"m.room.member",
+		"@bob:localhost",
+		&json!({ "membership": "join" }),
+		&[&create.0],
+	)?;
+
+	Ok([create, join])
+}
+
+/// A v11 state event of `@bob:localhost` signed by this server, as another
+/// server would relay it.
+///
+/// Its previous event is the last of its auth events, and its depth is one
+/// more than their number.
+fn state_event(
+	services: &Services,
+	room_id: &RoomId,
+	kind: &str,
+	state_key: &str,
+	content: &Value,
+	auth_events: &[&OwnedEventId],
+) -> Result<(OwnedEventId, Value)> {
+	let version = RoomVersionId::V11;
+	let prev_events: Vec<_> = auth_events.last().into_iter().collect();
+	let mut event: CanonicalJsonObject = from_value(json!({
+		"type": kind,
+		"state_key": state_key,
+		"content": content,
+		"room_id": room_id,
+		"sender": "@bob:localhost",
+		"origin_server_ts": 1,
+		"depth": auth_events.len().saturating_add(1),
+		"prev_events": prev_events,
+		"auth_events": auth_events,
+	}))?;
+
+	services
+		.server_keys
+		.hash_and_sign_event(&mut event, &version)?;
+
+	let event_id = gen_event_id(&event, &version)?;
+
+	Ok((event_id, serde_json::to_value(event)?))
 }
 
 #[test]
