@@ -626,19 +626,32 @@ registration error.
 
 #### Call tokens through Tuwunel
 
-Element Call gets its call token from the homeserver, and so through
-Tuwunel, when the advertised transport has a `url` and no
-`livekit_service_url`. Such a transport is configured in the
-`[global.well_known]` section of `tuwunel.toml`:
+To have Element Call request its call token through Tuwunel, add both
+entries below to the `[global.well_known]` section of `tuwunel.toml`.
+Replace `matrix-rtc.yourdomain.com` with your MatrixRTC domain. Use only `url`
+for the address in each entry. Adding `livekit_service_url` to the
+`livekit` entry would send Element Call `0.28.1` and `0.28.2` directly
+to lk-jwt-service.
 
 ```toml
 [[global.well_known.rtc_transports]]
 type = "m.livekit"
 url = "wss://matrix-rtc.yourdomain.com"
+
+[[global.well_known.rtc_transports]]
+type = "livekit"
+url = "wss://matrix-rtc.yourdomain.com"
 ```
 
-A transport with `livekit_service_url`, as `livekit_url` from section 3
-produces, keeps clients asking lk-jwt-service directly.
+Keep `livekit_url` from section 3 for older clients. Tuwunel lists the
+`livekit` transport it generates from that setting after the two entries
+above. The client's Element Call version determines which entry it uses.
+
+| Element Call version | Transport it uses |
+|---|---|
+| `0.29` and later | The first `m.livekit` entry. |
+| `0.28.1` and `0.28.2` | The first `livekit` entry. If the list has none, the client falls back to the `livekit_service_url` in its own `config.json` when one is set, and otherwise reports that the homeserver advertises no MatrixRTC transport. |
+| `0.28.0` and earlier | A `livekit` entry with a `livekit_service_url`. The entry from `livekit_url` sends these clients directly to lk-jwt-service. |
 
 For call checks and container logs, see [Troubleshooting](#troubleshooting).
 
