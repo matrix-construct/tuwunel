@@ -17,6 +17,51 @@ use crate::test_utils::fixture;
 type Aliases = SmallVec<[OwnedRoomAliasId; 2]>;
 
 #[tokio::test]
+async fn room_authority_requires_membership_but_alias_ownership_does_not() -> Result {
+	use ruma::{event_id, events::StateEventType};
+	use serde_json::json;
+
+	use crate::test_utils::{pdu_json, save_room_state, store_outlier, with_state_key};
+
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room = room_id!("!room:localhost");
+	let alias = room_alias_id!("#local:localhost");
+	let owner = user_id!("@owner:localhost");
+	let creator = user_id!("@creator:localhost");
+	let id = event_id!("$create");
+	let kind = StateEventType::RoomCreate;
+	let event = pdu_json(id, room, creator, &kind, &json!({"room_version": "11"}));
+	let state = store_outlier(services, &kind, "", id, with_state_key(event, "")).await?;
+	save_room_state(services, room, std::sync::Arc::new([state].into())).await?;
+	services.alias.set_alias_by(alias, room, owner)?;
+
+	assert!(
+		services
+			.alias
+			.user_can_remove_alias(alias, owner)
+			.await?
+	);
+	assert!(
+		!services
+			.alias
+			.user_can_remove_alias(alias, creator)
+			.await?
+	);
+	services.db["userroomid_joined"].put((creator, room), 1_u64);
+	assert!(
+		services
+			.alias
+			.user_can_remove_alias(alias, creator)
+			.await?
+	);
+	Ok(())
+}
+
+#[tokio::test]
 async fn selective_deletion_preserves_other_aliases() -> Result {
 	let Some(fixture) = fixture(Figment::new()).await? else {
 		return Ok(());
