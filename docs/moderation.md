@@ -144,6 +144,10 @@ existing entries.
   cheapest mitigation for an invite-spam wave on a small or invite-only
   server.
 
+A user's account-wide `m.ignored_user_list` may contain up to 1 MiB of JSON.
+Updating a larger list returns `413 M_TOO_LARGE` and leaves the previous
+list in place.
+
 ## Auto-deactivation triggers
 
 - `auto_deactivate_banned_room_attempts`: when `true`, any local user who
