@@ -65,3 +65,18 @@ fn stripped(events: &[serde_json::Value]) -> Vec<Raw<AnyStrippedStateEvent>> {
 		})
 		.collect()
 }
+
+#[tokio::test]
+async fn timeline_starts_after_last_hidden_state() {
+	let window =
+		|events| super::visible_window(futures::stream::iter(events), |event| *event == "state");
+
+	assert_eq!(
+		window(vec![("old", true), ("state", false), ("new", true)]).await,
+		(vec!["new"], true)
+	);
+	assert_eq!(
+		window(vec![("state", false), ("first", true), ("hidden", false), ("last", true)]).await,
+		(vec!["first", "last"], false)
+	);
+}
