@@ -635,7 +635,16 @@ Tuwunel, when the advertised transport has a `url` and no
 [[global.well_known.rtc_transports]]
 type = "m.livekit"
 url = "wss://matrix-rtc.yourdomain.com"
+
+[[global.well_known.rtc_transports]]
+type = "livekit"
+url = "wss://matrix-rtc.yourdomain.com"
 ```
+
+Keep both entries. Element Call 0.29 and later use the first `m.livekit`
+transport. Element Call 0.28 and earlier only look for the `livekit` type
+and report that the homeserver advertises no MatrixRTC transport when the
+list has none.
 
 A transport with `livekit_service_url`, as `livekit_url` from section 3
 produces, keeps clients asking lk-jwt-service directly.
