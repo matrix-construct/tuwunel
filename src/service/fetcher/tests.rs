@@ -17,6 +17,7 @@ use tokio::{
 	task::{spawn, yield_now},
 };
 use tuwunel_core::err;
+use tuwunel_matrix::pdu::MAX_PDU_BYTES;
 
 use super::*;
 use crate::federation::Candidates;
@@ -624,6 +625,26 @@ async fn room_version_threads_into_event_id_check() {
 		.expect_err("rejected under the V11 default");
 
 	assert!(error.to_string().contains("wrong event id"), "unexpected error: {error}");
+}
+
+#[tokio::test]
+async fn oversized_event_response_is_rejected() {
+	// An event is served with its `unsigned` data, so a valid response can be
+	// larger than the PDU size limit; one far larger is rejected unparsed.
+	let svc = Service::test(Arc::new(MockTransport::new([])), Arc::new(MockSelect::new([])), 4);
+	let opts = test_opts(&event_id!("$ev:test.local").to_owned());
+	let event = |pad| format!(r#"{{"pad":"{}"}}"#, "x".repeat(pad));
+
+	svc.validate(&opts, event(2 * MAX_PDU_BYTES).as_bytes())
+		.await
+		.expect("an event with its unsigned data is accepted");
+
+	let error = svc
+		.validate(&opts, event(4 * MAX_PDU_BYTES).as_bytes())
+		.await
+		.expect_err("an event far over the PDU size limit is rejected");
+
+	assert!(error.to_string().contains("larger than"), "unexpected error: {error}");
 }
 
 #[test]

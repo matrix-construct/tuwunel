@@ -263,6 +263,7 @@ pub(super) async fn prepare(
 		width: Some(sweep.width.unwrap_or(default_width)),
 		timeout: Some(Duration::from_secs(sweep.timeout)),
 		sweep_deadline: Some(Duration::from_secs(sweep.budget)),
+		limit: None,
 		exclude_self: sweep.no_loopback,
 		record: Record::Observe,
 	};

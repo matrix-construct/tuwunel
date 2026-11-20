@@ -55,7 +55,7 @@ pub(super) async fn fetch_state(
 	let state_vec = self
 		.fetch_auth(origin, room_id, state_ids, room_version, recursion_level)
 		.boxed() // cold arm: federation fallback
-		.await;
+		.await?;
 
 	let mut state: HashMap<ShortStateKey, OwnedEventId> = HashMap::with_capacity(state_vec.len());
 	for (pdu, _) in state_vec {
