@@ -19,7 +19,7 @@ use ruma::{
 	profile::ProfileFieldName,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::{Mutex as TokioMutex, OwnedMutexGuard};
 use tuwunel_core::{
 	Result, at, debug, err, implement, is_equal_to,
 	smallvec::SmallVec,
@@ -249,39 +249,50 @@ pub async fn drop_connection(&self, key: &ConnectionKey) {
 	cache.remove(key);
 }
 
-/// Returns the connection for a key, from the cache or else from storage.
-///
-/// An uncached connection for a removed device is returned fresh and left
-/// uncached, and a device that cannot be read fails the load. Otherwise the
-/// stored state, or a default when none is stored, is cached.
+/// Locks a connection and checks admission against the state the request will use.
+/// A cold connection is not published until it passes. Never wait on a warm
+/// connection while holding the cache lock: a sync stores under the opposite order.
 #[implement(Service)]
-#[tracing::instrument(level = "debug", skip(self))]
-pub async fn load_or_init_connection(&self, key: &ConnectionKey) -> Result<ConnectionVal> {
+#[tracing::instrument(level = "debug", skip(self, check))]
+pub async fn admit_connection<F>(
+	&self,
+	key: &ConnectionKey,
+	check: F,
+) -> Result<OwnedMutexGuard<Connection>>
+where
+	F: FnOnce(&Connection) -> Result + Send,
+{
 	let mut cache = self.connections.lock().await;
-
-	if let Some(conn) = cache.get(key) {
-		return Ok(conn.clone());
+	if let Some(conn) = cache.get(key).cloned() {
+		drop(cache);
+		let guard = conn.lock_owned().await;
+		check(&guard)?;
+		return Ok(guard);
 	}
 
-	// Left uncached, a removed device's connection can never be stored.
-	if self.device_removed(key).await? {
-		return Ok(ConnectionVal::default());
+	// A removed device's connection stays fresh and cannot be stored.
+	let removed = self.device_removed(key).await?;
+	let conn = if removed {
+		Connection::default()
+	} else {
+		self.db
+			.userdeviceconnid_conn
+			.qry(key)
+			.await
+			.deserialized()
+			.map(|Cbor(conn)| conn)
+			.unwrap_or_default()
+	};
+	check(&conn)?;
+	let handle = Arc::new(TokioMutex::new(conn));
+	let guard = handle
+		.clone()
+		.try_lock_owned()
+		.expect("new connection is unlocked");
+	if !removed {
+		cache.insert(key.clone(), handle);
 	}
-
-	let conn: ConnectionVal = self
-		.db
-		.userdeviceconnid_conn
-		.qry(key)
-		.await
-		.deserialized()
-		.map(|Cbor(conn)| conn)
-		.map(TokioMutex::new)
-		.map(Arc::new)
-		.unwrap_or_default();
-
-	cache.insert(key.clone(), conn.clone());
-
-	Ok(conn)
+	Ok(guard)
 }
 
 #[implement(Service)]
@@ -587,13 +598,11 @@ fn update_cache_lists(request: &Request, cached: &mut Self) -> bool {
 		.lists
 		.iter()
 		.fold(false, |changed, (list_id, request_list)| {
-			let list_changed = match cached.lists.get_mut(list_id) {
-				| Some(cached_list) => Self::update_cache_list(request_list, cached_list),
-				| None => {
-					cached
-						.lists
-						.insert(list_id.clone(), request_list.clone());
-
+			let list_changed = match cached.lists.entry(list_id.clone()) {
+				| Entry::Occupied(mut entry) =>
+					Self::update_cache_list(request_list, entry.get_mut()),
+				| Entry::Vacant(entry) => {
+					Self::update_cache_list(request_list, entry.insert(request::List::default()));
 					true
 				},
 			};
@@ -604,14 +613,16 @@ fn update_cache_lists(request: &Request, cached: &mut Self) -> bool {
 
 #[implement(Connection)]
 fn update_cache_list(request: &request::List, cached: &mut request::List) -> bool {
-	let ranges_changed = request.ranges != cached.ranges;
+	let ranges = distinct(&request.ranges);
+	let ranges_changed = ranges != cached.ranges.as_slice();
 	let timeline_limit_changed =
 		request.room_details.timeline_limit != cached.room_details.timeline_limit;
 
 	let required_state_changed = !request.room_details.required_state.is_empty()
 		&& request.room_details.required_state != cached.room_details.required_state;
 
-	let filters_changed = request.filters.as_ref().is_some_and(|request| {
+	let filters = request.filters.as_ref().map(distinct_filters);
+	let filters_changed = filters.as_ref().is_some_and(|request| {
 		cached
 			.filters
 			.as_ref()
@@ -622,7 +633,7 @@ fn update_cache_list(request: &request::List, cached: &mut request::List) -> boo
 		ranges_changed || timeline_limit_changed || required_state_changed || filters_changed;
 
 	if ranges_changed {
-		cached.ranges.clone_from(&request.ranges);
+		cached.ranges = ranges.into();
 	}
 
 	cached.room_details.timeline_limit = request.room_details.timeline_limit;
@@ -635,7 +646,7 @@ fn update_cache_list(request: &request::List, cached: &mut request::List) -> boo
 	}
 
 	if filters_changed {
-		cached.filters.clone_from(&request.filters);
+		cached.filters = filters;
 	}
 
 	changed
@@ -667,6 +678,34 @@ fn subscriptions_are_equal(request: &Subscriptions, cached: &Subscriptions) -> b
 fn list_config_is_equal(request: &request::ListConfig, cached: &request::ListConfig) -> bool {
 	request.timeline_limit == cached.timeline_limit
 		&& request.required_state == cached.required_state
+}
+
+/// The entries of a list in their first order, each kept once.
+fn distinct<T: Clone + PartialEq>(entries: &[T]) -> Vec<T> {
+	entries
+		.iter()
+		.fold(Vec::new(), |mut kept, entry| {
+			if !kept.contains(entry) {
+				kept.push(entry.clone());
+			}
+
+			kept
+		})
+}
+
+/// A list's filters with each entry kept once, in its first order.
+#[must_use]
+pub fn distinct_filters(filters: &request::ListFilters) -> request::ListFilters {
+	request::ListFilters {
+		is_dm: filters.is_dm,
+		is_encrypted: filters.is_encrypted,
+		is_invite: filters.is_invite,
+		room_types: distinct(&filters.room_types),
+		not_room_types: distinct(&filters.not_room_types),
+		tags: distinct(&filters.tags),
+		not_tags: distinct(&filters.not_tags),
+		spaces: distinct(&filters.spaces),
+	}
 }
 
 fn list_filters_are_equal(request: &request::ListFilters, cached: &request::ListFilters) -> bool {

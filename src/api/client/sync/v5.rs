@@ -1,5 +1,6 @@
 mod extensions;
 mod filter;
+mod limits;
 mod range;
 mod rooms;
 mod selector;
@@ -16,7 +17,7 @@ use std::{
 };
 
 use axum::extract::{Extension, State};
-use futures::{TryFutureExt, future::join};
+use futures::future::join;
 use ruma::{
 	DeviceId, OwnedRoomId, RoomId, UserId,
 	api::client::sync::sync_events::v5::{ListId, Request, Response, response},
@@ -24,7 +25,10 @@ use ruma::{
 	serde::Raw,
 };
 use serde::Deserialize;
-use tokio::{sync::Notify, time::timeout_at};
+use tokio::{
+	sync::{Notify, OwnedMutexGuard},
+	time::timeout_at,
+};
 use tuwunel_core::{
 	Err, Result, debug,
 	debug::INFO_SPAN_LEVEL,
@@ -33,7 +37,6 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	trace,
 	utils::{
-		TryFutureExtExt,
 		result::{FlatOk, NotFound},
 		time::millis,
 	},
@@ -138,12 +141,27 @@ pub(crate) async fn sync_events_v5_route(
 	let timeout = poll_timeout(request, services.config.client.sync.timeout_max);
 
 	let conn_key = into_connection_key(sender_user, sender_device, request.conn_id.as_deref());
-	let conn_val = services
+	let mut conn = services
 		.sync
-		.load_or_init_connection(&conn_key)
+		.admit_connection(&conn_key, |conn| {
+			limits::check(request, (since != 0).then_some(conn))?;
+			if since != 0 {
+				check_profile_selection(services, request, conn)?;
+				if conn.next_batch == 0 {
+					return Err!(Request(UnknownPos(warn!(
+						"Connection lost; restarting sync stream."
+					))));
+				}
+				if since != conn.next_batch && since > conn.globalsince {
+					return Err!(Request(UnknownPos(warn!(
+						"Requesting unknown or invalid stream position."
+					))));
+				}
+			}
+			Ok(())
+		})
 		.await?;
-
-	let conn = conn_val.lock();
+	let conn_val = OwnedMutexGuard::mutex(&conn).clone();
 	let ping = Ping {
 		device_id: sender_device,
 		client_ip: Some(client),
@@ -151,21 +169,12 @@ pub(crate) async fn sync_events_v5_route(
 		appservice: body.appservice_info.as_ref(),
 	};
 
-	let ping_presence = services
+	services
 		.presence
 		.maybe_ping_presence(sender_user, ping)
+		.await
 		.inspect_err(inspect_log)
 		.ok();
-
-	let (mut conn, _) = join(conn, ping_presence).await;
-
-	if since != 0 {
-		check_profile_selection(services, request, &conn)?;
-	}
-
-	if since != 0 && conn.next_batch == 0 {
-		return Err!(Request(UnknownPos(warn!("Connection lost; restarting sync stream."))));
-	}
 
 	if since == 0 {
 		*conn = Connection::default();
@@ -179,11 +188,6 @@ pub(crate) async fn sync_events_v5_route(
 
 	let advancing = since == conn.next_batch;
 	let retarding = since != 0 && since <= conn.globalsince;
-	if !advancing && !retarding {
-		return Err!(Request(UnknownPos(warn!(
-			"Requesting unknown or invalid stream position."
-		))));
-	}
 
 	debug_assert!(
 		advancing || retarding,
