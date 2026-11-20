@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use futures::{FutureExt, StreamExt, TryFutureExt};
 use ruma::{
-	OwnedRoomId,
+	OwnedRoomId, RoomId,
 	api::client::sync::sync_events::v5::response::{self, Typing},
 	events::typing::{SyncTypingEvent, TypingEventContent},
 	serde::Raw,
@@ -13,7 +13,9 @@ use tuwunel_core::{
 	utils::{IterStream, stream::BroadbandExt},
 };
 
-use super::{Connection, SyncInfo, Window, selector};
+use super::{
+	super::rooms::membership_allows_required_state, Connection, SyncInfo, Window, selector,
+};
 
 type CollectedRooms = SmallVec<[(OwnedRoomId, CollectedRoom); 1]>;
 
@@ -61,21 +63,7 @@ pub(super) async fn collect(
 ) -> Result<Collected> {
 	let SyncInfo { services, sender_user, .. } = sync_info;
 
-	let implicit = conn
-		.extensions
-		.typing
-		.lists
-		.as_deref()
-		.map(<[_]>::iter);
-
-	let explicit = conn
-		.extensions
-		.typing
-		.rooms
-		.as_deref()
-		.map(<[_]>::iter);
-
-	selector(conn, window, implicit, explicit)
+	selected_rooms(conn, window)
 		.stream()
 		.broad_filter_map(async |room_id| {
 			let roomsince = conn
@@ -113,6 +101,32 @@ pub(super) async fn collect(
 		.await
 }
 
+pub(super) fn selected_rooms<'a>(
+	conn: &'a Connection,
+	window: &'a Window,
+) -> impl Iterator<Item = &'a RoomId> {
+	let implicit = conn
+		.extensions
+		.typing
+		.lists
+		.as_deref()
+		.map(<[_]>::iter);
+
+	let explicit = conn
+		.extensions
+		.typing
+		.rooms
+		.as_deref()
+		.map(<[_]>::iter);
+
+	// Typing, like the required state, is only for a joined (or peeking) user.
+	selector(conn, window, implicit, explicit).filter(|room_id| {
+		window
+			.get(*room_id)
+			.is_some_and(|room| membership_allows_required_state(room.membership.as_ref()))
+	})
+}
+
 /// Whether a typing update publishes, and if so whether only alongside an
 /// initial room payload.
 ///
@@ -140,8 +154,8 @@ fn eligibility(
 #[cfg(test)]
 mod tests {
 	use ruma::{
-		OwnedUserId, RoomId, api::client::sync::sync_events::v5::response::Room as ResponseRoom,
-		room_id, user_id,
+		OwnedUserId, api::client::sync::sync_events::v5::response::Room as ResponseRoom, room_id,
+		user_id,
 	};
 
 	use super::*;
