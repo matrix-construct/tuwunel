@@ -18,7 +18,7 @@ use tuwunel_matrix::pdu::PduCount;
 use super::{
 	Candidate, Collected, Connection, ListIds, StateMode, TIMELINE_LIMIT_MAX, UnreadState,
 	collected::{recorded_snapshot, unread_state},
-	fingerprints_cover, membership_allows_required_state, merged_room_details,
+	fingerprint_index, fingerprints_cover, membership_allows_required_state, merged_room_details,
 	required_state_hash, room_config, room_timeline_limited, room_timeline_metadata,
 	state_is_required, state_may_have_changed, state_mode,
 };
@@ -309,22 +309,37 @@ fn state_coverage_resolves_wildcards_and_own_user() {
 	let kind = StateEventType::BeaconInfo;
 
 	for key in ["*", "$ME", user.as_str()] {
-		let previous = [required_state_hash(&kind, key)];
+		let previous = [required_state_hash(&kind, key)].into();
 
 		assert!(fingerprints_cover(&previous, &kind, user.as_str(), user));
 	}
 
-	let previous = [required_state_hash(&kind, "$ME")];
+	let previous = [required_state_hash(&kind, "$ME")].into();
 
 	assert!(!fingerprints_cover(&previous, &kind, "@other:example.com", user));
 	assert!(!fingerprints_cover(&previous, &StateEventType::RoomMember, user.as_str(), user));
 }
 
 #[test]
+fn fingerprint_index_keeps_one_entry_per_key() {
+	let user = user_id!("@reader:example.com");
+	let kind = StateEventType::RoomMember;
+	let own = required_state_hash(&kind, "$ME");
+	let other = required_state_hash(&kind, "@other:example.com");
+	let keys = [own, other, own];
+	let index = fingerprint_index(&keys);
+
+	assert_eq!(index.len(), 2);
+	assert!(fingerprints_cover(&index, &kind, user.as_str(), user));
+	assert!(fingerprints_cover(&index, &kind, "@other:example.com", user));
+	assert!(!fingerprints_cover(&index, &kind, "@third:example.com", user));
+}
+
+#[test]
 fn lazy_membership_does_not_claim_general_state_coverage() {
 	let user = user_id!("@share:example.com");
 	let kind = StateEventType::RoomMember;
-	let previous = [required_state_hash(&kind, "$LAZY")];
+	let previous = [required_state_hash(&kind, "$LAZY")].into();
 	let details = (0, [(kind.clone(), "$LAZY".into())].into());
 
 	assert!(room_config(&details).1.is_empty());
