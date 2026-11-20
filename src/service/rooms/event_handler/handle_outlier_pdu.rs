@@ -96,7 +96,7 @@ pub(super) async fn handle_outlier_pdu(
 			room_version,
 			recursion_level,
 		))
-		.await;
+		.await?;
 	}
 
 	// 6. Reject "due to auth events" if the event doesn't pass auth based on the

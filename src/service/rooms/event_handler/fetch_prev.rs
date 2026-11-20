@@ -147,10 +147,10 @@ where
 	let mut pdus = HashMap::new();
 	let mut graph: HashMap<OwnedEventId, _> = HashMap::with_capacity(todo_outlier_stack.len());
 
-	while let Some((prev_event_id, mut outlier)) = todo_outlier_stack.next().await {
+	while let Some((prev_event_id, outlier)) = todo_outlier_stack.next().await {
 		self.services.server.check_running()?;
 
-		let Some((pdu, mut json_opt)) = outlier.pop() else {
+		let Some((pdu, mut json_opt)) = outlier?.pop() else {
 			// Fetch and handle failed
 			graph.insert(prev_event_id.clone(), Default::default());
 			continue;
