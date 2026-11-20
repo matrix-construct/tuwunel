@@ -3,6 +3,7 @@ use ruma::{
 	events::{
 		AnyMessageLikeEvent, AnySyncMessageLikeEvent, AnySyncTimelineEvent, AnyTimelineEvent,
 	},
+	room_id,
 	serde::Raw,
 	user_id,
 };
@@ -1100,6 +1101,35 @@ fn remove_aggregations_leaves_absent_untouched() {
 
 		assert_eq!(kept.json().get(), unsigned, "rewrote unsigned without aggregations");
 	}
+}
+
+#[test]
+fn incoming_create_keeps_its_room_identity() {
+	let room = room_id!("!create");
+	let event = event_id!("$create");
+	let rules = crate::room_version::rules(&RoomVersionId::V12).expect("v12 rules");
+	let mut create: CanonicalJsonObject = serde_json::from_value(json!({
+		"type": "m.room.create",
+		"sender": "@alice:example.com",
+		"state_key": "",
+		"content": { "room_version": "12" },
+		"prev_events": [],
+		"auth_events": [],
+		"origin_server_ts": 1,
+		"depth": 1,
+		"hashes": { "sha256": "hash" },
+	}))
+	.expect("create event object");
+
+	let (pdu, _) = Pdu::from_object_federation(room, event, create.clone(), &rules)
+		.expect("restore the room ID of its create event");
+	assert_eq!(pdu.room_id(), room);
+	Pdu::from_object_federation(room, event_id!("$other"), create.clone(), &rules)
+		.expect_err("only the create event named by the room is valid");
+
+	create.insert("room_id".into(), "!explicit:example.com".into());
+	Pdu::from_object_federation(room, event, create, &rules)
+		.expect_err("an explicit room ID must agree with the expected room");
 }
 
 #[test]
