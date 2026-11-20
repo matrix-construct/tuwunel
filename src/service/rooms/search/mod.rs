@@ -1,4 +1,7 @@
-use std::sync::Arc;
+#[cfg(test)]
+mod tests;
+
+use std::{collections::HashSet, sync::Arc};
 
 use futures::{Stream, StreamExt};
 use ruma::{RoomId, UserId, api::client::search::search_events::v3::Criteria};
@@ -7,7 +10,7 @@ use tuwunel_core::{
 	arrayvec::ArrayVec,
 	implement, trace,
 	utils::{
-		ArrayVecExt, IterStream, ReadyExt, set,
+		ArrayVecExt, IterStream, ReadyExt,
 		stream::{TryIgnore, WidebandExt},
 	},
 };
@@ -96,7 +99,7 @@ pub async fn search_pdus<'a>(
 	&'a self,
 	query: &'a RoomQuery<'a>,
 ) -> Result<(usize, impl Stream<Item = (PduCount, impl Event + use<>)> + Send + '_)> {
-	let pdu_ids: Vec<_> = self.search_pdu_ids(query).await?.collect().await;
+	let pdu_ids = self.search_pdu_ids(query).await?;
 
 	let filter = &query.criteria.filter;
 	let count = pdu_ids.len();
@@ -131,13 +134,9 @@ pub async fn search_pdus<'a>(
 	Ok((count, pdus))
 }
 
-// result is modeled as a stream such that callers don't have to be refactored
-// though an additional async/wrap still exists for now
+/// The ids of a room's events holding every word of the query, newest first.
 #[implement(Service)]
-pub async fn search_pdu_ids(
-	&self,
-	query: &RoomQuery<'_>,
-) -> Result<impl Stream<Item = RawPduId> + Send + '_ + use<'_>> {
+pub async fn search_pdu_ids(&self, query: &RoomQuery<'_>) -> Result<Vec<RawPduId>> {
 	let shortroomid = self
 		.services
 		.short
@@ -148,9 +147,30 @@ pub async fn search_pdu_ids(
 		.search_pdu_ids_query_room(query, shortroomid)
 		.await;
 
-	let iters = pdu_ids.into_iter().map(IntoIterator::into_iter);
+	Ok(intersect_hits(pdu_ids))
+}
 
-	Ok(set::intersection(iters).stream())
+/// Keeps the ids every word's hit list holds, in the shortest list's order.
+///
+/// Each list is newest first, so the result is too. The shortest list is
+/// checked against a hash set of each other list, which costs the lists' total
+/// length. `set::intersection` copied every other list for each candidate of
+/// the first, about 3.1 billion ids for one ten-word query, before scanning
+/// them. No words give no hits.
+fn intersect_hits(mut lists: Vec<Vec<RawPduId>>) -> Vec<RawPduId> {
+	lists.sort_unstable_by_key(Vec::len);
+	let mut lists = lists.into_iter();
+	let mut hits = lists.next().unwrap_or_default();
+	for list in lists {
+		if hits.is_empty() {
+			break;
+		}
+
+		let list: HashSet<_> = list.into_iter().collect();
+		hits.retain(|id| list.contains(id));
+	}
+
+	hits
 }
 
 #[implement(Service)]
@@ -159,7 +179,7 @@ async fn search_pdu_ids_query_room(
 	query: &RoomQuery<'_>,
 	shortroomid: ShortRoomId,
 ) -> Vec<Vec<RawPduId>> {
-	tokenize(&query.criteria.search_term)
+	query_words(&query.criteria.search_term)
 		.stream()
 		.wide_then(async |word| {
 			self.search_pdu_ids_query_words(shortroomid, &word)
@@ -225,6 +245,15 @@ pub async fn delete_all_search_tokenids_for_room(&self, room_id: &RoomId) -> Res
 	txn.execute();
 
 	Ok(())
+}
+
+/// The distinct words of a search term, in first-seen order.
+///
+/// A repeated word holds the same events as its first use, so its hit list is
+/// read once.
+fn query_words(search_term: &str) -> impl Iterator<Item = String> + Send + '_ {
+	let mut seen = HashSet::new();
+	tokenize(search_term).filter(move |word| seen.insert(word.clone()))
 }
 
 /// Splits a string into tokens used as keys in the search inverted index
