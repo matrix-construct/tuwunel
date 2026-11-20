@@ -154,12 +154,51 @@ pub fn max_memory_locked() -> Result<(usize, usize)> { Ok((usize::MIN, usize::MI
 /// # Panics
 ///
 /// Panics when either platform limit cannot be represented as `usize`.
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(all(unix, not(any(target_os = "freebsd", target_os = "macos"))))]
 #[inline]
 pub fn max_threads() -> Result<(usize, usize)> {
 	getrlimit(Resource::RLIMIT_NPROC)
 		.map(apply!(2, ExpectInto::expect_into))
 		.map_err(Into::into)
+}
+
+/// Returns the per-process thread limit as both the soft and hard limit.
+///
+/// FreeBSD's `RLIMIT_NPROC` counts processes only. Threads are limited per
+/// process by the `kern.threads.max_threads_per_proc` sysctl, 1,500 by default,
+/// and creating one past it fails with `EAGAIN`. The sysctl has no soft value
+/// to raise, so both tuple elements are equal.
+///
+/// # Panics
+///
+/// Panics when the limit cannot be represented as `usize`.
+#[cfg(target_os = "freebsd")]
+#[inline]
+pub fn max_threads() -> Result<(usize, usize)> {
+	use crate::Error;
+
+	let mut limit: libc::c_int = 0;
+	let mut len = size_of_val(&limit);
+
+	// SAFETY: The name is NUL-terminated, `len` is the size of `limit`, the `int`
+	// this sysctl holds, and no new value is passed.
+	let ret = unsafe {
+		libc::sysctlbyname(
+			c"kern.threads.max_threads_per_proc".as_ptr(),
+			(&raw mut limit).cast(),
+			&raw mut len,
+			std::ptr::null(),
+			0,
+		)
+	};
+
+	if ret == -1 {
+		return Err(Error::from_errno());
+	}
+
+	let limit = limit.expect_into();
+
+	Ok((limit, limit))
 }
 
 /// Returns sentinel thread limits on unsupported platforms.
