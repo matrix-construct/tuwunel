@@ -1,22 +1,69 @@
 use std::{
 	collections::{HashSet, VecDeque},
+	sync::atomic::{AtomicUsize, Ordering},
 	time::Duration,
 };
 
-use futures::{FutureExt, StreamExt, TryFutureExt};
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, RoomId, RoomVersionId,
 	ServerName,
 };
 use tuwunel_core::{
-	debug, debug_error, debug_warn, expected, implement, trace,
+	Err, Result, debug, debug_error, debug_warn, err, expected, implement, trace,
 	utils::stream::{BroadbandExt, IterStream},
 	warn,
 };
-use tuwunel_matrix::{PduEvent, pdu::MAX_AUTH_EVENTS};
+use tuwunel_matrix::{
+	PduEvent,
+	pdu::{MAX_AUTH_EVENTS, MAX_PDU_BYTES},
+};
 
 use super::backoff::{Context, Disposition};
 use crate::fetcher::{Op, Opts};
+
+/// Each root walk has a count limit; all roots in a lookup share a byte limit.
+pub(super) struct AuthFetchBudget {
+	pub(super) limit: usize,
+	remaining: AtomicUsize,
+}
+
+impl AuthFetchBudget {
+	fn new(limit: u16) -> Self {
+		let limit = usize::from(limit);
+		Self {
+			limit,
+			remaining: AtomicUsize::new(limit.saturating_mul(MAX_PDU_BYTES)),
+		}
+	}
+
+	fn check_count(&self, fetched: usize) -> Result {
+		if fetched >= self.limit {
+			return Err!(Request(TooLarge("Auth chain fetch count limit reached")));
+		}
+
+		Ok(())
+	}
+
+	fn charge(&self, bytes: usize) -> Result {
+		self.remaining
+			.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(bytes))
+			.map(|_| ())
+			.map_err(|_| err!(Request(TooLarge("Auth chain fetch byte limit reached"))))
+	}
+}
+
+#[implement(super::Service)]
+pub(super) fn auth_fetch_budget(&self) -> AuthFetchBudget {
+	AuthFetchBudget::new(
+		self.services
+			.server
+			.config
+			.federation
+			.history
+			.max_fetch_prev_events,
+	)
+}
 
 /// Find the event and auth it. Once the event is validated (steps 1 - 8)
 /// it is appended to the outliers Tree.
@@ -44,18 +91,21 @@ pub(super) async fn fetch_auth<'a, Events>(
 	events: Events,
 	room_version: &RoomVersionId,
 	recursion_level: usize,
-) -> Vec<(PduEvent, Option<CanonicalJsonObject>)>
+	budget: &AuthFetchBudget,
+) -> Result<Vec<(PduEvent, Option<CanonicalJsonObject>)>>
 where
 	Events: Iterator<Item = &'a EventId> + Clone + Send,
 {
 	let events_with_auth_events: Vec<_> = events
 		.stream()
-		.broad_then(|event_id| self.fetch_auth_chain(origin, room_id, event_id, room_version))
-		.collect()
+		.broad_then(|event_id| {
+			self.fetch_auth_chain(origin, room_id, event_id, room_version, budget)
+		})
+		.try_collect()
 		.boxed() // size firewall
-		.await;
+		.await?;
 
-	events_with_auth_events
+	let pdus = events_with_auth_events
 		.into_iter()
 		.stream()
 		.fold(Vec::new(), async |mut pdus, (id, local_pdu, events_in_reverse_order)| {
@@ -74,7 +124,7 @@ where
 				.into_iter()
 				.rev()
 				.stream()
-				.fold(pdus, async |mut pdus, (next_id, value)| {
+				.fold(pdus, async |mut pdus, (next_id, pdu_json)| {
 					if self
 						.is_suppressed(
 							Context::Auth,
@@ -87,16 +137,21 @@ where
 						return pdus;
 					}
 
-					// recursion cycle
-					let outlier = Box::pin(self.handle_outlier_pdu(
-						origin,
-						room_id,
-						&next_id,
-						value.clone(),
-						room_version,
-						expected!(recursion_level + 1),
-						true,
-					));
+					let outlier = async {
+						let value = serde_json::from_slice(&pdu_json)?;
+						// recursion cycle
+						Box::pin(self.handle_outlier_pdu(
+							origin,
+							room_id,
+							&next_id,
+							value,
+							room_version,
+							expected!(recursion_level + 1),
+							budget,
+							true,
+						))
+						.await
+					};
 
 					if let Ok((pdu, json)) = outlier
 						.await
@@ -114,7 +169,9 @@ where
 				})
 				.await
 		})
-		.await
+		.await;
+
+	Ok(pdus)
 }
 
 #[implement(super::Service)]
@@ -124,19 +181,21 @@ where
 	skip_all,
 	fields(%event_id),
 )]
+#[expect(clippy::type_complexity)]
 async fn fetch_auth_chain(
 	&self,
 	origin: &ServerName,
 	room_id: &RoomId,
 	event_id: &EventId,
 	room_version: &RoomVersionId,
-) -> (OwnedEventId, Option<PduEvent>, Vec<(OwnedEventId, CanonicalJsonObject)>) {
+	budget: &AuthFetchBudget,
+) -> Result<(OwnedEventId, Option<PduEvent>, Vec<(OwnedEventId, Vec<u8>)>)> {
 	// a. Look in the main timeline (pduid_pdu tree)
 	// b. Look at outlier pdu tree
 	// (get_pdu_json checks both)
 	if let Ok(local_pdu) = self.services.timeline.get_pdu(event_id).await {
 		trace!(?event_id, "Found in database");
-		return (event_id.to_owned(), Some(local_pdu), vec![]);
+		return Ok((event_id.to_owned(), Some(local_pdu), vec![]));
 	}
 
 	// c. Ask origin server over federation
@@ -173,6 +232,8 @@ async fn fetch_auth_chain(
 			break;
 		}
 
+		budget.check_count(events_in_reverse_order.len())?;
+
 		debug!("Fetching {next_id} over federation.");
 		let opts = Opts::new(Op::AuthEvent, room_id.to_owned())
 			.event_id(next_id.clone())
@@ -193,10 +254,12 @@ async fn fetch_auth_chain(
 			continue;
 		};
 
-		let Ok(value) = serde_json::from_slice::<CanonicalJsonObject>(&outcome.bytes) else {
+		let Some((value, pdu_json)) = parse_fetched_pdu(&outcome.bytes) else {
 			self.record_outcome(Context::Fetch, &next_id, Disposition::Transient);
 			continue;
 		};
+
+		budget.charge(pdu_json.len())?;
 
 		debug!("Got {next_id} over federation");
 		self.record_success(Context::Fetch, &next_id)
@@ -212,9 +275,25 @@ async fn fetch_auth_chain(
 				todo_auth_events.push_back(auth_event.to_owned());
 			});
 
-		events_in_reverse_order.push((next_id.clone(), value));
+		events_in_reverse_order.push((next_id.clone(), pdu_json));
 		events_all.insert(next_id);
 	}
 
-	(event_id.to_owned(), None, events_in_reverse_order)
+	Ok((event_id.to_owned(), None, events_in_reverse_order))
 }
+
+/// Parse an event fetched by the auth chain walk, returning it both parsed and
+/// as canonical JSON. `unsigned` is removed, as handle_outlier_pdu removes it
+/// before checking the PDU size limit, and an event still larger than that
+/// limit is rejected. The walk keeps only the JSON, as a parsed event can take
+/// many times its serialized size in memory.
+fn parse_fetched_pdu(bytes: &[u8]) -> Option<(CanonicalJsonObject, Vec<u8>)> {
+	let mut value: CanonicalJsonObject = serde_json::from_slice(bytes).ok()?;
+	value.remove("unsigned");
+
+	let pdu_json = serde_json::to_vec(&value).ok()?;
+	(pdu_json.len() <= MAX_PDU_BYTES).then_some((value, pdu_json))
+}
+
+#[cfg(test)]
+mod tests;

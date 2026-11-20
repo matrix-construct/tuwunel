@@ -1,7 +1,12 @@
-use std::{collections::HashMap, iter::once, time::Duration};
+use std::{
+	collections::{HashMap, VecDeque},
+	iter::once,
+	num::NonZeroUsize,
+	time::Duration,
+};
 
 use futures::{
-	FutureExt, StreamExt, TryStreamExt,
+	StreamExt, TryStreamExt,
 	stream::{FuturesOrdered, FuturesUnordered},
 };
 use ruma::{
@@ -24,10 +29,49 @@ use tuwunel_matrix::{
 	room::state::resolution::topological_sort,
 };
 
-use super::handle_prev_pdu::PrevUpgrade;
+use super::{fetch_auth::AuthFetchBudget, handle_prev_pdu::PrevUpgrade};
 use crate::fetcher::{EventWindow, Op, Opts};
 
 pub(super) type Pdus = HashMap<OwnedEventId, (PduEvent, CanonicalJsonObject)>;
+
+/// Events requested by the `/get_missing_events` batch before the walk.
+const MISSING_EVENTS_LIMIT: NonZeroUsize = NonZeroUsize::new(10).unwrap();
+
+/// Fetches one walk runs at once. This covers every prev event of one event,
+/// at most 20, and leaves most of the fetcher's 256 slots to other rooms.
+const PREV_FETCH_WIDTH: usize = 32;
+
+#[cfg(test)]
+mod tests;
+
+struct PrevQueue {
+	waiting: VecDeque<OwnedEventId>,
+	remaining: usize,
+}
+
+impl PrevQueue {
+	fn new(waiting: VecDeque<OwnedEventId>, limit: usize) -> Self {
+		// Preserve the direct predecessors and the existing limit + 1 boundary.
+		let remaining = limit
+			.saturating_add(1)
+			.saturating_sub(waiting.len());
+		Self { waiting, remaining }
+	}
+
+	fn admit(&mut self, id: &EventId) -> bool {
+		let Some(remaining) = self.remaining.checked_sub(1) else { return false };
+		self.remaining = remaining;
+		self.waiting.push_back(id.to_owned());
+		true
+	}
+
+	fn take_ready(&mut self, in_flight: usize) -> impl Iterator<Item = OwnedEventId> + '_ {
+		let free = PREV_FETCH_WIDTH
+			.saturating_sub(in_flight)
+			.min(self.waiting.len());
+		self.waiting.drain(..free)
+	}
+}
 
 /// An incoming event's missing previous events, walked backwards.
 ///
@@ -35,7 +79,7 @@ pub(super) type Pdus = HashMap<OwnedEventId, (PduEvent, CanonicalJsonObject)>;
 /// `capped` in the prev-walk counters.
 pub(super) struct PrevFetch {
 	/// Walked event ids in topological order, including placeholders for events
-	/// that failed to fetch or fell past the cap.
+	/// that failed to fetch.
 	pub(super) sorted: Vec<OwnedEventId>,
 
 	/// Fetched PDUs of the walked events.
@@ -48,7 +92,7 @@ pub(super) struct PrevFetch {
 /// Walk an incoming event's missing previous events backwards.
 ///
 /// Each fetched event queues its own missing previous events in turn, until
-/// they reach the timeline, predate the room, or exceed the
+/// they reach the timeline, predate the room, or the queued events reach the
 /// `max_fetch_prev_events` cap.
 #[implement(super::Service)]
 #[tracing::instrument(
@@ -71,6 +115,7 @@ pub(super) async fn fetch_prev<'a, Events>(
 		..
 	}: PrevUpgrade<'_>,
 	initial_set: Events,
+	budget: &AuthFetchBudget,
 ) -> Result<PrevFetch>
 where
 	Events: Iterator<Item = &'a EventId> + Clone + Send,
@@ -102,11 +147,12 @@ where
 				incoming_event_id,
 				room_version,
 				recursion_level,
+				budget,
 			)
 		})
 		.await;
 
-	let mut todo_outlier_stack: FuturesOrdered<_> = initial_set
+	let waiting: VecDeque<OwnedEventId> = initial_set
 		.try_stream()
 		.map_ok(ToOwned::to_owned)
 		.try_filter_map(async |event_id| {
@@ -122,48 +168,45 @@ where
 				| Err(_) => Ok(Some(event_id)),
 			}
 		})
-		.map_ok(async |event_id| {
-			let events = once(event_id.as_ref());
-			let auth = self
-				.fetch_auth(origin, room_id, events, room_version, recursion_level)
-				.await;
-
-			(event_id, auth)
-		})
-		.map_ok(FutureExt::boxed) // heterogeneous FuturesOrdered
 		.try_collect()
 		.await?;
 
-	let limit: usize = self
-		.services
-		.server
-		.config
-		.federation
-		.history
-		.max_fetch_prev_events
-		.into();
+	let fetch = async |event_id: OwnedEventId| {
+		let events = once(event_id.as_ref());
+		let auth = self
+			.fetch_auth(origin, room_id, events, room_version, recursion_level, budget)
+			.await;
 
-	let mut amount = 0_usize;
+		(event_id, auth)
+	};
+
+	// Every queued event is fetched in the end, so the cap counts them all, not
+	// only the walked ones.
+	let mut graph: HashMap<OwnedEventId, _> = HashMap::with_capacity(waiting.len());
+	let mut queue = PrevQueue::new(waiting, budget.limit);
+	let mut capped = false;
 	let mut pdus = HashMap::new();
-	let mut graph: HashMap<OwnedEventId, _> = HashMap::with_capacity(todo_outlier_stack.len());
+	let mut todo_outlier_stack = FuturesOrdered::new();
 
-	while let Some((prev_event_id, mut outlier)) = todo_outlier_stack.next().await {
+	loop {
+		// A finished fetch counts until it is popped, so at most PREV_FETCH_WIDTH
+		// run at once.
+		let ready = queue.take_ready(todo_outlier_stack.len());
+		todo_outlier_stack.extend(ready.map(&fetch));
+
+		let Some((prev_event_id, outlier)) = todo_outlier_stack.next().await else {
+			break;
+		};
+
 		self.services.server.check_running()?;
 
-		let Some((pdu, mut json_opt)) = outlier.pop() else {
+		let Some((pdu, mut json_opt)) = outlier?.pop() else {
 			// Fetch and handle failed
 			graph.insert(prev_event_id.clone(), Default::default());
 			continue;
 		};
 
 		check_room_id(&pdu, room_id)?;
-
-		if amount > limit {
-			// keep counting so the capped check below sees the cut
-			amount = amount.saturating_add(1);
-			graph.insert(prev_event_id.clone(), Default::default());
-			continue;
-		}
 
 		if json_opt.is_none() {
 			json_opt = self
@@ -183,7 +226,6 @@ where
 		// handle_prev_pdu upgrades events this old too, so their prev events must be
 		// walked and room-checked as well.
 		if pdu.origin_server_ts() >= first_normal_ts {
-			amount = amount.saturating_add(1);
 			debug_assert!(
 				pdu.prev_events().count() <= MAX_PREV_EVENTS,
 				"PduEvent {prev_event_id} has too many prev_events"
@@ -194,22 +236,10 @@ where
 					continue;
 				}
 
-				let prev_prev = prev_prev.to_owned();
-				let fetch = async move {
-					let fetch = self
-						.fetch_auth(
-							origin,
-							room_id,
-							once(prev_prev.as_ref()),
-							room_version,
-							recursion_level,
-						)
-						.await;
-
-					(prev_prev, fetch)
-				};
-
-				todo_outlier_stack.push_back(fetch.boxed()); // heterogeneous FuturesOrdered
+				if !queue.admit(prev_prev) {
+					capped = true;
+					break;
+				}
 			}
 
 			graph.insert(
@@ -250,9 +280,6 @@ where
 		sorted.len() >= pdus.len(),
 		"returned topologically sorted events differ from pdus"
 	);
-
-	// at most limit + 1 events are admitted, so more means one was cut
-	let capped = amount > limit.saturating_add(1);
 
 	Ok(PrevFetch { sorted, pdus, capped })
 }
@@ -301,6 +328,7 @@ async fn prefetch_missing_events(
 	incoming_event_id: &EventId,
 	room_version: &RoomVersionId,
 	recursion_level: usize,
+	budget: &AuthFetchBudget,
 ) {
 	let boundary: EventWindow = self
 		.services
@@ -316,25 +344,33 @@ async fn prefetch_missing_events(
 		.hint(origin.to_owned())
 		.room_version(room_version.to_owned())
 		.attempt_limit(super::EVENT_FETCH_ATTEMPT_LIMIT)
+		.backfill_limit(MISSING_EVENTS_LIMIT)
 		.fanout_for_op();
 
 	let Ok(outcome) = self.services.fetcher.fetch(opts).await else {
 		return;
 	};
 
-	let Ok(events) = serde_json::from_slice::<Vec<Box<RawJsonValue>>>(&outcome.bytes) else {
+	let Ok(events) = missing_events(&outcome.bytes) else {
 		return;
 	};
 
 	events
-		.into_iter()
 		.stream()
 		.for_each_concurrent(automatic_width(), async |pdu| {
-			self.land_missing_event(origin, room_id, &pdu, room_version, recursion_level)
+			self.land_missing_event(origin, room_id, pdu, room_version, recursion_level, budget)
 				.await
 				.ok();
 		})
 		.await;
+}
+
+/// Land at most as many events as the request asked for.
+fn missing_events(bytes: &[u8]) -> serde_json::Result<impl Iterator<Item = &RawJsonValue>> {
+	let events: Vec<&RawJsonValue> = serde_json::from_slice(bytes)?;
+	Ok(events
+		.into_iter()
+		.take(MISSING_EVENTS_LIMIT.get()))
 }
 
 /// Authenticate and persist one event from the missing-events batch as an
@@ -348,6 +384,7 @@ async fn land_missing_event(
 	pdu: &RawJsonValue,
 	room_version: &RoomVersionId,
 	recursion_level: usize,
+	budget: &AuthFetchBudget,
 ) -> Result {
 	let value: CanonicalJsonObject = serde_json::from_str(pdu.get())
 		.map_err(|e| err!(BadServerResponse("missing-events pdu is not canonical json: {e}")))?;
@@ -371,6 +408,7 @@ async fn land_missing_event(
 		value,
 		room_version,
 		recursion_level,
+		budget,
 		false,
 	))
 	.await
