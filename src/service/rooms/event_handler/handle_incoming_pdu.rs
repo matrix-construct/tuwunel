@@ -274,8 +274,10 @@ async fn accepted(&self, event_id: &EventId) -> Option<RawPduId> {
 /// error. An event this server built gets its unsigned data back once the
 /// outlier step has dropped it, so the stored and appended forms both carry it.
 #[implement(super::Service)]
-async fn handle_admitted(
-	&self,
+// size firewall
+#[async_noinline]
+async fn handle_admitted<'a>(
+	&'a self,
 	Admitted {
 		origin,
 		room_id,
@@ -284,7 +286,7 @@ async fn handle_admitted(
 		create_event,
 		unsigned,
 		is_timeline_event,
-	}: Admitted<'_>,
+	}: Admitted<'a>,
 ) -> Result<Handled> {
 	let create_event =
 		create_event.ok_or_else(|| err!(Request(NotFound("Room is unknown to this server"))))?;
