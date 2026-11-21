@@ -24,7 +24,10 @@ use ruma::{OwnedUserId, UserId};
 use serde_json::json;
 use tuwunel_api::router::{ClientIp, RateLimitIp, State};
 pub(crate) use tuwunel_core::utils::url::{redirect_allowlisted, url_encode};
-use tuwunel_core::{Result, err, mod_ctor, mod_dtor, utils::random_string};
+use tuwunel_core::{
+	Result, err, mod_ctor, mod_dtor,
+	utils::{html::escape as html_escape, random_string},
+};
 use tuwunel_service::{Services, users::LoginToken};
 use url::Url;
 
@@ -152,6 +155,28 @@ fn sso_redirect_url(base: &str, idp_id: &str, callback: &Url) -> Result<Url> {
 
 	Ok(sso_url)
 }
+
+/// A page that sends the browser on to `url` by refresh, with a link for a
+/// browser that does not refresh.
+///
+/// Chromium enforces a page's `form-action 'self'` across the redirects after
+/// a form submission. Answering one with this page instead ends that
+/// navigation here, so the refresh starts a navigation of its own.
+fn refresh_html(url: &str) -> String { REFRESH_HTML.replace("{href}", &html_escape(url)) }
+
+static REFRESH_HTML: &str = r#"
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta http-equiv="refresh" content="0; URL={href}">
+		<title>Continue</title>
+	</head>
+	<body>
+		<p>Continue signing in.</p>
+		<a href="{href}">Continue</a>
+	</body>
+</html>"#;
 
 mod_ctor! {}
 mod_dtor! {}

@@ -12,7 +12,8 @@ use url::{Url, form_urlencoded::Serializer};
 
 use super::{
 	account::{account_error_response, account_html_response},
-	consume_login_token, peek_login_token, redirect_allowlisted, require_account_usable,
+	consume_login_token, peek_login_token, redirect_allowlisted, refresh_html,
+	require_account_usable,
 };
 use crate::ClientIp;
 
@@ -266,7 +267,7 @@ async fn release_code(
 	let html = if needs_interstitial(&redirect_url, native) {
 		complete_continue_html(redirect_url.as_str())
 	} else {
-		complete_refresh_html(redirect_url.as_str())
+		refresh_html(redirect_url.as_str())
 	};
 
 	Ok(account_html_response(StatusCode::OK, html))
@@ -346,32 +347,12 @@ fn complete_continue_html(redirect_url: &str) -> String {
 	)
 }
 
-fn complete_refresh_html(redirect_url: &str) -> String {
-	REFRESH_HTML.replace("{href}", &html_escape(redirect_url))
-}
-
-static REFRESH_HTML: &str = r#"
-<!DOCTYPE html>
-<html lang="en">
-	<head>
-		<meta charset="UTF-8">
-		<meta http-equiv="refresh" content="0; URL={href}">
-		<title>Continue</title>
-	</head>
-	<body>
-		<p>Continue to finish signing in.</p>
-		<a href="{href}">Continue</a>
-	</body>
-</html>"#;
-
 #[cfg(test)]
 mod tests {
 	use ruma::user_id;
 	use url::Url;
 
-	use super::{
-		Approval, approved, complete_continue_html, complete_refresh_html, needs_interstitial,
-	};
+	use super::{Approval, approved, complete_continue_html, needs_interstitial, refresh_html};
 
 	fn approval(client_name: &str, login_token: &str) -> String {
 		Approval {
@@ -429,7 +410,7 @@ mod tests {
 
 	#[test]
 	fn refresh_html_escapes_both_destinations() {
-		let html = complete_refresh_html("https://client.example/cb?x=\"<&code=a#state={href}");
+		let html = refresh_html("https://client.example/cb?x=\"<&code=a#state={href}");
 		let escaped = "https://client.example/cb?x=&quot;&lt;&amp;code=a#state={href}";
 
 		assert!(html.contains(&format!(r#"content="0; URL={escaped}""#)));
