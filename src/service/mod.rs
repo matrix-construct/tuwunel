@@ -20,6 +20,8 @@ pub mod fetcher;
 pub mod globals;
 pub mod integrity;
 pub mod key_backups;
+#[cfg(feature = "livekit")]
+pub mod livekit;
 pub mod login_ratelimit;
 pub mod media;
 pub mod membership;

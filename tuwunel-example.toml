@@ -2736,6 +2736,67 @@
 
 
 ################################################################################
+# LiveKit calls (MSC4195)
+#
+# Issues LiveKit access tokens for MatrixRTC calls (Element Call and other
+# MSC4195 clients) from this server, so a LiveKit SFU needs no separate
+# lk-jwt-service. Clients ask this server for a token, and the server
+# creates the call's LiveKit room before answering. LiveKit learns neither
+# Matrix room IDs nor user IDs: room names and participant identities are
+# hashes.
+#
+# Set all three of `url`, `api_key` and `api_secret`; with none of them set
+# the native transport is off. The key pair must be one listed in LiveKit's
+# `keys` setting.
+#
+# Minimal example:
+#
+#     [global.livekit]
+#     url = "wss://livekit.example.com"
+#     api_key = "APIb3c1e9f07d"
+#     api_secret = "replace-with-the-livekit-api-secret"
+#
+# Tips:
+# - Startup refuses a section with only some of the three set, or a `url`
+#   that is not `ws://` or `wss://` or that carries a user name or password.
+# - Changes take a restart; a reload that changes this section is refused.
+#
+#[global.livekit]
+
+# WebSocket URL of the LiveKit SFU, as clients reach it.
+#
+# Clients receive it as the `m.livekit` transport, and a token request
+# naming any other URL is refused; the comparison is exact. The server
+# calls LiveKit's API at the same address over HTTP: `wss` becomes
+# `https` and `ws` becomes `http`, keeping any path. Unset by default; an
+# empty value is the same as unset.
+#
+# reloadable: no
+# example: "wss://livekit.example.com"
+#
+#url =
+
+# API key that names this server as the issuer of its LiveKit tokens.
+#
+# It must be a key in LiveKit's `keys` setting. Unset by default; an
+# empty value is the same as unset.
+#
+# reloadable: no
+# example: "APIb3c1e9f07d"
+#
+#api_key =
+
+# API secret paired with `api_key` in LiveKit's `keys` setting.
+#
+# It signs every token this server issues, so keep it private. Unset by
+# default; an empty value is the same as unset.
+#
+# reloadable: no
+#
+#api_secret =
+
+
+################################################################################
 # Logging
 #
 # Controls what the server logs and where the output goes. By default it

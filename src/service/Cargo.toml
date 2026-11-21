@@ -26,6 +26,7 @@ default = [
 	"gcs_storage",
 	"gzip_compression",
 	"ldap",
+	"livekit",
 	"markdown",
 	"media_thumbnail",
 	"release_max_log_level",
@@ -60,6 +61,7 @@ gzip_compression = [
 ldap = [
 	"dep:ldap3",
 ]
+livekit = []
 markdown = [
 	"ruma/markdown",
 ]

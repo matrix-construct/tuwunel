@@ -77,6 +77,7 @@ jemalloc
 jemalloc_conf
 jwt_login
 ldap
+livekit
 lz4_compression
 markdown
 mas
@@ -93,12 +94,16 @@ zstd_compression
 
 ## Building
 
+Run the build from the root of the Tuwunel source tree. The command below
+uses the current tree's features. For `1.8.3`, use the `default` list in that
+release's `src/main/Cargo.toml` and omit `io_uring` and `systemd`.
+
 ```sh
 export PATH=/usr/pkg/bin:/usr/pkg/sbin:$PATH
 export LIBCLANG_PATH=/usr/pkg/lib
 
 cargo build --release -p tuwunel --no-default-features \
-    --features brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gcs_storage,gzip_compression,jemalloc,jemalloc_conf,jwt_login,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,release_max_log_level,s3_storage,sentry_telemetry,synapse_admin,url_preview,zstd_compression
+    --features brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gcs_storage,gzip_compression,jemalloc,jemalloc_conf,jwt_login,ldap,livekit,lz4_compression,markdown,mas,media_thumbnail,oidc,release_max_log_level,s3_storage,sentry_telemetry,synapse_admin,url_preview,zstd_compression
 ```
 
 No source changes or compiler flag workarounds are needed. The pinned RocksDB

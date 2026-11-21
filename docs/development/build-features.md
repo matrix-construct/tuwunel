@@ -22,6 +22,7 @@ The public Cargo feature surface is defined in [`src/main/Cargo.toml`](https://g
 | `jemalloc_stats` | × | Compile jemalloc allocation statistics support. Enable `jemalloc`; a substituted allocator must support statistics. |
 | `jwt_login` | ✔️ | Authenticate with a JSON Web Token through login (`org.matrix.login.jwt`) or user-interactive authentication. Configure authentication in `[global.jwt]`. Also provides the `debug create-jwt` admin command. Required when `jwt.enable` is true. A build without this feature rejects that configuration at startup and on reload. Otherwise it behaves as a server with `jwt.enable = false` and has no `debug create-jwt` command. ID tokens issued by the native OIDC server are unaffected. |
 | `ldap` | ✔️ | Authenticate users against LDAP. Enable and configure `[global.ldap]`; an LDAP server is needed. |
+| `livekit` | ✔️ | Issue LiveKit access tokens for MatrixRTC calls (MSC4195) without a separate `lk-jwt-service`. To enable token issuance, set the SFU's WebSocket `url`, `api_key`, and `api_secret` together in `[global.livekit]`. Without the feature, Tuwunel rejects any nonempty value in that section at startup and on reload. |
 | `lz4_compression` | ✔️ | LZ4 compression for RocksDB. Select `rocksdb.compression_algo = "lz4"` or `"lz4hc"`. |
 | `markdown` | ✔️ | Render Markdown to HTML in the server's administrative messages: admin command output, admin room notices and the welcome message, and room and user reports. A build without it sends their Markdown source as plain text. |
 | `mas` | ✔️ | Matrix Authentication Service provisioning API. Required when `authentication.mas_secret` is set; a build without it refuses to start with a nonempty secret. |
@@ -71,6 +72,7 @@ The `main` crate defines every public feature and forwards it to the workspace c
 | `jemalloc_stats` | `core` | Statistics on `jevmalloc` if the allocator is enabled. |
 | `jwt_login` | `admin`, `api`, `api-client`, `core` | `jsonwebtoken`'s `use_pem` feature, which adds `pem` and `simple_asn1`. `jsonwebtoken` itself stays for the native OIDC server. |
 | `ldap` | `api`, `api-client`, `service` | `ldap3`. |
+| `livekit` | `core`, `service` | No optional dependency activated by this feature. |
 | `lz4_compression` | `database` | RocksDB LZ4 support. |
 | `markdown` | `service` | Ruma's `markdown` feature, which adds `pulldown-cmark`. |
 | `mas` | `api-mas`, `router` | Optional workspace crate `tuwunel-api-mas`. |

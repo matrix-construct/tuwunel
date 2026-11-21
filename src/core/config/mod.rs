@@ -14,6 +14,7 @@ mod identity_provider_serde;
 pub mod ip_source;
 #[cfg(feature = "jwt_login")]
 mod jwt;
+pub mod livekit;
 pub mod manager;
 pub mod media;
 mod net;
@@ -93,6 +94,7 @@ pub use self::{
 	federation::Federation,
 	http::Http,
 	ip_source::{IpSource, UNIX_SOCKET_PEER},
+	livekit::Livekit,
 	logging::Logging,
 	manager::Manager,
 	media::Media,
@@ -215,7 +217,8 @@ pub type ProviderSection<'a> = (&'a str, Cow<'a, StorageProvider>);
 	          identity_provider storage_provider registration_terms smtp cache database runtime \
 	          http network media federation rooms sending authentication directory encryption \
 	          profile registration admin appservice_client client compatibility configuration \
-	          logging presence push read_receipts rendezvous telemetry tracing turn typing",
+	          livekit logging presence push read_receipts rendezvous telemetry tracing turn \
+	          typing",
 	forbidden = "database_restore_backup force_migration"
 )]
 pub struct Config {
@@ -416,6 +419,13 @@ pub struct Config {
 	// external structure; separate section
 	#[serde(default)]
 	pub jwt: JwtConfig,
+
+	/// Configures the native LiveKit transport for MatrixRTC calls.
+	///
+	/// The SFU's URL and API key pair live in the separate `[global.livekit]`
+	/// section. The transport is off until all three are set.
+	#[serde(default)]
+	pub livekit: Livekit,
 
 	/// Configures outbound SMTP email delivery.
 	///

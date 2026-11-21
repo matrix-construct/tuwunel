@@ -25,6 +25,7 @@ default = [
 	"jemalloc",
 	"jemalloc_conf",
 	"jwt_login",
+	"livekit",
 	"release_max_log_level",
 	"zstd_compression",
 ]
@@ -51,6 +52,7 @@ jemalloc_stats = [
 jwt_login = [
 	"jsonwebtoken/use_pem",
 ]
+livekit = []
 release_max_log_level = [
 	"log/max_level_trace",
 	"log/release_max_level_info",

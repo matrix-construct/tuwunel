@@ -232,6 +232,7 @@ jemalloc
 jemalloc_conf
 jwt_login
 ldap
+livekit
 lz4_compression
 markdown
 mas
@@ -258,19 +259,18 @@ _RJEM_MALLOC_CONF=stats_print:true tuwunel -V
 
 ## Building
 
-```sh
-export PATH=/usr/local/bin:/usr/local/sbin:$PATH
-export LIBCLANG_PATH=/usr/local/llvm21/lib
-export CARGO_TARGET_DIR=/home/build/target
+Run the build from the root of the Tuwunel source tree. The command below
+uses the current tree's features. For `1.8.3`, use the `default` list in that
+release's `src/main/Cargo.toml` and omit `io_uring` and `systemd`.
 
-cargo build --release -p tuwunel --no-default-features \
-    --features brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gcs_storage,gzip_compression,jemalloc,jemalloc_conf,jwt_login,ldap,lz4_compression,markdown,mas,media_thumbnail,oidc,release_max_log_level,s3_storage,sentry_telemetry,synapse_admin,url_preview,zstd_compression
-```
+> [!WARNING]
+> For `1.9.1` and earlier, also omit `jemalloc` and `jemalloc_conf`. A binary
+> built with `jemalloc` on those releases aborts at startup on OpenBSD.
 
-Building the 1.8.3 release rather than the current tree needs one more change.
-`tuwunel_core` denies `missing_docs`, and the OpenBSD arm of
-`available_parallelism` in `src/core/utils/sys/compute.rs` carried no doc
-comment, so the crate failed to compile on OpenBSD and nowhere else:
+If you build `1.8.3`, add a doc comment above the OpenBSD definition of
+`available_parallelism` in `src/core/utils/sys/compute.rs`. The current tree
+already has the comment. Without it, `tuwunel_core` fails the `missing_docs`
+check on OpenBSD with this error.
 
 ```
 error: missing documentation for a function
@@ -279,7 +279,14 @@ error: missing documentation for a function
 131 | pub fn available_parallelism() -> usize { num_cpus::get() }
 ```
 
-Adding a doc comment above it is enough. This is fixed in the tree.
+```sh
+export PATH=/usr/local/bin:/usr/local/sbin:$PATH
+export LIBCLANG_PATH=/usr/local/llvm21/lib
+export CARGO_TARGET_DIR=/home/build/target
+
+cargo build --release -p tuwunel --no-default-features \
+    --features brotli_compression,bzip2_compression,console,cpu_affinity,direct_tls,element_hacks,email,gcs_storage,gzip_compression,jemalloc,jemalloc_conf,jwt_login,ldap,livekit,lz4_compression,markdown,mas,media_thumbnail,oidc,release_max_log_level,s3_storage,sentry_telemetry,synapse_admin,url_preview,zstd_compression
+```
 
 A cold build took about 57 minutes on 2 jobs on `arm64`, and about 80 minutes on
 2 jobs on `amd64`, producing an 81.6 MB and a 90 MB binary respectively. The

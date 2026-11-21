@@ -56,6 +56,13 @@ pub struct Clients {
 
 	/// OAuth provider requests with redirects disabled.
 	pub oauth: Client,
+
+	/// Client for LiveKit RoomService requests.
+	///
+	/// These requests carry an API token, so the client follows no redirects
+	/// and keeps wire logging off even in debug builds.
+	#[cfg(feature = "livekit")]
+	pub livekit: Client,
 }
 
 /// Separate DNS resolvers and connection pools for direct and SRV routes.
@@ -204,6 +211,12 @@ fn make_clients(services: &Services) -> Result<Clients> {
 			.https_only(true)
 			.redirect(guarded_redirect(services, 4)));
 
+	#[cfg(feature = "livekit")]
+	let livekit = with!(cb => cb
+		.dns_resolver(Arc::clone(&services.resolver.resolver))
+		.redirect(Policy::none())
+		.connection_verbose(false));
+
 	Ok(Clients {
 		default,
 		url_preview,
@@ -233,6 +246,9 @@ fn make_clients(services: &Services) -> Result<Clients> {
 			.dns_resolver(Arc::clone(&services.resolver.resolver))
 			.redirect(Policy::limited(0))
 			.pool_max_idle_per_host(1)),
+
+		#[cfg(feature = "livekit")]
+		livekit,
 	})
 }
 

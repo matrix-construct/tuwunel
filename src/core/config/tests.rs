@@ -2,6 +2,7 @@
 
 mod baseline;
 mod hierarchy;
+mod livekit;
 mod sso_callback;
 
 use std::{

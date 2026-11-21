@@ -26,7 +26,7 @@ use super::{
 use crate::{
 	Config, Err, Result, debug, debug_info, err, error,
 	utils::{
-		is_secret_set,
+		BoolExt, is_secret_set,
 		string::{equals_any, is_namespaced_id, is_opaque_id},
 		sys::storage::{Filesystem, filesystem_from_path},
 		time::timepoint_from_now,
@@ -66,6 +66,14 @@ pub fn reload(old: &Config, new: &Config) -> Result {
 		return Err!(Config(
 			"storage_provider",
 			"Storage providers cannot be changed at runtime; restart the server to apply this \
+			 change."
+		));
+	}
+
+	if new.livekit.settings() != old.livekit.settings() {
+		return Err!(Config(
+			"livekit",
+			"LiveKit settings cannot be changed at runtime; restart the server to apply this \
 			 change."
 		));
 	}
@@ -117,6 +125,7 @@ pub fn check(config: &Config) -> Result {
 	check_typing_timeouts(config)?;
 	check_password_hashing(config)?;
 	check_jwt(config)?;
+	check_livekit(config)?;
 	check_turn_and_media_misc(config)?;
 	check_url_previews(config)?;
 	check_room_version(config)?;
@@ -611,6 +620,51 @@ fn check_jwt(config: &Config) -> Result {
 	}
 
 	Ok(())
+}
+
+fn check_livekit(config: &Config) -> Result {
+	let livekit = &config.livekit;
+	let settings = livekit.settings();
+
+	if settings.iter().all(Option::is_none) {
+		return Ok(());
+	}
+
+	if cfg!(not(feature = "livekit")) {
+		return Err!(Config(
+			"livekit",
+			"tuwunel was not built with LiveKit support (\"livekit\")"
+		));
+	}
+
+	let Some((url, ..)) = livekit.enabled() else {
+		let unset = ["url", "api_key", "api_secret"]
+			.into_iter()
+			.zip(settings)
+			.filter(|(_, value)| value.is_none())
+			.map(|(name, _)| name)
+			.join(", ");
+
+		return Err!(Config(
+			"livekit",
+			"LiveKit needs url, api_key and api_secret together; unset: {unset}."
+		));
+	};
+
+	// Neither refusal quotes the url, which may hold a password.
+	let url = Url::parse(url)
+		.ok()
+		.filter(|url| matches!(url.scheme(), "ws" | "wss"))
+		.ok_or_else(|| {
+			err!(Config("livekit.url", "LiveKit url is not a ws:// or wss:// URL."))
+		})?;
+
+	// Clients are sent the url as written.
+	let anonymous = url.username().is_empty() && url.password().is_none();
+
+	BoolExt::ok_or_else(anonymous, || {
+		err!(Config("livekit.url", "LiveKit url must not carry a user name or password."))
+	})
 }
 
 fn check_turn_and_media_misc(config: &Config) -> Result {

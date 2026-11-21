@@ -8,6 +8,8 @@ use tuwunel_core::{
 use tuwunel_database::Database;
 
 pub(crate) use crate::OnceServices;
+#[cfg(feature = "livekit")]
+use crate::livekit::Service as LivekitService;
 use crate::{
 	account_data, admin, appservice, client, config, deactivate, delayed_events, emergency,
 	federation, fetcher, globals, key_backups, login_ratelimit,
@@ -30,6 +32,9 @@ pub struct Services {
 	pub fetcher: Arc<fetcher::Service>,
 	pub globals: Arc<globals::Service>,
 	pub key_backups: Arc<key_backups::Service>,
+	/// LiveKit tokens for MatrixRTC calls (MSC4195).
+	#[cfg(feature = "livekit")]
+	pub livekit: Arc<LivekitService>,
 	pub login_ratelimit: Arc<login_ratelimit::Service>,
 	pub media: Arc<media::Service>,
 	pub presence: Arc<presence::Service>,
@@ -105,6 +110,8 @@ pub async fn build(server: Arc<Server>) -> Result<Arc<Self>> {
 		fetcher: fetcher::Service::build(&args)?,
 		globals: globals::Service::build(&args)?,
 		key_backups: key_backups::Service::build(&args)?,
+		#[cfg(feature = "livekit")]
+		livekit: LivekitService::build(&args)?,
 		media: media::Service::build(&args)?,
 		presence: presence::Service::build(&args)?,
 		pusher: pusher::Service::build(&args)?,
@@ -177,6 +184,8 @@ pub(crate) fn services(&self) -> impl Iterator<Item = Arc<dyn Service>> + Send {
 		cast!(self.fetcher),
 		cast!(self.globals),
 		cast!(self.key_backups),
+		#[cfg(feature = "livekit")]
+		cast!(self.livekit),
 		cast!(self.media),
 		cast!(self.presence),
 		cast!(self.pusher),
