@@ -4,6 +4,7 @@ use std::{
 	io,
 	net::TcpListener,
 	path::PathBuf,
+	pin::pin,
 	sync::{Arc, Mutex},
 	time::Duration,
 };
@@ -16,14 +17,22 @@ use axum::{
 	routing::get,
 };
 use axum_server::{from_tcp_rustls, tls_rustls::RustlsConfig};
+use futures::{
+	TryStreamExt,
+	future::{Either, ready, select, try_join},
+};
 use reqwest::{Method, Response};
 use serde_json::{Value, from_slice, from_value, json, to_value};
-use tokio::{task::JoinSet, time::sleep};
+use tokio::{
+	sync::Barrier,
+	task::JoinSet,
+	time::{sleep, timeout},
+};
 use tuwunel_core::{
 	Result, err, implement,
 	result::NotFound,
 	ruma::{
-		CanonicalJsonObject, OwnedServerName, RoomId, RoomVersionId, ServerName, UserId,
+		CanonicalJsonObject, EventId, OwnedServerName, RoomId, RoomVersionId, ServerName, UserId,
 		events::{
 			StateEventType,
 			room::member::{MembershipState, RoomMemberEventContent},
@@ -69,6 +78,7 @@ const REFUSED: &str = "@refused:";
 const UNSIGNED: &str = "@unsigned:";
 const FORGED: &str = "@forged:";
 const STALLED: &str = "@stalled:";
+const RETRIED: &str = "@retried:";
 const NO_ANSWER: &str = "did not answer the invite";
 const ALICE_TOKEN: &str = "state-member-invite-alice-access-token";
 const BOB_TOKEN: &str = "state-member-invite-bob-access-token";
@@ -86,6 +96,14 @@ const LONG_DELAY: u64 = 60_000;
 const STALL: Duration = Duration::from_secs(32);
 const ANSWER_WITHIN: Duration = Duration::from_secs(1);
 
+// Bounds the wait for a retry's invite, so a send never retried is still
+// answered.
+const RETRY_WINDOW: Duration = Duration::from_secs(10);
+
+// An invite nothing holds back is stored well within this, so one still
+// pending at its end is waiting on the mutex.
+const PARKED: Duration = Duration::from_secs(2);
+
 // The stub's certificate and loopback address pass, and its key comes from
 // itself rather than a notary.
 const STUB_OPTIONS: [&str; 4] = [
@@ -100,11 +118,12 @@ const STUB_OPTIONS: [&str; 4] = [
 /// localpart selects.
 ///
 /// It refuses an invite of its `refused` user, returns one of its `unsigned`
-/// user unchanged, signs one of its `forged` user under its published key ID
-/// with another key, and answers one of its `stalled` user only after `STALL`.
-/// It signs any other with the key its key document serves and adds a second
-/// signature under a key ID it does not publish. Every other federation request
-/// gets an empty success.
+/// user unchanged, and signs one of its `forged` user under its published key
+/// ID with another key. It answers one of its `stalled` user only after
+/// `STALL`, and holds one of its `retried` user until a second arrives, so the
+/// two answers return together. It signs any other with the key its key
+/// document serves and adds a second signature under a key ID it does not
+/// publish. Every other federation request gets an empty success.
 struct Peer {
 	name: OwnedServerName,
 	key: Ed25519KeyPair,
@@ -112,6 +131,7 @@ struct Peer {
 	unpublished: Ed25519KeyPair,
 	document: CanonicalJsonObject,
 	invites: Mutex<Vec<Value>>,
+	retries: Barrier,
 }
 
 /// Runs each case on a server of its own, booted in turn.
@@ -151,6 +171,7 @@ async fn remote_invites(services: &Services, base: &str, listener: TcpListener) 
 	ordinary_invite(&client, &alice, &peer).await?;
 	appservice_invite(services, base, &peer).await?;
 	disabled_room_invite(&client, &peer).await?;
+	parked_invite(&client, &peer).await?;
 	delayed_invite(&client, &alice, &peer).await?;
 	delayed_refusal(&client, &peer).await?;
 	stalled_invite(&client, &alice, &peer).await?;
@@ -171,6 +192,7 @@ async fn serve(services: &Services, listener: TcpListener) -> Result<(Arc<Peer>,
 		name,
 		key,
 		invites: Mutex::default(),
+		retries: Barrier::new(2),
 	});
 
 	listener.set_nonblocking(true)?;
@@ -219,6 +241,12 @@ async fn answer(
 
 	if invitee.starts_with(STALLED) {
 		sleep(STALL).await;
+	}
+
+	if invitee.starts_with(RETRIED) {
+		timeout(RETRY_WINDOW, peer.retries.wait())
+			.await
+			.ok();
 	}
 
 	let answer = match invitee {
@@ -353,7 +381,8 @@ async fn ordinary_invite(client: &Client<'_>, alice: &UserId, peer: &Peer) -> Re
 /// An appservice's invite sent as state reaches the invitee's server.
 ///
 /// The invite it saw names the user the appservice acted as and carries the
-/// timestamp the appservice asked for.
+/// timestamp the appservice asked for. The retried-invite case reuses the
+/// appservice and its room.
 async fn appservice_invite(services: &Services, base: &str, peer: &Peer) -> Result {
 	let bridge = Bridge {
 		id: "state-member-invite",
@@ -391,6 +420,54 @@ async fn appservice_invite(services: &Services, base: &str, peer: &Peer) -> Resu
 	assert_eq!(invite["event"]["sender"], bridged.as_str());
 	assert_eq!(invite["event"]["origin_server_ts"], TIMESTAMP);
 
+	retried_invite(&client, room_id, &bridged, peer).await
+}
+
+/// An appservice's retry of a timestamped invite, sent while the first still
+/// waits on the invitee's server, stores the invite once.
+///
+/// Both sends build the same event from one frontier and one timestamp, and
+/// the stub answers them together. The second acceptance finds the first's
+/// timeline row, so it writes neither an outlier copy, which a redaction would
+/// miss, nor a second timeline entry.
+async fn retried_invite(
+	client: &Client<'_>,
+	room_id: &RoomId,
+	bridged: &UserId,
+	peer: &Peer,
+) -> Result {
+	let timeline = &client.services.timeline;
+	let dana = format!("{RETRIED}{}", peer.name);
+	let query = format!("?user_id={bridged}&ts={TIMESTAMP}");
+	let body = json!({ "membership": "invite" });
+	let put = || put_invite(client, room_id, &dana, &query, &body);
+	let (first, retry) = try_join(put(), put()).await?;
+
+	let first = answered(first, StatusCode::OK).await?;
+	let retry = answered(retry, StatusCode::OK).await?;
+	let event_id: &EventId = first["event_id"]
+		.as_str()
+		.unwrap_or_default()
+		.try_into()?;
+
+	let outlier = timeline
+		.outlier_pdu_exists(event_id)
+		.await
+		.present()?;
+
+	let copies = timeline
+		.pdus(None, room_id, None)
+		.try_filter(|(_, pdu)| ready(pdu.event_id() == event_id))
+		.try_fold(0_usize, |copies, _| ready(Ok(copies.saturating_add(1))))
+		.await?;
+
+	received(peer)?;
+	received(peer)?;
+
+	assert_eq!(retry["event_id"], first["event_id"], "both sends built one event");
+	assert_eq!(outlier, None, "an outlier copy was left beside the accepted invite");
+	assert_eq!(copies, 1, "the invite was appended {copies} times");
+
 	Ok(())
 }
 
@@ -409,6 +486,33 @@ async fn disabled_room_invite(client: &Client<'_>, peer: &Peer) -> Result {
 	let response = put_invite(client, &room_id, &erin, "", &body).await?;
 
 	invited(response, client.services, &room_id, &erin).await?;
+	received(peer).map(drop)
+}
+
+/// An invite whose room's federation mutex is held waits for it to store.
+///
+/// The invitee's server answers at once, so only the mutex, which serializes a
+/// retried send's acceptance, keeps the send pending. Once it is released the
+/// invite is stored.
+async fn parked_invite(client: &Client<'_>, peer: &Peer) -> Result {
+	let room_id = client.create_room(&json!({})).await?;
+	let frank = format!("@frank:{}", peer.name);
+	let body = json!({ "membership": "invite" });
+	let held = client
+		.services
+		.event_handler
+		.mutex_federation
+		.lock(&room_id)
+		.await;
+
+	let invite = pin!(put_invite(client, &room_id, &frank, "", &body));
+	let Either::Right(((), invite)) = select(invite, pin!(sleep(PARKED))).await else {
+		panic!("the invite was stored while its room's federation mutex was held");
+	};
+
+	drop(held);
+
+	invited(invite.await?, client.services, &room_id, &frank).await?;
 	received(peer).map(drop)
 }
 

@@ -65,9 +65,9 @@ pub struct Service {
 	/// Gapped incoming events whose passes are in flight.
 	///
 	/// An entry lives exactly as long as its pass. Top-level timeline passes run
-	/// under the room's `mutex_federation` except for remote invites and a local
-	/// join's federation fallback, so entries stay within one per room holding its
-	/// federation mutex, plus any passes those two callers have in flight.
+	/// under the room's `mutex_federation`, so a room holding that mutex has at
+	/// most one entry. A local join's federation fallback runs outside it and
+	/// adds whatever passes it has in flight.
 	prev_walks_in_flight: InFlightWalks,
 
 	backoff: BackoffCounters,

@@ -14,7 +14,7 @@ use tuwunel_core::{
 	trace,
 	utils::{
 		BoolExt,
-		future::ReadyEqExt,
+		future::{ReadyEqExt, TryExtExt},
 		result::NotFound,
 		stream::{IterStream, TryBroadbandExt, TryReadyExt},
 		time::now_millis,
@@ -150,8 +150,7 @@ pub async fn handle_incoming_pdu<'a>(
 	is_timeline_event: bool,
 ) -> Result<Handled> {
 	// 1. Skip the PDU if we already have it as a timeline event
-	if let Ok(pdu_id) = self.services.timeline.get_pdu_id(event_id).await {
-		debug!(?pdu_id, "Exists.");
+	if let Some(pdu_id) = self.accepted(event_id).await {
 		return Ok(Some((pdu_id, false)));
 	}
 
@@ -202,6 +201,12 @@ pub async fn handle_incoming_pdu<'a>(
 /// so an invite the invitee's server has countersigned is not refused after
 /// that server accepted it. The unsigned data the event was built with, which
 /// the receive path otherwise drops, is restored before it is appended.
+///
+/// It runs under the room's federation mutex, as a peer's event does. For an
+/// event already in the timeline it returns the existing row before writing
+/// anything, since a retried send can rebuild the same event while the first
+/// still waits on the peer; the retry's acceptance then stores no second copy.
+/// The caller holds neither that mutex nor the room's state lock.
 #[implement(super::Service)]
 // size firewall
 #[async_noinline]
@@ -228,6 +233,12 @@ pub(crate) async fn handle_local_pdu<'a>(
 		return Err!(Request(Forbidden("A local PDU must be sent by a user of this server.")));
 	}
 
+	let _federation = self.mutex_federation.lock(room_id).await;
+
+	if let Some(pdu_id) = self.accepted(event_id).await {
+		return Ok(Some((pdu_id, false)));
+	}
+
 	let create_event = self.room_create_event(room_id).await?;
 
 	self.handle_admitted(Admitted {
@@ -240,6 +251,20 @@ pub(crate) async fn handle_local_pdu<'a>(
 		is_timeline_event: true,
 	})
 	.await
+}
+
+/// The timeline row of an event this server already accepted.
+///
+/// Such an event needs no handling, so each receive entry returns this row
+/// before it writes anything.
+#[implement(super::Service)]
+async fn accepted(&self, event_id: &EventId) -> Option<RawPduId> {
+	self.services
+		.timeline
+		.get_pdu_id(event_id)
+		.inspect_ok(|pdu_id| debug!(?pdu_id, "Exists."))
+		.ok()
+		.await
 }
 
 /// Check an admitted event as an outlier and, for a timeline event, fetch the
