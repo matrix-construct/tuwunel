@@ -132,7 +132,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let replay_room = create_room(services, base, token).await?;
 	let replaying = register(services, "replaying-refusal").await?;
 
-	assert_replay_needs_membership(services, base, &replay_room, &replaying).await?;
+	assert_replay_needs_membership(services, base, &admin, &replay_room, &replaying).await?;
 
 	let disabled_room = create_room(services, base, token).await?;
 	let outsider = register(services, "joining-disabled").await?;
@@ -295,13 +295,11 @@ async fn assert_refused(
 async fn assert_replay_needs_membership(
 	services: &Services,
 	base: &str,
+	admin: &UserId,
 	room_id: &RoomId,
 	user_id: &UserId,
 ) -> Result {
-	let join_event = prepare(services, user_id, room_id, MembershipState::Join).await?;
-
-	answered(services, base, Route::Join, room_id, &join_event, StatusCode::OK).await?;
-
+	let join_event = accepted(services, base, Route::Join, room_id, user_id).await?;
 	let replay =
 		answered(services, base, Route::Join, room_id, &join_event, StatusCode::OK).await?;
 
@@ -312,11 +310,50 @@ async fn assert_replay_needs_membership(
 		"{replay}"
 	);
 
-	let leave_event = prepare(services, user_id, room_id, MembershipState::Leave).await?;
+	accepted(services, base, Route::Leave, room_id, user_id).await?;
+	assert_replay_refused(services, base, room_id, &join_event).await?;
 
-	answered(services, base, Route::Leave, room_id, &leave_event, StatusCode::OK).await?;
+	accepted(services, base, Route::Join, room_id, user_id).await?;
+	answered(services, base, Route::Join, room_id, &join_event, StatusCode::OK).await?;
 
-	let refusal = forbidden(services, base, Route::Join, room_id, &join_event).await?;
+	accepted(services, base, Route::Leave, room_id, user_id).await?;
+	services
+		.membership
+		.invite(admin, user_id, room_id, None, false)
+		.await?;
+
+	assert_replay_refused(services, base, room_id, &join_event).await?;
+
+	accepted(services, base, Route::Leave, room_id, user_id).await?;
+	set_knock_rule(services, admin, room_id).await?;
+	accepted(services, base, Route::Knock, room_id, user_id).await?;
+	assert_replay_refused(services, base, room_id, &join_event).await?;
+
+	ban(services, admin, user_id, room_id).await?;
+	assert_replay_refused(services, base, room_id, &join_event).await
+}
+
+async fn accepted(
+	services: &Services,
+	base: &str,
+	route: Route,
+	room_id: &RoomId,
+	user_id: &UserId,
+) -> Result<MembershipPdu> {
+	let event = prepare(services, user_id, room_id, route.membership()).await?;
+
+	answered(services, base, route, room_id, &event, StatusCode::OK).await?;
+
+	Ok(event)
+}
+
+async fn assert_replay_refused(
+	services: &Services,
+	base: &str,
+	room_id: &RoomId,
+	join_event: &MembershipPdu,
+) -> Result {
+	let refusal = forbidden(services, base, Route::Join, room_id, join_event).await?;
 
 	assert!(
 		refusal["error"]
@@ -412,5 +449,13 @@ impl Route {
 		}?;
 
 		Ok((status, serde_json::from_str(&body)?))
+	}
+
+	fn membership(self) -> MembershipState {
+		match self {
+			| Self::Join => MembershipState::Join,
+			| Self::Leave => MembershipState::Leave,
+			| Self::Knock => MembershipState::Knock,
+		}
 	}
 }
