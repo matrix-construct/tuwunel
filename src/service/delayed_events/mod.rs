@@ -21,7 +21,7 @@ use ruma::{
 	EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, OwnedUserId, UserId,
 	api::{
 		client::delayed_events::get_delayed_event::v1::Finalized,
-		error::{ErrorKind, LimitExceededErrorData, RetryAfter, StandardErrorBody},
+		error::{ErrorKind, LimitExceededErrorData, RetryAfter},
 	},
 	events::TimelineEventType,
 };
@@ -47,6 +47,7 @@ use tuwunel_matrix::{
 };
 
 use crate::{
+	membership::RemoteInvite,
 	service::make_name,
 	transaction_ids::{RoomScope, RoomTxn},
 };
@@ -156,6 +157,9 @@ const DELAY_ID_LEN: usize = 32;
 const SEND_WIDTH: usize = 8;
 
 const MAX_WAIT: Duration = Duration::from_mins(1);
+
+// How long a remote invite may hold a send slot awaiting its countersignature.
+const INVITE_ANSWER_WITHIN: Duration = Duration::from_secs(30);
 
 #[async_trait]
 impl crate::Service for Service {
@@ -506,9 +510,12 @@ async fn send_and_finalise(&self, delay_id: &str, event: Event) -> Result<OwnedE
 /// Appends an event through the ordinary local send path.
 ///
 /// A suspended sender is refused here, since the suspension may postdate the
-/// scheduling. The event names its delay ID in its unsigned data, which the
-/// serving paths show to its sender alone (MSC4140). Once the event is stored,
-/// the append succeeds even if a later step, such as thread indexing, fails.
+/// scheduling. A member invite to a user on another server goes through the
+/// invite handshake, as an immediate send does, so a refusal from that server,
+/// or no answer within `INVITE_ANSWER_WITHIN`, becomes the outcome. The event
+/// names its delay ID in its unsigned data, which the serving paths show to its
+/// sender alone (MSC4140). Once the event is stored, the append succeeds even
+/// if a later step, such as thread indexing, fails.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn append(&self, delay_id: &str, event: &Event) -> Result<OwnedEventId> {
@@ -529,11 +536,25 @@ async fn append(&self, delay_id: &str, event: &Event) -> Result<OwnedEventId> {
 	};
 
 	let state_lock = self.services.state.mutex.lock(room_id).await;
-	let (event_id, appended) = self
-		.services
-		.timeline
-		.build_and_store_pdu(pdu, user_id, room_id, &state_lock)
-		.await?;
+	let (event_id, appended) = match self.services.membership.remote_invitee(&pdu) {
+		| Some(invitee) =>
+			self.services
+				.membership
+				.federate_invite(RemoteInvite {
+					sender: user_id,
+					invitee: &invitee,
+					room_id,
+					invite: pdu,
+					state_lock,
+					answer_within: Some(INVITE_ANSWER_WITHIN),
+				})
+				.await?,
+		| None =>
+			self.services
+				.timeline
+				.build_and_store_pdu(pdu, user_id, room_id, &state_lock)
+				.await?,
+	};
 
 	appended
 		.inspect_err(|e| log_send_error(delay_id, user_id, e, Some(&event_id)))
@@ -750,15 +771,13 @@ fn conflict(finalised: &Finalized) -> Error {
 
 /// Records a send's outcome with the time it was finalised.
 ///
-/// A failure keeps the error body an ordinary send answers with.
+/// A failure keeps the error body an ordinary send answers with, so a remote's
+/// error the response would withhold stays out of the record as well.
 fn outcome(result: &Result<OwnedEventId>) -> Finalized {
 	let finalized_ts = MilliSecondsSinceUnixEpoch::now();
 
 	match result {
 		| Ok(event_id) => Finalized::Sent { finalized_ts, event_id: event_id.clone() },
-		| Err(e) => Finalized::Error {
-			finalized_ts,
-			error: StandardErrorBody::new(e.kind(), e.sanitized_message()),
-		},
+		| Err(e) => Finalized::Error { finalized_ts, error: e.client_body() },
 	}
 }

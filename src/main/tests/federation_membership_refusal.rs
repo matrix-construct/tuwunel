@@ -27,9 +27,15 @@ use tuwunel_core::{
 use tuwunel_matrix::pdu::PduBuilder;
 use tuwunel_service::{Services, membership::Join, users::Register};
 
-use self::federation::{MembershipPdu, prepare, submit};
+use self::{
+	federation::{MembershipPdu, prepare, submit},
+	timeline::timelined,
+};
 
 mod federation;
+
+#[path = "fixture/timeline.rs"]
+mod timeline;
 
 struct DatabasePath(PathBuf);
 
@@ -122,7 +128,13 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	ban(services, &admin, &knocking, &room_id).await?;
 	assert_refused(services, base, Route::Knock, &room_id, &knock_event).await?;
 
-	Ok(())
+	let disabled_room = create_room(services, base, token).await?;
+	let outsider = register(services, "joining-disabled").await?;
+	let outsider_join =
+		prepare(services, &outsider, &disabled_room, MembershipState::Join).await?;
+
+	services.metadata.disable_room(&disabled_room);
+	assert_disabled(services, base, &disabled_room, &outsider_join).await
 }
 
 async fn wait_until_ready(services: &Services, base: &str) -> Result {
@@ -251,12 +263,7 @@ async fn assert_refused(
 	room_id: &RoomId,
 	event: &MembershipPdu,
 ) -> Result {
-	let response = route
-		.send(services, base, room_id, &event.event_id, event.pdu.clone())
-		.await?;
-
-	assert_eq!(response.0, 403, "{route:?}: {}", response.1);
-	assert_eq!(response.1["errcode"], "M_FORBIDDEN", "{route:?}");
+	forbidden(services, base, route, room_id, event).await?;
 
 	assert!(
 		services
@@ -267,15 +274,60 @@ async fn assert_refused(
 	);
 
 	assert!(
-		services
-			.timeline
-			.non_outlier_pdu_exists(&event.event_id)
-			.await
-			.is_err_and(|error| error.is_not_found()),
+		!timelined(services, &event.event_id).await?,
 		"{route:?}: refused event entered the timeline",
 	);
 
 	Ok(())
+}
+
+/// A join into a room whose federation this server disabled is refused.
+///
+/// The event names this server as its origin, as a peer's copy of this
+/// server's join template does, and the receive path still refuses it.
+async fn assert_disabled(
+	services: &Services,
+	base: &str,
+	room_id: &RoomId,
+	event: &MembershipPdu,
+) -> Result {
+	let pdu: Value = serde_json::from_str(event.pdu.get())?;
+	let body = forbidden(services, base, Route::Join, room_id, event).await?;
+
+	assert_eq!(pdu["origin"], services.globals.server_name().as_str(), "{pdu}");
+	assert!(
+		body["error"]
+			.as_str()
+			.is_some_and(|error| error.contains("disabled")),
+		"{body}"
+	);
+
+	assert!(
+		!timelined(services, &event.event_id).await?,
+		"refused join entered the timeline"
+	);
+
+	Ok(())
+}
+
+/// Submits the event through the route and asserts a 403 `M_FORBIDDEN`.
+///
+/// The body comes back for the caller to inspect further.
+async fn forbidden(
+	services: &Services,
+	base: &str,
+	route: Route,
+	room_id: &RoomId,
+	event: &MembershipPdu,
+) -> Result<Value> {
+	let (status, body) = route
+		.send(services, base, room_id, &event.event_id, event.pdu.clone())
+		.await?;
+
+	assert_eq!(status, 403, "{route:?}: {body}");
+	assert_eq!(body["errcode"], "M_FORBIDDEN", "{route:?}: {body}");
+
+	Ok(body)
 }
 
 impl Route {

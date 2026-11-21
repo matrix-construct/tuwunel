@@ -1270,3 +1270,32 @@ fn lapsed_copies_lose_a_remaining_time_formatted_earlier() {
 	);
 	assert!(unsigned.get(STICKY_TTL_KEY).is_none(), "plain outer event kept a TTL");
 }
+
+#[test]
+fn built_unsigned_returns_to_the_event_and_its_json() {
+	let pdu = Pdu { unsigned: None, ..message_pdu() };
+	let pdu_json: CanonicalJsonObject =
+		serde_json::from_value(json!({ "unsigned": { "age": 4 } })).expect("canonical object");
+
+	let built = json!({ DELAY_ID: "delay" });
+	let unsigned =
+		Unsigned::from_json_string(built.to_string()).expect("valid raw unsigned object");
+
+	let (pdu, pdu_json) = pdu
+		.with_built_unsigned(pdu_json, Some(unsigned))
+		.expect("an unsigned object");
+
+	let restored: serde_json::Value = pdu
+		.unsigned
+		.as_ref()
+		.map(|unsigned| serde_json::from_str(unsigned.json().get()))
+		.transpose()
+		.expect("readable unsigned data")
+		.expect("unsigned data on the event");
+
+	assert_eq!(restored, built);
+	assert_eq!(
+		serde_json::to_value(&pdu_json["unsigned"]).expect("serializable unsigned data"),
+		json!({ "age": 4, DELAY_ID: "delay" })
+	);
+}

@@ -38,8 +38,8 @@ impl From<Error> for UiaaResponse {
 		}
 
 		let status = match &error {
-			| Error::Federation(origin, remote) if !is_relayable(ruma_error_kind(remote)) =>
-				return withheld_remote_error(origin),
+			| _ if withheld_origin(&error).is_some() =>
+				return matrix_response(StatusCode::BAD_GATEWAY, error.client_body()),
 
 			// A remote's 401 reads to a client as its own session failing.
 			| Error::Federation(..) if error.status_code() == StatusCode::UNAUTHORIZED =>
@@ -52,7 +52,31 @@ impl From<Error> for UiaaResponse {
 			.is_server_error()
 			.then(|| error!(?error, "request failed"));
 
-		matrix_response(status, error.kind(), error.sanitized_message())
+		matrix_response(status, error.client_body())
+	}
+}
+
+impl Error {
+	/// The error body a local client is answered with.
+	///
+	/// A remote's error of a kind we do not relay becomes an `M_UNKNOWN` body
+	/// naming the remote. A body kept for a client to read later withholds the
+	/// same detail the live response does.
+	#[must_use]
+	pub fn client_body(&self) -> StandardErrorBody {
+		withheld_origin(self)
+			.map(|origin| format!("Request to {origin} failed."))
+			.map(|message| StandardErrorBody::new(ErrorKind::Unknown, message))
+			.unwrap_or_else(|| StandardErrorBody::new(self.kind(), self.sanitized_message()))
+	}
+}
+
+/// The remote whose error a local client is not shown, when this is one.
+fn withheld_origin(error: &Error) -> Option<&ServerName> {
+	match error {
+		| Error::Federation(origin, remote) if !is_relayable(ruma_error_kind(remote)) =>
+			Some(origin),
+		| _ => None,
 	}
 }
 
@@ -76,16 +100,8 @@ fn is_relayable(kind: &ErrorKind) -> bool {
 	)
 }
 
-fn withheld_remote_error(origin: &ServerName) -> UiaaResponse {
-	let message = format!("Request to {origin} failed.");
-
-	matrix_response(StatusCode::BAD_GATEWAY, ErrorKind::Unknown, message)
-}
-
-fn matrix_response(status: StatusCode, kind: ErrorKind, message: String) -> UiaaResponse {
-	let body = ErrorBody::Standard(StandardErrorBody { kind, message });
-
-	UiaaResponse::MatrixError(RumaError::new(status, body))
+fn matrix_response(status: StatusCode, body: StandardErrorBody) -> UiaaResponse {
+	UiaaResponse::MatrixError(RumaError::new(status, ErrorBody::Standard(body)))
 }
 
 pub(super) fn status_code(kind: &ErrorKind, hint: StatusCode) -> StatusCode {

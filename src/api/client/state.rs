@@ -28,9 +28,9 @@ use tuwunel_core::{
 };
 use tuwunel_matrix::{
 	Event,
-	pdu::{PduBuilder, PduEvent},
+	pdu::{Content, PduBuilder, PduEvent},
 };
-use tuwunel_service::{Services, profile::check_member_content};
+use tuwunel_service::{Services, membership::RemoteInvite, profile::check_member_content};
 
 use crate::{Ruma, RumaResponse, with_membership};
 
@@ -209,10 +209,33 @@ async fn send_state_event_for_key_helper(
 ) -> Result<OwnedEventId> {
 	allowed_to_send_state_event(services, sender, room_id, event_type, state_key, json).await?;
 
+	let pdu = PduBuilder {
+		event_type: event_type.clone().into(),
+		content: Content::from_raw_value(json.json()),
+		state_key: Some(state_key.into()),
+		timestamp,
+		..Default::default()
+	};
+
 	let state_lock = services.state.mutex.lock(room_id).await;
 
 	if *event_type == StateEventType::RoomMember {
 		check_member_content_size(services, sender, room_id, state_key, json).await?;
+	}
+
+	if let Some(invitee) = services.membership.remote_invitee(&pdu) {
+		return services
+			.membership
+			.federate_invite(RemoteInvite {
+				sender,
+				invitee: &invitee,
+				room_id,
+				invite: pdu,
+				state_lock,
+				answer_within: None,
+			})
+			.await
+			.and_then(|(event_id, sent)| sent.map(|()| event_id));
 	}
 
 	let current = match state_dedup_eligible(event_type, timestamp.as_ref()) {
@@ -241,18 +264,7 @@ async fn send_state_event_for_key_helper(
 
 	let event_id = services
 		.timeline
-		.build_and_append_pdu(
-			PduBuilder {
-				event_type: event_type.to_string().into(),
-				content: serde_json::from_str(json.json().get())?,
-				state_key: Some(state_key.into()),
-				timestamp,
-				..Default::default()
-			},
-			sender,
-			room_id,
-			&state_lock,
-		)
+		.build_and_append_pdu(pdu, sender, room_id, &state_lock)
 		.await?;
 
 	Ok(event_id)

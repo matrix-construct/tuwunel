@@ -1,14 +1,19 @@
-use ruma::api::{
-	client::delayed_events::get_delayed_event::v1::Finalized,
-	error::{ErrorKind, StandardErrorBody},
+use http::StatusCode;
+use ruma::{
+	OwnedServerName,
+	api::{
+		client::delayed_events::get_delayed_event::v1::Finalized,
+		error::{ErrorBody, ErrorKind, LimitExceededErrorData, StandardErrorBody},
+	},
 };
-use tuwunel_core::Result;
+use tuwunel_core::{Error, Result};
 
-use super::Event;
+use super::{Event, outcome};
 
 const SENT: &str = r#","finalised":{"finalised_ts":3000,"event_id":"$sent:example.org"}"#;
 const FAILED: &str = r#","finalised":{"finalised_ts":3000,"error":{"errcode":"M_LIMIT_EXCEEDED","retry_after_ms":5000,"error":"Too many."}}"#;
 const CANCELLED: &str = r#","finalised":{"finalised_ts":3000}"#;
+const REMOTE: &str = "remote.example";
 
 #[test]
 fn scheduled_record_reads_without_outcome() -> Result {
@@ -46,4 +51,25 @@ fn outcomes_round_trip() -> Result {
 
 fn limit_exceeded(error: &StandardErrorBody) -> bool {
 	matches!(&error.kind, ErrorKind::LimitExceeded(data) if data.retry_after.is_some())
+}
+
+#[test]
+fn remote_error_the_response_withholds_stays_out_of_the_outcome() -> Result {
+	let Finalized::Error { error, .. } = outcome(&Err(remote_limit_exceeded()?)) else {
+		panic!("a failed send finalises as an error");
+	};
+
+	assert_eq!(error.kind, ErrorKind::Unknown, "the remote's errcode is withheld: {error:?}");
+	assert!(error.message.contains(REMOTE), "the remote is named: {error:?}");
+
+	Ok(())
+}
+
+/// A rate limit the remote answered with, which a client would take for its own.
+fn remote_limit_exceeded() -> Result<Error> {
+	let origin = OwnedServerName::try_from(REMOTE)?;
+	let kind = ErrorKind::LimitExceeded(LimitExceededErrorData { retry_after: None });
+	let body = ErrorBody::Standard(StandardErrorBody::new(kind, "Too many.".to_owned()));
+
+	Ok(Error::Federation(origin, body.into_error(StatusCode::TOO_MANY_REQUESTS)))
 }

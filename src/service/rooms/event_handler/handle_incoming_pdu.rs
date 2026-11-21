@@ -22,7 +22,9 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_matrix::{
-	Event, PduCount, PduEvent, pdu::MAX_PREV_EVENTS, room_version::from_create_event,
+	Event, PduCount, PduEvent,
+	pdu::{MAX_PREV_EVENTS, Unsigned},
+	room_version::from_create_event,
 };
 
 use super::{
@@ -34,9 +36,26 @@ use super::{
 };
 use crate::rooms::{state_cache::MembershipUpdate, timeline::RawPduId};
 
+#[cfg(test)]
+mod tests;
+
 type PrevSplit = SmallVec<[OwnedEventId; MAX_PREV_EVENTS]>;
 
 type Handled = Option<(RawPduId, bool)>;
+
+/// An event one of the receive entries let into its room.
+///
+/// The entry has already applied the gates it owns and read the room's create
+/// event; `unsigned` is set only for an event this server built.
+struct Admitted<'a> {
+	origin: &'a ServerName,
+	room_id: &'a RoomId,
+	event_id: &'a EventId,
+	pdu: CanonicalJsonObject,
+	create_event: Option<PduEvent>,
+	unsigned: Option<Unsigned>,
+	is_timeline_event: bool,
+}
 
 /// Handle a PDU a peer pushed to this server in a federation transaction.
 ///
@@ -144,22 +163,13 @@ pub async fn handle_incoming_pdu<'a>(
 
 	let origin_acl_check = self.acl_check(origin, room_id);
 
-	let sender: &UserId = pdu
-		.get("sender")
-		.try_into()
-		.map_err(|e| err!(Request(InvalidParam("PDU does not have a valid sender key: {e}"))))?;
-
+	let sender = sender(&pdu)?;
 	let sender_acl_check = sender
 		.server_name()
 		.ne(origin)
 		.then_async(|| self.acl_check(sender.server_name(), room_id));
 
-	// Absent when the room's state was never stored or was deleted.
-	let create_event = self
-		.services
-		.state_accessor
-		.room_state_get(room_id, &StateEventType::RoomCreate, "")
-		.map(|result| Ok(result.ok()));
+	let create_event = self.room_create_event(room_id);
 
 	let (is_disabled, (), (), create_event) = try_join4(
 		is_disabled,
@@ -173,6 +183,84 @@ pub async fn handle_incoming_pdu<'a>(
 		return Err!(Request(Forbidden("Federation of this room is disabled by this server.")));
 	}
 
+	self.handle_admitted(Admitted {
+		origin,
+		room_id,
+		event_id,
+		pdu,
+		create_event,
+		unsigned: None,
+		is_timeline_event,
+	})
+	.await
+}
+
+/// Handle an event this server built once a federation handshake completed it.
+///
+/// The event enters under this server's name and must have one of its users as
+/// sender. It skips the disabled-room and origin ACL gates, which refuse peers,
+/// so an invite the invitee's server has countersigned is not refused after
+/// that server accepted it. The unsigned data the event was built with, which
+/// the receive path otherwise drops, is restored before it is appended.
+#[implement(super::Service)]
+// size firewall
+#[async_noinline]
+#[tracing::instrument(
+	name = "local_pdu",
+	level = "debug",
+	skip_all,
+	fields(
+		%room_id,
+		%event_id,
+	),
+	ret(level = "debug"),
+)]
+pub(crate) async fn handle_local_pdu<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+	event_id: &'a EventId,
+	pdu: CanonicalJsonObject,
+	unsigned: Option<Unsigned>,
+) -> Result<Handled> {
+	let origin = self.services.globals.server_name();
+
+	if sender(&pdu)?.server_name() != origin {
+		return Err!(Request(Forbidden("A local PDU must be sent by a user of this server.")));
+	}
+
+	let create_event = self.room_create_event(room_id).await?;
+
+	self.handle_admitted(Admitted {
+		origin,
+		room_id,
+		event_id,
+		pdu,
+		create_event,
+		unsigned,
+		is_timeline_event: true,
+	})
+	.await
+}
+
+/// Check an admitted event as an outlier and, for a timeline event, fetch the
+/// prev events it is missing and append it.
+///
+/// An absent create event means the room is unknown here, which is a not-found
+/// error. An event this server built gets its unsigned data back once the
+/// outlier step has dropped it, so the stored and appended forms both carry it.
+#[implement(super::Service)]
+async fn handle_admitted(
+	&self,
+	Admitted {
+		origin,
+		room_id,
+		event_id,
+		pdu,
+		create_event,
+		unsigned,
+		is_timeline_event,
+	}: Admitted<'_>,
+) -> Result<Handled> {
 	let create_event =
 		create_event.ok_or_else(|| err!(Request(NotFound("Room is unknown to this server"))))?;
 
@@ -182,6 +270,8 @@ pub async fn handle_incoming_pdu<'a>(
 	let (incoming_pdu, pdu) = self
 		.handle_outlier_pdu(origin, room_id, event_id, pdu, &room_version, recursion_level, false)
 		.await?;
+
+	let (incoming_pdu, pdu) = incoming_pdu.with_built_unsigned(pdu, unsigned)?;
 
 	// 8. if not timeline event: stop
 	if !is_timeline_event {
@@ -286,6 +376,26 @@ pub async fn handle_incoming_pdu<'a>(
 		.await;
 
 	handled
+}
+
+fn sender(pdu: &CanonicalJsonObject) -> Result<&UserId> {
+	pdu.get("sender")
+		.try_into()
+		.map_err(|e| err!(Request(InvalidParam("PDU does not have a valid sender key: {e}"))))
+}
+
+/// The room's create event, absent when its state was never stored or was
+/// deleted.
+///
+/// Only a missing record reads as absent; any other read error is returned
+/// rather than taken for an unknown room.
+#[implement(super::Service)]
+async fn room_create_event(&self, room_id: &RoomId) -> Result<Option<PduEvent>> {
+	self.services
+		.state_accessor
+		.room_state_get(room_id, &StateEventType::RoomCreate, "")
+		.map(NotFound::present)
+		.await
 }
 
 /// Apply a federated leave that rescinds an out-of-band invite for a local

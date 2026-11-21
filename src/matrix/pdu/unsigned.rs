@@ -6,7 +6,7 @@ use std::{
 };
 
 use ruma::{
-	MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId, UserId,
+	CanonicalJsonObject, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId, UserId,
 	events::{AnySyncMessageLikeEvent, room::member::MembershipState},
 	serde::Raw,
 };
@@ -18,7 +18,7 @@ use serde::{
 use serde_json::value::{RawValue as RawJsonValue, Value as JsonValue, to_raw_value};
 use tuwunel_core::{Error, Result, err, implement, result::LogErr, utils::BoolExt, warn};
 
-use super::{Pdu, Unsigned};
+use super::{Pdu, Unsigned, with_unsigned};
 
 /// The unstable MSC4140 key naming the delayed event an event was sent from.
 ///
@@ -84,6 +84,31 @@ struct ReferenceEvent<'a> {
 struct Identity {
 	event_id: OwnedEventId,
 	sender: OwnedUserId,
+}
+
+/// Returns the event and its JSON form carrying the unsigned data it was built
+/// with.
+///
+/// The receive path drops an event's unsigned data. For an event this server
+/// built, that data can hold fields served only to its sender, such as the
+/// MSC4140 delay ID. The event takes `unsigned` whole, while the JSON's unsigned
+/// object is extended with its entries, which replace any key both hold.
+/// Without `unsigned` both come back as they were; it fails when `unsigned` is
+/// not a canonical JSON object.
+#[implement(Pdu)]
+pub fn with_built_unsigned(
+	self,
+	pdu_json: CanonicalJsonObject,
+	unsigned: Option<Unsigned>,
+) -> Result<(Self, CanonicalJsonObject)> {
+	let Some(unsigned) = unsigned else {
+		return Ok((self, pdu_json));
+	};
+
+	let pdu_json = with_unsigned(pdu_json, unsigned.deserialize()?);
+	let pdu = Self { unsigned: Some(unsigned), ..self };
+
+	Ok((pdu, pdu_json))
 }
 
 /// Returns the event without its private fields unless served to its sender.

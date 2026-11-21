@@ -816,18 +816,40 @@ fn unreadable_summary_event(room_id: &RoomId, event_id: &EventId) -> impl Fn(&Er
 
 /// Builds full-PDU invite-state context for a membership event.
 ///
-/// Recommended stored state and the supplied event are formatted for the given
-/// room version as required by MSC4311. A recommended event absent from the
-/// current state is skipped; any other failed lookup, including an event the
-/// state references but storage cannot read as a PDU, is logged and omitted.
-/// The supplied membership event is appended last.
+/// The room's current snapshot supplies the state, as described for
+/// [`Self::summary_pdus_at`].
 #[implement(Service)]
-#[tracing::instrument(skip_all, level = "debug")]
 pub async fn summary_pdus<Pdu: Event>(
 	&self,
 	event: &Pdu,
 	event_json: &CanonicalJsonObject,
 	room_version: &RoomVersionId,
+) -> Vec<Box<RawJsonValue>> {
+	let shortstatehash = self
+		.get_room_shortstatehash(event.room_id())
+		.await;
+
+	self.summary_pdus_at(event, event_json, room_version, shortstatehash)
+		.await
+}
+
+/// Builds full-PDU invite-state context for a membership event from a
+/// snapshot read earlier.
+///
+/// Recommended state from the snapshot and the supplied event are formatted for
+/// the given room version as required by MSC4311. A recommended event absent
+/// from the snapshot is skipped; any other failed lookup, including an
+/// unreadable snapshot or an event the state references but storage cannot read
+/// as a PDU, is logged and omitted. The supplied membership event is appended
+/// last.
+#[implement(Service)]
+#[tracing::instrument(skip_all, level = "debug")]
+pub async fn summary_pdus_at<Pdu: Event>(
+	&self,
+	event: &Pdu,
+	event_json: &CanonicalJsonObject,
+	room_version: &RoomVersionId,
+	shortstatehash: Result<ShortStateHash>,
 ) -> Vec<Box<RawJsonValue>> {
 	let room_id = event.room_id();
 	let membership = self
@@ -838,13 +860,11 @@ pub async fn summary_pdus<Pdu: Event>(
 		.await;
 
 	// A room with a membership event to summarize has a snapshot; a failed read is a fault.
-	let shortstatehash = self
-		.get_room_shortstatehash(room_id)
+	let shortstatehash = shortstatehash
 		.inspect_err(|error| {
 			warn!(%room_id, %error, "Omitting summary state of an unreadable snapshot.");
 		})
-		.ok()
-		.await;
+		.ok();
 
 	shortstatehash
 		.into_iter()

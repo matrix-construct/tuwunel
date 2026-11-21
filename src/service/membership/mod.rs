@@ -23,6 +23,7 @@ use tuwunel_matrix::pdu::Pdu;
 
 use self::auto_accept::Pending;
 pub use self::{
+	invite::RemoteInvite,
 	join::{Join, is_reserved_join_key},
 	stripped_state::{
 		StrippedCreateVerdict, dedup_stripped_state, enforce_stripped_create,

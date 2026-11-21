@@ -1,7 +1,9 @@
 pub(super) mod check;
+#[cfg(test)]
+mod tests;
 
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, RoomId, RoomVersionId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, RoomId, RoomVersionId, ServerName,
 	room_version_rules::{EventsReferenceFormatVersion, RoomVersionRules},
 };
 use tuwunel_core::{extract_variant, is_equal_to};
@@ -102,6 +104,70 @@ pub fn from_incoming_federation(
 
 	if !room_rules.event_format.require_event_id {
 		pdu_json.insert("event_id".into(), CanonicalJsonValue::String(event_id.into()));
+	}
+
+	pdu_json
+}
+
+/// Adds one server's signatures to a PDU object.
+///
+/// Signatures the object already holds are kept, those of this server
+/// included, and a held key wins over the same key added. An object without a
+/// `signatures` map is returned unchanged.
+#[must_use]
+pub fn with_server_signatures(
+	mut pdu_json: CanonicalJsonObject,
+	server: &ServerName,
+	signatures: CanonicalJsonObject,
+) -> CanonicalJsonObject {
+	let Some(CanonicalJsonValue::Object(all)) = pdu_json.get_mut("signatures") else {
+		return pdu_json;
+	};
+
+	match all.get_mut(server.as_str()) {
+		| Some(CanonicalJsonValue::Object(held)) =>
+			for (key_id, signature) in signatures {
+				held.entry(key_id).or_insert(signature);
+			},
+		| _ => {
+			all.insert(server.as_str().into(), CanonicalJsonValue::Object(signatures));
+		},
+	}
+
+	pdu_json
+}
+
+/// Replaces a PDU object's signatures with one server's.
+///
+/// Signatures are excluded from the signed bytes, so the result verifies against
+/// that server's keys alone, where a verifier would otherwise demand keys for
+/// every signer present.
+#[must_use]
+pub fn with_only_server_signatures(
+	mut pdu_json: CanonicalJsonObject,
+	server: &ServerName,
+	signatures: CanonicalJsonObject,
+) -> CanonicalJsonObject {
+	let all = [(server.as_str().into(), CanonicalJsonValue::Object(signatures))];
+
+	pdu_json.insert("signatures".into(), CanonicalJsonValue::Object(all.into()));
+	pdu_json
+}
+
+/// Adds entries to a PDU object's unsigned data.
+///
+/// The entries extend an existing `unsigned` object, replacing keys it already
+/// holds; a missing or malformed `unsigned` is set to them.
+#[must_use]
+pub fn with_unsigned(
+	mut pdu_json: CanonicalJsonObject,
+	unsigned: CanonicalJsonObject,
+) -> CanonicalJsonObject {
+	match pdu_json.get_mut("unsigned") {
+		| Some(CanonicalJsonValue::Object(stored)) => stored.extend(unsigned),
+		| _ => {
+			pdu_json.insert("unsigned".into(), CanonicalJsonValue::Object(unsigned));
+		},
 	}
 
 	pdu_json

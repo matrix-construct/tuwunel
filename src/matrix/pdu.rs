@@ -35,7 +35,8 @@ pub use self::{
 	count::Count,
 	format::{
 		check::{check_room_id, check_rules},
-		from_incoming_federation, into_outgoing_federation,
+		from_incoming_federation, into_outgoing_federation, with_only_server_signatures,
+		with_server_signatures, with_unsigned,
 	},
 	hashes::EventHashes as EventHash,
 	id::Id,
