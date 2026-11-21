@@ -3,6 +3,10 @@
 #[path = "signature_updates/mod.rs"]
 mod fixture;
 
+#[expect(dead_code)] // Only the key pair helper is used here.
+#[path = "fixture/server_keys.rs"]
+mod server_keys;
+
 use futures::{FutureExt, StreamExt};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{

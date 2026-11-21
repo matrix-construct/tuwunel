@@ -19,6 +19,7 @@ use self::{
 	client::{Client, register},
 	fixture::boot,
 	sign::sign,
+	timeline::timelined,
 };
 
 mod client;
@@ -26,6 +27,9 @@ mod fixture;
 
 #[path = "fixture/sign.rs"]
 mod sign;
+
+#[path = "fixture/timeline.rs"]
+mod timeline;
 
 const TOKEN: &str = "federation-prev-event-room-access-token";
 
@@ -81,7 +85,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	assert_rejected(services, &room_id, &event_id, pdu, "boundary").await?;
 	assert!(
-		!in_timeline(services, &prev_id).await,
+		!timelined(services, &prev_id).await?,
 		"the stored prev event reached the timeline"
 	);
 
@@ -111,7 +115,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	assert_accepted(services, &room_id, &event_id, pdu).await?;
 	assert!(
-		in_timeline(services, &prev_id).await,
+		timelined(services, &prev_id).await?,
 		"the same-room predecessor did not reach the timeline"
 	);
 
@@ -156,7 +160,7 @@ async fn assert_backdated_event_kept(
 
 	assert!(accepted.is_none(), "the old gapped event was accepted");
 	assert!(
-		!in_timeline(services, &event_id).await,
+		!timelined(services, &event_id).await?,
 		"the old gapped event reached the timeline"
 	);
 
@@ -266,10 +270,7 @@ async fn assert_rejected(
 	};
 
 	assert!(error.to_string().contains("wrong room"), "rejected for another reason: {error}");
-	assert!(
-		!in_timeline(services, event_id).await,
-		"the rejected event reached the timeline"
-	);
+	assert!(!timelined(services, event_id).await?, "the rejected event reached the timeline");
 
 	assert!(
 		services
@@ -303,7 +304,7 @@ async fn assert_accepted(
 
 	assert!(result.is_some(), "same-room event was not accepted");
 	assert!(
-		in_timeline(services, event_id).await,
+		timelined(services, event_id).await?,
 		"the same-room event did not reach the timeline"
 	);
 
@@ -317,12 +318,4 @@ async fn assert_accepted(
 	);
 
 	Ok(())
-}
-
-async fn in_timeline(services: &Services, event_id: &EventId) -> bool {
-	services
-		.timeline
-		.non_outlier_pdu_exists(event_id)
-		.await
-		.is_ok()
 }

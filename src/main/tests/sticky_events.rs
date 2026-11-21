@@ -42,6 +42,7 @@ use self::{
 	},
 	sign::sign,
 	sync::joined_room,
+	timeline::timelined,
 };
 
 mod client;
@@ -56,6 +57,9 @@ mod federation;
 
 #[path = "fixture/sign.rs"]
 mod sign;
+
+#[path = "fixture/timeline.rs"]
+mod timeline;
 
 #[path = "client/get.rs"]
 mod get;
@@ -924,7 +928,7 @@ async fn waits_for_its_sender(&self, room: &RoomId) -> Result {
 			.await;
 
 		require(
-			withheld && !accepted_event(services, event_id).await,
+			withheld && !timelined(services, event_id).await?,
 			"a late event was not withheld",
 		)?;
 	}
@@ -964,8 +968,12 @@ async fn waits_for_its_sender(&self, room: &RoomId) -> Result {
 	alice.act_on(room, "unban", carol_id).await?;
 	carol.act(room, "join").await?;
 
-	let promoted =
-		poll_until(PROMOTION_DEADLINE, async || accepted_event(services, &kept.0).await).await;
+	let promoted = poll_until(PROMOTION_DEADLINE, async || {
+		timelined(services, &kept.0)
+			.await
+			.unwrap_or_default()
+	})
+	.await;
 
 	require(promoted, "a withheld event was not accepted once its sender returned")?;
 
@@ -975,7 +983,7 @@ async fn waits_for_its_sender(&self, room: &RoomId) -> Result {
 
 	require(fresh_copy(&fetched), "an accepted event was served without its sticky time")?;
 	require(
-		!accepted_event(services, &redacted.0).await,
+		!timelined(services, &redacted.0).await?,
 		"a withheld event redacted meanwhile was accepted",
 	)
 }
@@ -1063,15 +1071,6 @@ async fn send_sticky_for(
 	let event_id = field(&response, "event_id")?.try_into()?;
 
 	Ok(event_id)
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-async fn accepted_event(services: &Services, event_id: &EventId) -> bool {
-	services
-		.timeline
-		.non_outlier_pdu_exists(event_id)
-		.await
-		.is_ok()
 }
 
 /// A new connection's request: one list over every room, a one-event

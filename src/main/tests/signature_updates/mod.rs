@@ -11,6 +11,8 @@ use tuwunel_core::{
 use tuwunel_database::{Deserialized, Json, serialize_key};
 use tuwunel_service::Services;
 
+use super::server_keys::key_pair;
+
 pub(super) struct Fixture {
 	pub(super) sender: OwnedUserId,
 	pub(super) target: OwnedUserId,
@@ -23,11 +25,8 @@ pub(super) struct Fixture {
 
 #[implement(Fixture)]
 pub(super) fn new(sender: &UserId, target: &UserId) -> Result<Self> {
-	let signer = Ed25519KeyPair::from_der(&Ed25519KeyPair::generate(), "SIGNER".into())
-		.expect("generated signer key should parse");
-
-	let root = Ed25519KeyPair::from_der(&Ed25519KeyPair::generate(), "ROOT".into())
-		.expect("generated root key should parse");
+	let signer = key_pair("SIGNER")?;
+	let root = key_pair("ROOT")?;
 
 	let target_key = Base64::<Standard, _>::new(root.public_key()).encode();
 	let signer_key = Base64::<Standard, _>::new(signer.public_key()).encode();

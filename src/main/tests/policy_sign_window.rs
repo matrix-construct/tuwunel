@@ -59,8 +59,7 @@ use tuwunel_core::{
 		},
 		serde::{Base64, Raw},
 		signatures::{
-			Ed25519KeyPair, KeyPair, PublicKeyMap, sign_json,
-			to_canonical_json_string_for_signing,
+			Ed25519KeyPair, KeyPair, PublicKeyMap, to_canonical_json_string_for_signing,
 		},
 	},
 	utils::time::timepoint_from_now,
@@ -75,6 +74,7 @@ use self::{
 	client::{Client, register},
 	federation::send_as,
 	fixture::boot,
+	server_keys::{key_document, key_pair},
 	state_cache::membership_update,
 	sticky::a_refused_withheld_event_loses_its_visibility,
 };
@@ -83,6 +83,9 @@ mod client;
 #[expect(dead_code)] // Membership routes are not driven here.
 mod federation;
 mod fixture;
+#[expect(dead_code)] // Only the key helpers are used here.
+#[path = "fixture/server_keys.rs"]
+mod server_keys;
 #[path = "fixture/sign.rs"]
 mod sign;
 #[path = "fixture/state_cache.rs"]
@@ -93,7 +96,6 @@ mod sticky;
 const CERTIFICATE: &str = "../../nix/pkgs/complement/certificate.crt";
 const PRIVATE_KEY: &str = "../../nix/pkgs/complement/private_key.key";
 const KEY_ID: &str = "ed25519:policy_server";
-const SERVER_KEY_ID: &str = "ed25519:stub";
 const ALICE_TOKEN: &str = "policy-sign-window-alice-access-token";
 const BOB_TOKEN: &str = "policy-sign-window-bob-access-token";
 const MESSAGE: &str = "m.room.message";
@@ -304,6 +306,7 @@ async fn policy_server(
 	mode: Mode,
 ) -> Result<(Arc<Policy>, Stub)> {
 	let key = key_pair("policy_server")?;
+	// MSC4284: the server key is apart from the policy key, so neither passes for the other.
 	let server_key = key_pair("stub")?;
 	let (key_id, verify_key) = services.server_keys.active_verify_key();
 	let origin = services.globals.server_name().to_owned();
@@ -353,41 +356,6 @@ async fn policy_server(
 	stub.spawn_on(remote, services.server.runtime());
 
 	Ok((policy, stub))
-}
-
-/// The policy server's key document, signed with its server key.
-///
-/// The server key is apart from the policy key the room publishes, as MSC4284
-/// recommends, so a signature under one never passes for the other.
-fn key_document(name: &ServerName, key: &Ed25519KeyPair) -> Result<CanonicalJsonObject> {
-	let valid_until = timepoint_from_now(Duration::from_hours(1))?;
-	let valid_until_ts = MilliSecondsSinceUnixEpoch::from_system_time(valid_until)
-		.ok_or_else(|| err!("key document expiry out of range"))?;
-
-	let public_key: Base64 = Base64::new(key.public_key().to_vec());
-	let document = json!({
-		"server_name": name,
-		"valid_until_ts": valid_until_ts,
-		"verify_keys": { SERVER_KEY_ID: { "key": public_key } },
-		"old_verify_keys": {},
-	});
-
-	signed(from_value(document)?, name, key)
-}
-
-fn signed(
-	mut object: CanonicalJsonObject,
-	name: &ServerName,
-	key: &Ed25519KeyPair,
-) -> Result<CanonicalJsonObject> {
-	sign_json(name.as_str(), key, &mut object).map_err(|e| err!("key document: {e}"))?;
-
-	Ok(object)
-}
-
-fn key_pair(version: &str) -> Result<Ed25519KeyPair> {
-	Ed25519KeyPair::from_der(&Ed25519KeyPair::generate(), version.into())
-		.map_err(|e| err!("{version} key: {e}"))
 }
 
 /// Bob's message lands while Alice's waits for its signature.
