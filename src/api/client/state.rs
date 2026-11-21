@@ -32,7 +32,7 @@ use tuwunel_matrix::{
 };
 use tuwunel_service::{Services, membership::RemoteInvite, profile::check_member_content};
 
-use crate::{Ruma, RumaResponse, with_membership};
+use crate::{Ruma, RumaResponse, utils::invite_check, with_membership};
 
 /// # `PUT /_matrix/client/*/rooms/{roomId}/state/{eventType}/{stateKey}`
 ///
@@ -594,7 +594,13 @@ async fn validate_member(
 		return Err!(Request(Forbidden("This room is banned on this homeserver.")));
 	}
 
-	if membership_content.membership == MembershipState::Invite
+	let invite = membership_content.membership == MembershipState::Invite;
+
+	if invite {
+		invite_check(services, sender, room_id).await?;
+	}
+
+	if invite
 		&& services.globals.user_is_local(&target_user)
 		&& services
 			.users

@@ -71,6 +71,7 @@ const FORGED: &str = "@forged:";
 const STALLED: &str = "@stalled:";
 const NO_ANSWER: &str = "did not answer the invite";
 const ALICE_TOKEN: &str = "state-member-invite-alice-access-token";
+const BOB_TOKEN: &str = "state-member-invite-bob-access-token";
 const BRIDGE_TOKEN: &str = "state-member-invite-bridge-access-token";
 const TIMESTAMP: u64 = 1_234_567_890_123;
 const QUIET: [&str; 2] = ["logging.enable=false", "database.pool.max_workers=64"];
@@ -113,14 +114,23 @@ struct Peer {
 	invites: Mutex<Vec<Value>>,
 }
 
+/// Runs each case on a server of its own, booted in turn.
+///
+/// The second case blocks invites from non-admins server-wide, which would
+/// refuse the first case's senders before any invite left the server.
 #[test]
 fn member_invites_sent_as_state() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let federating = QUIET.into_iter().chain(STUB_OPTIONS);
+	let blocking = QUIET
+		.into_iter()
+		.chain(["rooms.invites.block_non_admin=true"]);
 
 	boot("state-member-invite-remote", federating, async move |services, base| {
 		remote_invites(services, base, listener).await
-	})
+	})?;
+
+	boot("state-member-invite-blocked", blocking, non_admin_invite_refused)
 }
 
 /// Member invites sent as state to users on the stub reach it as invites.
@@ -522,6 +532,24 @@ async fn delayed_stalled_invite(client: &Client<'_>, peer: &Peer) -> Result {
 	assert!(absent(client.services, &room_id, &user_id).await, "the invite was stored");
 
 	Ok(())
+}
+
+/// A non-admin's member invite sent as state is refused while invites are
+/// blocked.
+///
+/// The block covers the state route as it covers `/invite` and `createRoom`,
+/// since that route would otherwise let a non-admin invite anyone.
+async fn non_admin_invite_refused(services: &Services, base: &str) -> Result {
+	register(services, "alice", ALICE_TOKEN).await?;
+
+	let bob = register(services, "bob", BOB_TOKEN).await?;
+	let bob = bob.as_str();
+	let client = Client { services, base, token: ALICE_TOKEN };
+	let room_id = client.create_room(&json!({})).await?;
+	let body = json!({ "membership": "invite" });
+	let response = put_invite(&client, &room_id, bob, "", &body).await?;
+
+	refused(response, services, &room_id, bob).await
 }
 
 /// Sends a member invite as state through the client API.
