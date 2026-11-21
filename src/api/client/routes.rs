@@ -18,6 +18,8 @@ use tuwunel_core::{
 	err,
 };
 
+#[cfg(feature = "livekit")]
+use crate::get_livekit_token_route;
 use crate::{
 	self as client, State, is_joined_route, put_msc4388_route,
 	send_message_event_or_delayed_route, send_state_event_or_delayed_route, sso_callback_route,
@@ -49,6 +51,14 @@ pub fn build(server: &Server) -> Router<State> {
 
 	let router = register_delayed_event_routes(router);
 	let router = register_client_misc_routes(router);
+
+	#[cfg(feature = "livekit")]
+	let router = if config.livekit.is_enabled() {
+		router.ruma_route(&get_livekit_token_route)
+	} else {
+		router
+	};
+
 	let router = register_rendezvous_routes(router);
 	let router = if config.federation.enable {
 		router.route("/_tuwunel/local_user_count", get(client::tuwunel_local_user_count))

@@ -1,3 +1,6 @@
+use ruma::api::client::rtc::RtcTransport;
+use serde_json::{from_value, json};
+
 use super::{assert_masked, assert_verdict, config_from_toml, default_config};
 use crate::config::{Config, Livekit, check, check::reload};
 
@@ -117,6 +120,35 @@ fn change_needs_a_restart() {
 
 	for (old, new) in [(&default, &enabled), (&enabled, &rotated), (&enabled, &default)] {
 		assert_verdict("livekit", reload(old, new), false, "livekit");
+	}
+}
+
+#[test]
+fn misdirects_only_for_another_sfu_without_a_service_url() {
+	const OWN: &str = "wss://livekit.example.com";
+	const OTHER: &str = "wss://other.example.com";
+	const SERVICE: &str = "https://jwt.example.com";
+
+	let configured = parse(COMPLETE_SECTION).livekit;
+	let unset = Livekit::default();
+
+	for (entry, misdirects) in [
+		(json!({"type": "m.livekit", "url": OTHER}), true),
+		(json!({"type": "livekit", "url": OTHER}), true),
+		(json!({"type": "m.livekit", "url": OWN}), false),
+		(json!({"type": "livekit", "url": OWN}), false),
+		(
+			json!({"type": "m.livekit", "url": OTHER, "livekit_service_url": SERVICE}),
+			false,
+		),
+		(json!({"type": "livekit", "url": OTHER, "livekit_service_url": SERVICE}), false),
+		(json!({"type": "livekit", "livekit_service_url": SERVICE}), false),
+		(json!({"type": "org.example.sfu", "url": OTHER}), false),
+	] {
+		let transport: RtcTransport = from_value(entry.clone()).expect("a transport parses");
+
+		assert_eq!(configured.misdirects(&transport), misdirects, "{entry}");
+		assert!(!unset.misdirects(&transport), "unset: {entry}");
 	}
 }
 

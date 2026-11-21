@@ -21,6 +21,7 @@ crate-type = [
 default = [
 	"jwt_login",
 	"ldap",
+	"livekit",
 	"release_max_log_level",
 	"tuwunel-api/default",
 	"tuwunel-core/default",
@@ -30,6 +31,7 @@ default = [
 
 jwt_login = ["tuwunel-api/jwt_login"]
 ldap = ["tuwunel-api/ldap", "tuwunel-service/ldap"]
+livekit = ["tuwunel-service/livekit"]
 
 release_max_log_level = [
 	"log/max_level_trace",

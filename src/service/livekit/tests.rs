@@ -1,16 +1,24 @@
-use http::StatusCode;
-use ruma::{room_id, user_id};
+use http::{Response, StatusCode};
+use ruma::{
+	api::{
+		EndpointError,
+		client::rtc::livekit::get_token::v1::Request,
+		error::{Error as RumaError, ErrorKind},
+	},
+	room_id, server_name, user_id,
+};
 use serde_json::{Value as JsonValue, json};
 use tuwunel_core::{
-	Result,
+	Error, Result, err,
 	jwt::{Algorithm, DecodingKey, Validation, decode},
 	utils::time::now_secs,
 };
 
 use super::{
 	Conf,
+	get_token::{is_unrecognized, relay_error, stable_request, unstable_request},
 	names::{derive, identity, room_name},
-	room_service::{Method, Room, answer, created, failed},
+	room_service::{Method, Room, answer, created, failed, not_created},
 	token::Grant,
 };
 
@@ -179,7 +187,8 @@ fn roomservice_failures_are_not_found_or_bad_gateway() {
 /// A CreateRoom answer counts only when it names the requested room.
 ///
 /// LiveKit answers with the whole room, so an answer carrying metadata well
-/// past 64 KiB still parses.
+/// past 64 KiB still parses. CreateRoom has no not-found answer, so one is a
+/// 502 like any other failure.
 #[test]
 fn createroom_answer_must_name_the_room() {
 	let name = "O8437W3+jmzMVjoIP3tNwbm+XxHQk2iKpOA7aqw3qSc";
@@ -189,6 +198,136 @@ fn createroom_answer_must_name_the_room() {
 
 	created(&room, name).expect("the requested room was created");
 	created(&room, "another-room").expect_err("an answer for another room is a failure");
+
+	let not_found = br#"{"code":"not_found","msg":"room does not exist"}"#;
+	let missing: Result<Room> = answer(StatusCode::NOT_FOUND, not_found);
+	let missing = missing.expect_err("a not-found answer is an error");
+
+	assert_eq!(not_created("CreateRoom", missing).status_code(), StatusCode::BAD_GATEWAY);
+}
+
+/// Only another server's 403 `M_FORBIDDEN` and 400 `M_INVALID_PARAM` reach
+/// the client, each as this server's own refusal.
+///
+/// The errcode is read from the raw body, so a bare `{"errcode": ...}` counts.
+/// Either errcode with another status, any other answer and a failure to reach
+/// the server all become a 502 `M_UNKNOWN`, and none repeats the remote's text.
+#[test]
+fn relay_error_keeps_only_forbidden_and_invalid_param() {
+	let forbidden = (StatusCode::FORBIDDEN, ErrorKind::Forbidden);
+	let invalid = (StatusCode::BAD_REQUEST, ErrorKind::InvalidParam);
+	let unknown = (StatusCode::BAD_GATEWAY, ErrorKind::Unknown);
+
+	for (status, body, relayed) in [
+		(
+			StatusCode::FORBIDDEN,
+			r#"{"errcode":"M_FORBIDDEN","error":"remote text"}"#,
+			&forbidden,
+		),
+		(StatusCode::FORBIDDEN, r#"{"errcode":"M_FORBIDDEN"}"#, &forbidden),
+		(
+			StatusCode::BAD_REQUEST,
+			r#"{"errcode":"M_INVALID_PARAM","error":"remote text"}"#,
+			&invalid,
+		),
+		(
+			StatusCode::INTERNAL_SERVER_ERROR,
+			r#"{"errcode":"M_FORBIDDEN","error":"remote text"}"#,
+			&unknown,
+		),
+		(
+			StatusCode::FORBIDDEN,
+			r#"{"errcode":"M_INVALID_PARAM","error":"remote text"}"#,
+			&unknown,
+		),
+		(
+			StatusCode::NOT_FOUND,
+			r#"{"errcode":"M_NOT_FOUND","error":"remote text"}"#,
+			&unknown,
+		),
+		(
+			StatusCode::TOO_MANY_REQUESTS,
+			r#"{"errcode":"M_LIMIT_EXCEEDED","error":"remote text"}"#,
+			&unknown,
+		),
+		(StatusCode::BAD_GATEWAY, "remote text", &unknown),
+	] {
+		let error = relay_error(&remote(status, body));
+
+		assert_eq!(&(error.status_code(), error.kind()), relayed, "{status} {body}");
+		assert!(!error.message().contains("remote text"), "{error}");
+	}
+
+	let transport = relay_error(&err!("remote text: connection refused"));
+
+	assert_eq!((transport.status_code(), transport.kind()), unknown);
+}
+
+/// A 404 triggers the unstable retry when its errcode is `M_UNRECOGNIZED`,
+/// empty or missing, as lk-jwt-service reads it.
+///
+/// Any other errcode, any other status and a failure to reach the server
+/// leave the stable answer standing.
+#[test]
+fn retry_only_on_an_unrecognized_404() {
+	for (status, body, retried) in [
+		(StatusCode::NOT_FOUND, r#"{"errcode":"M_UNRECOGNIZED","error":"text"}"#, true),
+		(StatusCode::NOT_FOUND, r#"{"errcode":"","error":"text"}"#, true),
+		(StatusCode::NOT_FOUND, "{}", true),
+		(StatusCode::NOT_FOUND, "<html>text</html>", true),
+		(StatusCode::NOT_FOUND, r#"{"errcode":"M_NOT_FOUND"}"#, false),
+		(StatusCode::NOT_FOUND, r#"{"errcode":"M_NOT_FOUND","error":"text"}"#, false),
+		(StatusCode::BAD_REQUEST, r#"{"errcode":"M_UNRECOGNIZED","error":"text"}"#, false),
+	] {
+		assert_eq!(is_unrecognized(&remote(status, body)), retried, "{status} {body}");
+	}
+
+	assert!(!is_unrecognized(&err!("connection refused")), "a transport failure");
+}
+
+/// The stable request carries the slot as sent; the unstable retry spells
+/// the call slot as servers predating the fold hash it.
+///
+/// Every other field, and every other slot, goes out the same on both.
+#[test]
+fn unstable_retry_sends_the_unstable_call_slot() {
+	let user_id = user_id!("@alice:example.com");
+
+	for (slot, retried) in [
+		("m.call#room", "m.call#ROOM"),
+		("m.call#ROOM", "m.call#ROOM"),
+		("m.call#standup", "m.call#standup"),
+	] {
+		let room_id = room_id!("!roomid:example.com").to_owned();
+		let url = "wss://livekit.example.com".to_owned();
+		let request = Request::new(url, room_id, slot.to_owned(), "memberABC".to_owned());
+		let (stable, unstable) =
+			(stable_request(user_id, &request), unstable_request(user_id, &request));
+
+		assert_eq!((stable.slot_id.as_str(), unstable.slot_id.as_str()), (slot, retried));
+
+		for (sent_user, url, room_id, member_id) in [
+			(&stable.user_id, &stable.url, &stable.room_id, &stable.member_id),
+			(&unstable.user_id, &unstable.url, &unstable.room_id, &unstable.member_id),
+		] {
+			assert_eq!(sent_user, user_id);
+			assert_eq!(url, &request.url);
+			assert_eq!(room_id, &request.room_id);
+			assert_eq!(member_id, &request.member_id);
+		}
+	}
+}
+
+fn remote(status: StatusCode, body: &str) -> Error {
+	let response = Response::builder()
+		.status(status)
+		.body(body.as_bytes())
+		.expect("a response builds");
+
+	Error::Federation(
+		server_name!("remote.example.com").to_owned(),
+		RumaError::from_http_response(response),
+	)
 }
 
 fn conf() -> Conf {

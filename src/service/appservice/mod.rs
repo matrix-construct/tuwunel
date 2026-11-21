@@ -63,6 +63,9 @@ type Registrations = BTreeMap<String, RegistrationInfo>;
 
 const KNOWN_SCOPES: [&str; 1] = [IS_JOINED_SCOPE];
 
+// The proxied path native LiveKit serves itself, after its version segments.
+const NATIVE_LIVEKIT_PATH: &str = "rtc/livekit/get_token";
+
 /// The registrations [`receivers`] yields.
 ///
 /// A named type rather than an opaque one, so a caller may shorten its borrow
@@ -186,6 +189,7 @@ impl Service {
 		self.admit_registration(&registrations, &registration_info)
 			.await?;
 
+		self.warn_native_livekit(&registration_info);
 		registrations.insert(id, registration_info);
 
 		Ok(())
@@ -229,6 +233,7 @@ impl Service {
 		self.admit_registration(&registrations, &registration_info)
 			.await?;
 
+		self.warn_native_livekit(&registration_info);
 		self.db
 			.id_appserviceregistrations
 			.insert(&id, yaml);
@@ -466,6 +471,31 @@ async fn admit_registration(
 	}
 
 	Ok(())
+}
+
+/// Warns that native LiveKit answers requests the proxy claim covers.
+///
+/// A native route owns its exact path and is matched before the proxy, so with
+/// `[global.livekit]` set the claim keeps only the LiveKit paths native LiveKit
+/// does not serve. It is a warning rather than a refusal, so the registration
+/// still loads with everything else it grants.
+#[implement(Service)]
+fn warn_native_livekit(&self, registration_info: &RegistrationInfo) {
+	let shadowed = self.services.config.livekit.is_enabled()
+		&& registration_info.proxy_covers(NATIVE_LIVEKIT_PATH);
+
+	if let Some(claim) = registration_info
+		.proxy_prefix
+		.filter(|_| shadowed)
+	{
+		let id = &registration_info.registration.id;
+
+		warn!(
+			%id,
+			%claim,
+			"Native LiveKit answers the get_token requests this appservice's proxy claim covers"
+		);
+	}
 }
 
 /// Whether `register_appservice` persisted this id, which an id loaded from

@@ -19,6 +19,8 @@ pub(crate) mod query;
 ///
 /// It includes discovery endpoints and applies the federation setting.
 pub mod routes;
+#[cfg(feature = "livekit")]
+pub(crate) mod rtc;
 pub(crate) mod send;
 pub(crate) mod send_join;
 pub(crate) mod send_knock;
@@ -30,6 +32,8 @@ pub(crate) mod user;
 pub(crate) mod version;
 pub(crate) mod well_known;
 
+#[cfg(feature = "livekit")]
+pub(crate) use self::rtc::{get_livekit_token_route, get_livekit_token_unstable_route};
 pub(crate) use self::{
 	backfill::get_backfill_route,
 	event::get_event_route,

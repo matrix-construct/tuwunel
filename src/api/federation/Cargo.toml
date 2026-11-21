@@ -19,6 +19,7 @@ crate-type = [
 
 [features]
 default = [
+	"livekit",
 	"release_max_log_level",
 	"tuwunel-api/default",
 	"tuwunel-api-client/default",
@@ -26,6 +27,8 @@ default = [
 	"tuwunel-matrix/default",
 	"tuwunel-service/default",
 ]
+
+livekit = ["tuwunel-service/livekit"]
 
 release_max_log_level = [
 	"log/max_level_trace",

@@ -1231,7 +1231,7 @@ fn check_well_known_support_contact_validity(config: &Config) -> Result {
 }
 
 fn check_well_known_rtc_transports(config: &Config) -> Result {
-	let transports = config.well_known.get_transports()?;
+	let transports = config.rtc_transports()?;
 
 	// MSC4143 requires each type to follow the Common Namespaced Identifier Grammar.
 	let invalid = transports
@@ -1247,7 +1247,25 @@ fn check_well_known_rtc_transports(config: &Config) -> Result {
 		));
 	}
 
+	warn_misdirecting_transports(config, &transports);
+
 	Ok(())
+}
+
+fn warn_misdirecting_transports(config: &Config, transports: &[RtcTransport]) {
+	transports
+		.iter()
+		.filter(|transport| config.livekit.misdirects(transport))
+		.for_each(|transport| {
+			warn!(
+				?transport,
+				"well_known.rtc_transports lists a LiveKit transport for another SFU with no \
+				 livekit_service_url. Clients that pick it ask this server for a token, and \
+				 native LiveKit issues tokens for livekit.url alone, so their calls fail. Point \
+				 the entry at livekit.url, give it the livekit_service_url of the service that \
+				 issues its tokens, or remove it."
+			);
+		});
 }
 
 fn check_email(config: &Config) -> Result {

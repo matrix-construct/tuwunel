@@ -37,6 +37,18 @@ pub(super) fn room_name(room_id: &RoomId, slot_id: &str) -> Name {
 	derive(room_id.as_str(), slot_id)
 }
 
+/// Spells a slot for the unstable federation retry.
+///
+/// A server without the stable endpoint predates the fold and hashes the slot
+/// as sent, so the call slot goes in the spelling its clients send.
+pub(super) fn unstable_slot(slot_id: &str) -> &str {
+	if slot_id == CALL_SLOT {
+		UNSTABLE_CALL_SLOT
+	} else {
+		slot_id
+	}
+}
+
 /// Names a call member's LiveKit participant.
 ///
 /// The user ID is part of the hash, so a user can only claim the member IDs

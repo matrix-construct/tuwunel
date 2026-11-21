@@ -22,7 +22,7 @@ pub(crate) async fn well_known_client(
 		},
 	};
 
-	let rtc_foci = services.config.well_known.get_transports()?;
+	let rtc_foci = services.config.rtc_transports()?;
 
 	Ok(discover_homeserver::Response {
 		rtc_foci,

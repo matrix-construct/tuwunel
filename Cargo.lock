@@ -5347,6 +5347,7 @@ version = "2.0.0"
 dependencies = [
  "axum",
  "axum-server",
+ "base64 0.22.1",
  "clap",
  "console-subscriber",
  "const-str",

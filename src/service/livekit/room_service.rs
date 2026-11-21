@@ -89,9 +89,10 @@ pub(super) async fn create_room(&self, conf: &Conf, name: &str) -> Result {
 	let method = &conf.create_room;
 	let room = self
 		.call(conf, method, Grant::create_room(name), &request)
-		.await?;
+		.await
+		.map_err(|error| not_created(method.name, error))?;
 
-	created(&room, name).map_err(|error| failed(method.name, error))
+	created(&room, name).map_err(|error| unavailable(method.name, &error))
 }
 
 /// Posts one RoomService request and reads its answer.
@@ -193,6 +194,19 @@ pub(super) fn failed(method: &str, error: Error) -> Error {
 		return error;
 	}
 
+	unavailable(method, &error)
+}
+
+// CreateRoom cannot report a missing room, so a not-found answer is a bad gateway.
+pub(super) fn not_created(method: &str, error: Error) -> Error {
+	if error.is_not_found() {
+		return unavailable(method, &error);
+	}
+
+	error
+}
+
+fn unavailable(method: &str, error: &Error) -> Error {
 	warn!(%method, %error, "LiveKit RoomService call failed");
 	err!(RequestStatus(BAD_GATEWAY, Unknown("The call server could not be reached.")))
 }

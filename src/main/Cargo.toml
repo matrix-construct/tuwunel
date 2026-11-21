@@ -176,6 +176,8 @@ ldap = [
 	"tuwunel-service/ldap",
 ]
 livekit = [
+	"tuwunel-api-client/livekit",
+	"tuwunel-api-federation/livekit",
 	"tuwunel-core/livekit",
 	"tuwunel-service/livekit",
 ]
@@ -317,6 +319,7 @@ workspace = true
 axum.workspace = true
 axum-server.workspace = true
 axum-server.features = ["tls-rustls"]
+base64.workspace = true
 criterion.workspace = true
 futures.workspace = true
 image.workspace = true

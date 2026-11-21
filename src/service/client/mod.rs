@@ -63,6 +63,14 @@ pub struct Clients {
 	/// and keeps wire logging off even in debug builds.
 	#[cfg(feature = "livekit")]
 	pub livekit: Client,
+
+	/// Federation requests fetching LiveKit tokens from other servers.
+	///
+	/// This pair uses the federation transport settings with wire logging
+	/// off, even in debug builds, because a successful answer is a usable call
+	/// token.
+	#[cfg(feature = "livekit")]
+	pub livekit_federation: Federation,
 }
 
 /// Separate DNS resolvers and connection pools for direct and SRV routes.
@@ -164,14 +172,20 @@ fn make_clients(services: &Services) -> Result<Clients> {
 		}};
 	}
 
-	let federation = make_federation(services, |cb| {
+	let federation_transport = |cb: ClientBuilder| {
 		let transport = &services.config.federation.transport;
 
 		cb.read_timeout(Duration::from_secs(transport.timeout))
 			.pool_max_idle_per_host(transport.idle_per_host.into())
 			.pool_idle_timeout(Duration::from_secs(transport.idle_timeout))
 			.redirect(Policy::none())
-	})?;
+	};
+
+	let federation = make_federation(services, federation_transport)?;
+
+	#[cfg(feature = "livekit")]
+	let livekit_federation =
+		make_federation(services, |cb| federation_transport(cb).connection_verbose(false))?;
 
 	let synapse = make_federation(services, |cb| {
 		cb.read_timeout(Duration::from_secs(305))
@@ -249,6 +263,8 @@ fn make_clients(services: &Services) -> Result<Clients> {
 
 		#[cfg(feature = "livekit")]
 		livekit,
+		#[cfg(feature = "livekit")]
+		livekit_federation,
 	})
 }
 

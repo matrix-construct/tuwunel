@@ -72,7 +72,7 @@ The `main` crate defines every public feature and forwards it to the workspace c
 | `jemalloc_stats` | `core` | Statistics on `jevmalloc` if the allocator is enabled. |
 | `jwt_login` | `admin`, `api`, `api-client`, `core` | `jsonwebtoken`'s `use_pem` feature, which adds `pem` and `simple_asn1`. `jsonwebtoken` itself stays for the native OIDC server. |
 | `ldap` | `api`, `api-client`, `service` | `ldap3`. |
-| `livekit` | `core`, `service` | No optional dependency activated by this feature. |
+| `livekit` | `api-client`, `api-federation`, `core`, `service` | No optional dependency activated by this feature. |
 | `lz4_compression` | `database` | RocksDB LZ4 support. |
 | `markdown` | `service` | Ruma's `markdown` feature, which adds `pulldown-cmark`. |
 | `mas` | `api-mas`, `router` | Optional workspace crate `tuwunel-api-mas`. |

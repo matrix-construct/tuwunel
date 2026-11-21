@@ -97,11 +97,22 @@ pub fn login_terms_params(&self) -> Option<LoginTermsParams> {
 	(!policies.is_empty()).then(|| LoginTermsParams::new(policies))
 }
 
-/// Build the configured RTC transports as `RtcTransport` values, the typed
-/// form shared between `.well-known/matrix/client.rtc_foci` and the
-/// `/rtc/transports` endpoint.
+/// Builds the MatrixRTC transports advertised to clients.
+///
+/// The operator's `rtc_transports` entries come first, in their order, then
+/// the native LiveKit transport when `[global.livekit]` is set, then the legacy
+/// `livekit_url` one; MSC4143 reads the list as the server's order of
+/// preference. `.well-known/matrix/client`, `/rtc/transports` and the startup
+/// check all read this one list.
+#[implement(super::Config)]
+#[inline]
+pub fn rtc_transports(&self) -> Result<Vec<RtcTransport>> {
+	self.well_known
+		.get_transports(self.livekit.transport())
+}
+
 #[implement(super::WellKnownConfig)]
-pub fn get_transports(&self) -> Result<Vec<RtcTransport>> {
+fn get_transports(&self, native: Option<RtcTransport>) -> Result<Vec<RtcTransport>> {
 	let custom = self.rtc_transports.iter().map(|item| {
 		let mut data = item
 			.as_object()
@@ -124,6 +135,7 @@ pub fn get_transports(&self) -> Result<Vec<RtcTransport>> {
 	});
 
 	custom
+		.chain(native.map(Ok))
 		.chain(livekit_url)
 		.collect::<Result<Vec<_>>>()
 		.inspect_err(inspect_log)
@@ -142,7 +154,8 @@ mod tests {
 			livekit_url: Some(url.into()),
 			..Default::default()
 		};
-		let transports = config.get_transports()?;
+
+		let transports = config.get_transports(None)?;
 
 		assert_eq!(
 			to_value(&transports[0])?,

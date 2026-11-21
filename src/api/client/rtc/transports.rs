@@ -17,7 +17,7 @@ pub(crate) async fn get_transports_route(
 	_body: Ruma<Request>,
 ) -> Result<Response> {
 	Ok(Response {
-		transports: services.config.well_known.get_transports()?,
+		transports: services.config.rtc_transports()?,
 	})
 }
 
@@ -30,6 +30,6 @@ pub(crate) async fn get_transports_unstable_route(
 	_body: Ruma<UnstableRequest>,
 ) -> Result<UnstableResponse> {
 	Ok(UnstableResponse {
-		rtc_transports: services.config.well_known.get_transports()?,
+		rtc_transports: services.config.rtc_transports()?,
 	})
 }

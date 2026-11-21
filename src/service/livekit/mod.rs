@@ -5,6 +5,7 @@
 //! Matrix room, the slot nor the user. The room is created through LiveKit's
 //! RoomService before a token is signed, so a failing SFU yields no token.
 
+mod get_token;
 mod names;
 mod room_service;
 #[cfg(test)]
@@ -79,7 +80,7 @@ impl crate::Service for Service {
 /// has checked that the user may join the call.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self))]
-pub async fn issue_token(
+async fn issue_token(
 	&self,
 	user_id: &UserId,
 	room_id: &RoomId,
@@ -107,8 +108,7 @@ pub fn is_enabled(&self) -> bool { self.conf.is_some() }
 /// The comparison is exact, with no normalization: a request for any other
 /// URL is one this server cannot issue tokens for.
 #[implement(Service)]
-#[must_use]
-pub fn is_own_url(&self, url: &str) -> bool {
+fn is_own_url(&self, url: &str) -> bool {
 	self.conf
 		.as_ref()
 		.is_some_and(|conf| conf.url == url)

@@ -8,7 +8,7 @@ use std::{ops::Not, sync::LazyLock, time::Duration};
 
 use serde::Serialize;
 use tuwunel_core::{
-	Result, err, implement,
+	Result, err, error, implement,
 	jwt::{Algorithm, Header, encode},
 	utils::time::now_secs,
 };
@@ -114,6 +114,8 @@ fn sign(&self, sub: Option<&str>, video: Grant<'_>, ttl: Duration) -> Result<Str
 		video,
 	};
 
-	encode(&HEADER, &claims, &self.key)
-		.map_err(|error| err!(error!(%error, "Failed to sign a LiveKit token.")))
+	encode(&HEADER, &claims, &self.key).map_err(|error| {
+		error!(%error, "Failed to sign a LiveKit token");
+		err!("Failed to sign a LiveKit token.")
+	})
 }

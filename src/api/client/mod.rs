@@ -58,6 +58,8 @@ pub(crate) mod well_known;
 
 mod utils;
 
+#[cfg(feature = "livekit")]
+pub(crate) use self::rtc::get_livekit_token_route;
 pub(crate) use self::{
 	account::{
 		add_3pid_route, change_password_route, deactivate_route, delete_3pid_route,

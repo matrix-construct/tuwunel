@@ -7,15 +7,27 @@ use tuwunel_api::router::RouterExt;
 use tuwunel_core::{Server, err};
 
 use crate::{self as federation, State};
+#[cfg(feature = "livekit")]
+use crate::{get_livekit_token_route, get_livekit_token_unstable_route};
 
 /// Builds the server endpoint routes.
 ///
 /// Federation settings select the enabled handlers or disabled responses.
 pub fn build(server: &Server) -> Router<State> {
+	let config = &server.config;
 	let router = Router::new();
 	let router = register_server_misc_routes(router);
 
-	register_federation_routes(router, server.config.federation.enable)
+	#[cfg(feature = "livekit")]
+	let router = if config.federation.enable && config.livekit.is_enabled() {
+		router
+			.ruma_route(&get_livekit_token_route)
+			.ruma_route(&get_livekit_token_unstable_route)
+	} else {
+		router
+	};
+
+	register_federation_routes(router, config.federation.enable)
 }
 
 fn register_server_misc_routes(router: Router<State>) -> Router<State> {

@@ -5,6 +5,7 @@
 //! three are set.
 
 use derive_more::Debug;
+use ruma::api::client::rtc::RtcTransport;
 use serde::Deserialize;
 use smallstr::SmallString;
 use tuwunel_macros::config_example_generator;
@@ -91,6 +92,39 @@ pub struct Livekit {
 #[inline]
 #[must_use]
 pub fn is_enabled(&self) -> bool { self.enabled().is_some() }
+
+/// The transport advertising this SFU to clients, when the section is set.
+///
+/// It carries the configured `url` alone, with no `livekit_service_url`, so a
+/// client asks this server for its token.
+#[implement(Livekit)]
+#[must_use]
+pub fn transport(&self) -> Option<RtcTransport> {
+	self.enabled()
+		.map(|(url, ..)| RtcTransport::livekit(url.to_owned()))
+}
+
+/// Whether a configured transport sends clients here for another SFU's token.
+///
+/// A LiveKit entry with a `url` and no `livekit_service_url` makes a client
+/// ask this server for its token, and native LiveKit issues tokens for its own
+/// `url` alone, so such an entry naming another URL leaves its calls without a
+/// token. An entry carrying a service URL is that service's to answer.
+#[implement(Livekit)]
+#[expect(deprecated)]
+pub(super) fn misdirects(&self, transport: &RtcTransport) -> bool {
+	let url = match transport {
+		| RtcTransport::LiveKit(livekit) if livekit.service_url.is_none() =>
+			Some(livekit.url.as_str()),
+		| RtcTransport::LegacyLiveKit(livekit) if livekit.service_url.is_none() =>
+			livekit.url.as_deref(),
+		| _ => None,
+	};
+
+	self.enabled()
+		.zip(url)
+		.is_some_and(|((own, ..), url)| url != own)
+}
 
 /// Borrows the URL, API key and API secret when all three are set.
 ///

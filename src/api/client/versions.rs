@@ -59,6 +59,13 @@ pub(crate) async fn get_supported_versions_route(
 				.into_iter()
 				.flatten(),
 		)
+		.chain(
+			services
+				.config
+				.livekit
+				.is_enabled()
+				.then_some("org.matrix.msc4195.stable"),
+		)
 		.map(Into::into)
 		.zip(once(true).cycle())
 		.collect();

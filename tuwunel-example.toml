@@ -6514,8 +6514,9 @@
 # Note: You must also set `client` above to your homeserver URL.
 #
 # This is the setting to use for a LiveKit backend. Clients receive it as
-# a `livekit` transport, listed after any `rtc_transports` entries;
-# MSC4143 reads that list as the server's order of preference.
+# a `livekit` transport, listed last: after any `rtc_transports` entries
+# and after the `m.livekit` transport of `[global.livekit]`. MSC4143
+# reads that list as the server's order of preference.
 #
 # reloadable: yes
 #
@@ -6533,11 +6534,15 @@
 # transport; for that, use `livekit_url` now.
 #
 # Entries are advertised in the order listed here, ahead of the
-# `livekit_url` transport, and MSC4143 reads that order as the server's
-# preference. Each `type` must be 1 to 255 characters from `[a-z0-9._-]`,
-# starting with a lowercase letter (the Matrix namespaced identifier
-# grammar); an entry that breaks this, or is not a table with a string
-# `type`, stops startup, and a config reload carrying one is refused.
+# `m.livekit` transport of `[global.livekit]` and the `livekit_url`
+# transport, and MSC4143 reads that order as the server's preference.
+# With `[global.livekit]` set, startup warns about a LiveKit entry with a
+# `url` but no `livekit_service_url` whose `url` is not `livekit.url`:
+# clients would ask this server for a token it cannot issue. Each `type`
+# must be 1 to 255 characters from `[a-z0-9._-]`, starting with a
+# lowercase letter (the Matrix namespaced identifier grammar); an entry
+# that breaks this, or is not a table with a string `type`, stops
+# startup, and a config reload carrying one is refused.
 #
 # Example:
 # [global.well_known]
