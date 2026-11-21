@@ -121,17 +121,18 @@ For multi-value matrix runs (as used in CI), set the `cargo_profiles`,
 
 ### Multi-value defaults
 
-```hcl
-variable "cargo_profiles"   { default = "[\"test\", \"release\"]"          }
-variable "feat_sets"        { default = "[\"none\", \"default\", \"all\"]" }
-variable "rust_toolchains"  { default = "[\"nightly\", \"msrv\"]"          }
-variable "rust_targets"     { default = "[\"x86_64-unknown-linux-gnu\"]"   }
-variable "sys_names"        { default = "[\"debian\"]"                     }
-variable "sys_versions"     { default = "[\"testing-slim\"]"               }
-variable "sys_targets"      { default = "[\"x86_64-v1-linux-gnu\"]"        }
-```
+In `docker/bake.hcl`, each default is a string containing a JSON array.
+The wrapper `docker/bake.sh` selects `nightly` by default.
 
-These are escaped JSON arrays passed as strings.
+```hcl
+variable "cargo_profiles"   { default = "[\"test\", \"release\"]"             }
+variable "feat_sets"        { default = "[\"none\", \"default\", \"all\"]"    }
+variable "rust_toolchains"  { default = "[\"nightly\", \"stable\", \"msrv\"]" }
+variable "rust_targets"     { default = "[\"x86_64-unknown-linux-gnu\"]"      }
+variable "sys_names"        { default = "[\"debian\"]"                        }
+variable "sys_versions"     { default = "[\"testing-slim\"]"                  }
+variable "sys_targets"      { default = "[\"x86_64-v1-linux-gnu\"]"           }
+```
 
 
 ## Target Hierarchy

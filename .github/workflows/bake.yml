@@ -46,6 +46,10 @@ on:
         type: string
         default: ${{vars.RUST_NIGHTLY || 'nightly'}}
         description: Override nightly toolchain with more specific nightly.
+      rust_stable:
+        type: string
+        default: ${{vars.RUST_STABLE || 'stable'}}
+        description: Override stable toolchain with a specific release.
       checkout:
         type: string
         default: ${{github.sha}}
@@ -158,6 +162,7 @@ jobs:
         CI_SILENT_BAKE: ${{inputs.silent_bake}}
         CI_PRINT_BAKE: ${{inputs.print_bake}}
         rust_nightly: ${{inputs.rust_nightly}}
+        rust_stable: ${{inputs.rust_stable}}
         git_checkout: ${{inputs.checkout}}
         rustdoc_base_path: ${{inputs.rustdoc_base_path}}
         CACHIX_AUTH_TOKEN: ${{secrets.cachix_auth_token}}

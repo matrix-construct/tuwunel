@@ -54,11 +54,14 @@ variable "install_prefix" {
 variable "rust_msrv" {
     default = "stable"
 }
+variable "rust_stable" {
+    default = "stable"
+}
 variable "rust_nightly" {
     default = "nightly"
 }
 variable "rust_toolchains" {
-    default = "[\"nightly\", \"msrv\"]"
+    default = "[\"nightly\", \"stable\", \"msrv\"]"
 }
 variable "rust_targets" {
     default = "[\"x86_64-unknown-linux-gnu\"]"
@@ -2355,6 +2358,8 @@ target "rust" {
         rust_toolchain = (
             rust_toolchain == "msrv"?
                 rust_msrv:
+            rust_toolchain == "stable"?
+                rust_stable:
             rust_toolchain == "nightly"?
                 rust_nightly:
                 rust_toolchain
