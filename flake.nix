@@ -54,13 +54,32 @@
         };
         pkgsHostStatic = pkgsHost.pkgsStatic;
 
-        # The Rust toolchain to use
-        toolchain = inputs.fenix.packages.${system}.fromToolchainFile {
-          file = ./rust-toolchain.toml;
-
-          # See also `rust-toolchain.toml`
-          sha256 = "sha256-gh/xTkxKHL4eiRXzWv8KP7vfjSk61Iq48x47BEDFgfk=";
-        };
+        # The Rust toolchain to use: the stable release at the locked fenix
+        # revision, so updating the fenix input advances it. The components
+        # and targets mirror `rust-toolchain.toml`, which pins the minimum
+        # supported version instead.
+        toolchain =
+          let
+            fenix = inputs.fenix.packages.${system};
+          in
+          fenix.combine (
+            [
+              (fenix.stable.withComponents [
+                "cargo"
+                "clippy"
+                "rust-analyzer"
+                "rust-src"
+                "rustc"
+                "rustfmt"
+              ])
+            ]
+            ++ map (target: fenix.targets.${target}.stable.rust-std) [
+              "x86_64-unknown-linux-gnu"
+              "x86_64-unknown-linux-musl"
+              "aarch64-unknown-linux-gnu"
+              "aarch64-unknown-linux-musl"
+            ]
+          );
 
         mkScope =
           pkgs:
