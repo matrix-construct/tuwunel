@@ -292,6 +292,25 @@ pub async fn get(&self, delay_id: &str, owner: Option<&UserId>) -> Result<Event>
 		.ok_or_else(|| err!(Request(NotFound("No delayed event with this ID."))))
 }
 
+/// Reads a scheduled or finalised event, restricted to `owner`'s events when
+/// one is given.
+///
+/// Unlike [`Service::get`], a storage or decoding fault is an error rather
+/// than a missing event, for a caller that must not take a fault for the
+/// event's end.
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+pub async fn find(&self, delay_id: &str, owner: Option<&UserId>) -> Result<Option<Event>> {
+	let event = match self.get_event(delay_id).await.present()? {
+		| Some(event) => Some(event),
+		| None => read_event(&self.db.delayid_finalised, delay_id)
+			.await
+			.present()?,
+	};
+
+	Ok(event.filter(|event| owner.is_none_or(|owner| owner == event.user_id)))
+}
+
 /// Streams the events a user has scheduled, with their `delay_id`s.
 ///
 /// An index entry whose record is missing or unreadable is skipped.

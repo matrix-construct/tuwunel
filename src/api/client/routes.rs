@@ -18,12 +18,12 @@ use tuwunel_core::{
 	err,
 };
 
-#[cfg(feature = "livekit")]
-use crate::get_livekit_token_route;
 use crate::{
 	self as client, State, is_joined_route, put_msc4388_route,
 	send_message_event_or_delayed_route, send_state_event_or_delayed_route, sso_callback_route,
 };
+#[cfg(feature = "livekit")]
+use crate::{delegate_delayed_leave_route, get_livekit_token_route};
 
 /// Builds the client endpoint routes.
 ///
@@ -54,7 +54,9 @@ pub fn build(server: &Server) -> Router<State> {
 
 	#[cfg(feature = "livekit")]
 	let router = if config.livekit.is_enabled() {
-		router.ruma_route(&get_livekit_token_route)
+		router
+			.ruma_route(&get_livekit_token_route)
+			.ruma_route(&delegate_delayed_leave_route)
 	} else {
 		router
 	};

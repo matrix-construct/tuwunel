@@ -1,10 +1,14 @@
-//! Issues LiveKit access tokens for MatrixRTC calls (MSC4195).
+//! Issues LiveKit access tokens for MatrixRTC calls and follows delegated
+//! leave events (MSC4195).
 //!
 //! A token admits one call member to the LiveKit room of one call slot. Room
 //! names and participant identities are hashes, so the SFU learns neither the
 //! Matrix room, the slot nor the user. The room is created through LiveKit's
-//! RoomService before a token is signed, so a failing SFU yields no token.
+//! RoomService before a token is signed, so a failing SFU yields no token. A
+//! member may also hand this server its delayed leave event, which is kept
+//! alive while LiveKit reports the member connected and sent once it leaves.
 
+mod delegation;
 mod get_token;
 mod names;
 mod room_service;
@@ -16,9 +20,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ruma::{RoomId, UserId};
-use tuwunel_core::{Result, err, implement, jwt::EncodingKey, smallstr::SmallString};
+use tuwunel_core::{
+	Result, err, implement, jwt::EncodingKey, smallstr::SmallString, utils::MutexMap,
+};
+use tuwunel_database::Map;
 
 use self::{
+	delegation::Participant,
 	names::{identity, room_name},
 	room_service::Method,
 };
@@ -27,15 +35,27 @@ use crate::{Args, SelfServices, service::make_name};
 // The 15-byte keys `livekit-server generate-keys` prints stay inline.
 type ApiKey = SmallString<[u8; 16]>;
 
-/// Issues LiveKit tokens against the SFU configured at startup.
+/// Issues LiveKit tokens and follows delegations against the SFU configured
+/// at startup.
 ///
 /// It keeps the SFU's address and the signing key from the startup
 /// configuration, which a reload cannot change.
 pub struct Service {
 	services: SelfServices,
+	db: Data,
+
+	/// Serializes the writes to one participant's delegation.
+	///
+	/// The map holds an entry only while a delegation request or a poll is
+	/// working on that participant.
+	locks: MutexMap<Participant, ()>,
 
 	/// The SFU's connection details, or `None` when native LiveKit is off.
 	conf: Option<Conf>,
+}
+
+struct Data {
+	lkparticipant_delegation: Arc<Map>,
 }
 
 /// Connection details of the configured SFU, fixed for the server's lifetime.
@@ -54,6 +74,9 @@ struct Conf {
 
 	/// RoomService's CreateRoom method.
 	create_room: Method,
+
+	/// RoomService's GetParticipant method, which polling a delegation calls.
+	get_participant: Method,
 }
 
 #[async_trait]
@@ -67,7 +90,30 @@ impl crate::Service for Service {
 			.map(Conf::new)
 			.transpose()?;
 
-		Ok(Arc::new(Self { services: args.services.clone(), conf }))
+		let db = Data {
+			lkparticipant_delegation: args.db["lkparticipant_delegation"].clone(),
+		};
+
+		let service = Self {
+			services: args.services.clone(),
+			db,
+			locks: MutexMap::new(),
+			conf,
+		};
+
+		Ok(Arc::new(service))
+	}
+
+	#[tracing::instrument(level = "debug", skip_all)]
+	async fn worker(self: Arc<Self>) -> Result {
+		// A read-only database could record no outcome, so each poll would repeat it.
+		if self.conf.is_none() || self.services.db.is_read_only() {
+			return Ok(());
+		}
+
+		self.delegation_loop().await;
+
+		Ok(())
 	}
 
 	fn name(&self) -> &str { make_name(module_path!()) }
@@ -128,6 +174,7 @@ impl Conf {
 			api_key: api_key.into(),
 			key: EncodingKey::from_secret(api_secret.as_bytes()),
 			create_room: Method::new(url, "CreateRoom")?,
+			get_participant: Method::new(url, "GetParticipant")?,
 		})
 	}
 }

@@ -18,7 +18,6 @@ use axum::{
 	response::{IntoResponse, Response as AxumResponse},
 };
 use axum_server::from_tcp;
-use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use reqwest::Response;
 use serde_json::{Value, from_slice, json};
 use serde_urlencoded::{from_str as from_query, to_string as to_query};
@@ -33,7 +32,6 @@ use tuwunel_core::{
 	Result, err,
 	http::{HeaderValue, Request as HttpRequest, header::AUTHORIZATION},
 	implement,
-	jwt::{Algorithm, DecodingKey, Validation, decode},
 	ruma::{
 		OwnedUserId, RoomId, UserId,
 		api::{
@@ -42,18 +40,21 @@ use tuwunel_core::{
 		},
 		events::room::member::MembershipState,
 	},
-	utils::hash::sha256::hash as sha256,
 };
 use tuwunel_service::Services;
 
 use self::{
 	client::{Client, accepted, field, register},
+	common::{API_KEY, FOLDED_SLOT, SECRET, SLOT, claims, derive, refusal, with},
 	fixture::boot,
 	state_cache::membership_update,
 };
 
 mod client;
 mod fixture;
+
+#[path = "livekit/common.rs"]
+mod common;
 
 #[path = "fixture/state_cache.rs"]
 mod state_cache;
@@ -65,15 +66,9 @@ mod state_cache;
 #[path = "client/get.rs"]
 mod get;
 
-const API_KEY: &str = "livekit-boot-key";
-const SECRET: &str = "livekit-boot-secret";
 const MEMBER_TOKEN: &str = "livekit-member-access-token-00001";
 const OUTSIDER_TOKEN: &str = "livekit-outsider-access-token-001";
 const MEMBER_ID: &str = "memberABC";
-
-// Element Call's spelling of the call slot, which shares a room with MSC4196's.
-const SLOT: &str = "m.call#ROOM";
-const FOLDED_SLOT: &str = "m.call#room";
 
 const CREATE_ROOM: &str = "/twirp/livekit.RoomService/CreateRoom";
 const REDIRECTED: &str = "/redirected";
@@ -553,21 +548,6 @@ fn admits(jwt: &str, user_id: &UserId, room_id: &str) -> Result {
 	Ok(())
 }
 
-fn claims(jwt: &str) -> Result<Value> {
-	let key = DecodingKey::from_secret(SECRET.as_bytes());
-	let token = decode::<Value>(jwt, &key, &Validation::new(Algorithm::HS256))
-		.map_err(|e| err!("the token does not verify with the API secret: {e}"))?;
-
-	Ok(token.claims)
-}
-
-// MSC4195's derivation: unpadded base64 of SHA-256 over a two-string JSON array.
-fn derive(first: &str, second: &str) -> String {
-	let json = serde_json::to_vec(&[first, second]).expect("two strings serialize");
-
-	STANDARD_NO_PAD.encode(sha256(json))
-}
-
 #[tracing::instrument(level = "debug", skip_all)]
 async fn get_token(client: &Client<'_>, prefix: &str, body: &Value) -> Result<Response> {
 	client
@@ -686,19 +666,4 @@ async fn register_claim(services: &Services) -> Result {
 		.appservice
 		.register_appservice(registration)
 		.await
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-async fn refusal(response: Response) -> Result<(u16, String)> {
-	let status = response.status().as_u16();
-	let body: Value = response.json().await?;
-
-	Ok((status, field(&body, "errcode")?.to_owned()))
-}
-
-fn with(request: &Value, key: &str, value: &str) -> Value {
-	let mut changed = request.clone();
-
-	changed[key] = value.into();
-	changed
 }

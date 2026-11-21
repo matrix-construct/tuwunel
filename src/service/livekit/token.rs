@@ -64,13 +64,21 @@ const API_TOKEN_TTL: Duration = Duration::from_mins(5);
 // HS256 is the one algorithm LiveKit verifies.
 static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS256));
 
-impl<'a> Grant<'a> {
-	pub(super) fn create_room(room: &'a str) -> Self {
-		Self {
-			room,
-			room_create: true,
-			..Default::default()
-		}
+#[implement(Grant, generics = "<'a>", params = "<'a>")]
+pub(super) fn create_room(room: &'a str) -> Self {
+	Self {
+		room,
+		room_create: true,
+		..Default::default()
+	}
+}
+
+#[implement(Grant, generics = "<'a>", params = "<'a>")]
+pub(super) fn room_admin(room: &'a str) -> Self {
+	Self {
+		room,
+		room_admin: true,
+		..Default::default()
 	}
 }
 

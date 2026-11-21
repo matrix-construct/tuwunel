@@ -4,9 +4,11 @@
 //! that follows no redirect and is bounded by a timeout. Only an HTTP 404
 //! carrying Twirp's `not_found` code (a participant LiveKit does not know)
 //! passes through as not found, for callers to tell apart from failure. Every
-//! other failure is logged here under the method's name, never with LiveKit's
-//! message text, and answers 502 with no detail, since LiveKit's own status (a
-//! 401 for a wrong key, say) would mislead a Matrix client.
+//! other failure of a call answering a client is logged here under the
+//! method's name, never with LiveKit's message text, and answers 502 with no
+//! detail, since LiveKit's own status (a 401 for a wrong key, say) would
+//! mislead a Matrix client. A participant lookup answers no client, so its
+//! failures go back to the poller that asked.
 
 use std::{borrow::Cow, time::Duration};
 
@@ -38,6 +40,46 @@ struct CreateRoom<'a> {
 #[derive(Debug, Deserialize)]
 pub(super) struct Room {
 	pub(super) name: Name,
+}
+
+#[derive(Serialize)]
+struct ParticipantIdentity<'a> {
+	room: &'a str,
+	identity: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct ParticipantInfo {
+	#[serde(default)]
+	state: State,
+}
+
+// LiveKit's participant states; an answer may leave out the first, protobuf's zero value.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum State {
+	#[default]
+	Joining,
+	Joined,
+	Active,
+	Disconnected,
+}
+
+/// Whether a participant is connected, as following a delegation reads it.
+///
+/// LiveKit's `JOINING` and `JOINED` both read as joining, since only
+/// `ACTIVE` means the participant's media flows. A participant LiveKit does
+/// not know reads as gone, like a disconnected one.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Presence {
+	/// Connected, with media flowing.
+	Active,
+
+	/// Still setting up its connection.
+	Joining,
+
+	/// Disconnected, or unknown to LiveKit.
+	Gone,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +135,28 @@ pub(super) async fn create_room(&self, conf: &Conf, name: &str) -> Result {
 		.map_err(|error| not_created(method.name, error))?;
 
 	created(&room, name).map_err(|error| unavailable(method.name, &error))
+}
+
+/// Asks LiveKit whether a participant is connected to a room.
+///
+/// A participant LiveKit does not know, or reports disconnected, is gone. Any
+/// failure returns to the caller unlogged; when LiveKit answered, the error
+/// names its status and Twirp code, never its message text.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn get_participant(
+	&self,
+	conf: &Conf,
+	room: &str,
+	identity: &str,
+) -> Result<Presence> {
+	let request = ParticipantIdentity { room, identity };
+	let participant = self
+		.exchange(conf, &conf.get_participant, Grant::room_admin(room), &request)
+		.await
+		.and_then(|(status, body)| answer(status, &body));
+
+	presence(participant)
 }
 
 /// Posts one RoomService request and reads its answer.
@@ -215,4 +279,14 @@ pub(super) fn created(room: &Room, name: &str) -> Result {
 	BoolExt::ok_or_else(room.name.as_str() == name, || {
 		err!(BadServerResponse("LiveKit answered CreateRoom for another room."))
 	})
+}
+
+pub(super) fn presence(participant: Result<ParticipantInfo>) -> Result<Presence> {
+	match participant {
+		| Err(error) if error.is_not_found() => Ok(Presence::Gone),
+		| Err(error) => Err(error),
+		| Ok(ParticipantInfo { state: State::Active }) => Ok(Presence::Active),
+		| Ok(ParticipantInfo { state: State::Joining | State::Joined }) => Ok(Presence::Joining),
+		| Ok(ParticipantInfo { state: State::Disconnected }) => Ok(Presence::Gone),
+	}
 }

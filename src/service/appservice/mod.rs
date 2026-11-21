@@ -63,8 +63,9 @@ type Registrations = BTreeMap<String, RegistrationInfo>;
 
 const KNOWN_SCOPES: [&str; 1] = [IS_JOINED_SCOPE];
 
-// The proxied path native LiveKit serves itself, after its version segments.
-const NATIVE_LIVEKIT_PATH: &str = "rtc/livekit/get_token";
+// The proxied paths native LiveKit serves itself, after their version segments.
+const NATIVE_LIVEKIT_PATHS: [&str; 2] =
+	["rtc/livekit/get_token", "rtc/livekit/delegate_delayed_leave"];
 
 /// The registrations [`receivers`] yields.
 ///
@@ -482,7 +483,9 @@ async fn admit_registration(
 #[implement(Service)]
 fn warn_native_livekit(&self, registration_info: &RegistrationInfo) {
 	let shadowed = self.services.config.livekit.is_enabled()
-		&& registration_info.proxy_covers(NATIVE_LIVEKIT_PATH);
+		&& NATIVE_LIVEKIT_PATHS
+			.iter()
+			.any(|path| registration_info.proxy_covers(path));
 
 	if let Some(claim) = registration_info
 		.proxy_prefix
@@ -493,7 +496,8 @@ fn warn_native_livekit(&self, registration_info: &RegistrationInfo) {
 		warn!(
 			%id,
 			%claim,
-			"Native LiveKit answers the get_token requests this appservice's proxy claim covers"
+			"Native LiveKit answers the get_token and delegate_delayed_leave requests this \
+			 appservice's proxy claim covers"
 		);
 	}
 }

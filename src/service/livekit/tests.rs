@@ -16,13 +16,16 @@ use tuwunel_core::{
 
 use super::{
 	Conf,
+	delegation::{Action, Record, decide},
 	get_token::{is_unrecognized, relay_error, stable_request, unstable_request},
 	names::{derive, identity, room_name},
-	room_service::{Method, Room, answer, created, failed, not_created},
+	room_service::{Method, Presence, Room, answer, created, failed, not_created, presence},
 	token::Grant,
 };
+use crate::delayed_events::Event;
 
 const SECRET: &str = "livekit-test-secret";
+const URL: &str = "wss://livekit.example.com";
 
 // The room-name vector of MSC4195's appendix.
 #[test]
@@ -92,21 +95,34 @@ fn join_token_carries_the_msc_grants() {
 	);
 }
 
+/// CreateRoom's token may create rooms and GetParticipant's may administer
+/// the one room it names.
+///
+/// Neither token names a participant or permits joining.
 #[test]
 fn api_token_grants_only_what_the_call_needs() {
-	let token = conf()
-		.api_token(Grant::create_room("livekit-room"))
-		.expect("an API token signs");
+	for (grant, create, admin) in [
+		(Grant::create_room("livekit-room"), true, None),
+		(Grant::room_admin("livekit-room"), false, Some(true)),
+	] {
+		let token = conf()
+			.api_token(grant)
+			.expect("an API token signs");
 
-	let claims = claims(&token);
-	let video = &claims["video"];
+		let claims = claims(&token);
+		let video = &claims["video"];
+		let room_admin = video
+			.get("roomAdmin")
+			.and_then(JsonValue::as_bool);
 
-	assert_eq!(claims.get("sub"), None);
-	assert_eq!(lifetime(&claims), 300);
-	assert_eq!(video["roomCreate"], true);
-	assert_eq!(video.get("roomAdmin"), None);
-	assert_eq!(video["roomJoin"], false);
-	assert_eq!(video["canPublish"], false);
+		assert_eq!(claims.get("sub"), None);
+		assert_eq!(lifetime(&claims), 300);
+		assert_eq!(video["room"], "livekit-room");
+		assert_eq!(video["roomCreate"], create);
+		assert_eq!(room_admin, admin);
+		assert_eq!(video["roomJoin"], false);
+		assert_eq!(video["canPublish"], false);
+	}
 }
 
 #[test]
@@ -204,6 +220,84 @@ fn createroom_answer_must_name_the_room() {
 	let missing = missing.expect_err("a not-found answer is an error");
 
 	assert_eq!(not_created("CreateRoom", missing).status_code(), StatusCode::BAD_GATEWAY);
+}
+
+/// LiveKit's participant states read as active, joining or gone.
+///
+/// A participant LiveKit does not know is gone like a disconnected one, and
+/// an answer leaving out the state reads as protobuf's zero value, joining.
+/// Any other failure stays an error, on which a poll changes nothing.
+#[test]
+fn participant_states_read_as_presence() {
+	let not_found = r#"{"code":"not_found","msg":"participant does not exist"}"#;
+
+	for (status, body, expected) in [
+		(StatusCode::OK, r#"{"identity":"x","state":"ACTIVE"}"#, Some(Presence::Active)),
+		(StatusCode::OK, r#"{"state":"JOINED"}"#, Some(Presence::Joining)),
+		(StatusCode::OK, r#"{"state":"JOINING"}"#, Some(Presence::Joining)),
+		(StatusCode::OK, r#"{"identity":"x"}"#, Some(Presence::Joining)),
+		(StatusCode::OK, r#"{"state":"DISCONNECTED"}"#, Some(Presence::Gone)),
+		(StatusCode::NOT_FOUND, not_found, Some(Presence::Gone)),
+		(StatusCode::NOT_FOUND, "<html>text</html>", None),
+		(StatusCode::UNAUTHORIZED, r#"{"code":"unauthenticated","msg":"text"}"#, None),
+		(StatusCode::OK, r#"{"state":"UNHEARD_OF"}"#, None),
+	] {
+		let presence = presence(answer(status, body.as_bytes())).ok();
+
+		assert_eq!(presence, expected, "{status} {body}");
+	}
+}
+
+/// A connected participant's event restarts once it falls due within half its
+/// delay plus one poll interval, and not a millisecond sooner.
+///
+/// A waiting one restarts only on connecting and is let go once its hour is
+/// over, even while LiveKit cannot answer; an unanswered poll otherwise sends
+/// and restarts nothing.
+#[test]
+fn decide_covers_every_row() {
+	const SINCE: u64 = 1_000_000;
+	const DELAY: u64 = 3_600_000;
+	const EDGE: u64 = SINCE + DELAY - DELAY / 2 - 10_000;
+	const WAITED: u64 = SINCE + DELAY;
+
+	let event = scheduled(DELAY, SINCE + DELAY);
+	let (waiting, connected) = (record(SINCE, false), record(SINCE, true));
+	let (active, joining, gone) =
+		(Some(Presence::Active), Some(Presence::Joining), Some(Presence::Gone));
+
+	for (record, presence, now, expected) in [
+		(&waiting, active, SINCE, Action::Connect { restart: false }),
+		(&waiting, active, EDGE, Action::Connect { restart: true }),
+		(&waiting, joining, WAITED - 1, Action::Wait),
+		(&waiting, gone, WAITED - 1, Action::Wait),
+		(&waiting, None, WAITED - 1, Action::Wait),
+		(&waiting, joining, WAITED, Action::GiveUp),
+		(&waiting, gone, WAITED, Action::GiveUp),
+		(&waiting, None, WAITED, Action::GiveUp),
+		(&connected, active, EDGE - 1, Action::Wait),
+		(&connected, joining, EDGE - 1, Action::Wait),
+		(&connected, active, EDGE, Action::Restart),
+		(&connected, joining, EDGE, Action::Restart),
+		(&connected, None, EDGE, Action::Wait),
+		(&connected, gone, SINCE, Action::Send),
+	] {
+		let action = decide(record, presence, &event, now);
+
+		assert_eq!(action, expected, "{record:?} {presence:?} {now}");
+	}
+}
+
+/// Two delegations of the same event made in the same millisecond differ.
+///
+/// A poll that read one therefore never acts on the other.
+#[test]
+fn delegations_made_at_once_differ() {
+	let user_id = user_id!("@alice:example.com");
+
+	let made = || Record::new(user_id, "delay", URL, 5);
+
+	assert_ne!(made(), made());
 }
 
 /// Only another server's 403 `M_FORBIDDEN` and 400 `M_INVALID_PARAM` reach
@@ -330,9 +424,30 @@ fn remote(status: StatusCode, body: &str) -> Error {
 	)
 }
 
+fn scheduled(delay_ms: u64, due_ms: u64) -> Event {
+	let event = json!({
+		"user_id": "@alice:example.com",
+		"room_id": "!roomid:example.com",
+		"type": "org.matrix.msc3401.call.member",
+		"content": {},
+		"delay_ms": delay_ms,
+		"due_ms": due_ms,
+	});
+
+	serde_json::from_value(event).expect("a scheduled event deserializes")
+}
+
+fn record(since_ms: u64, connected: bool) -> Record {
+	let user_id = user_id!("@alice:example.com");
+
+	Record {
+		connected,
+		..Record::new(user_id, "delay", URL, since_ms)
+	}
+}
+
 fn conf() -> Conf {
-	Conf::new(("wss://livekit.example.com", "livekit-test-key", SECRET))
-		.expect("a websocket URL makes a configuration")
+	Conf::new((URL, "livekit-test-key", SECRET)).expect("a websocket URL makes a configuration")
 }
 
 fn claims(token: &str) -> JsonValue {

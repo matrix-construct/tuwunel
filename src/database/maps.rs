@@ -219,6 +219,12 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
+		name: "lkparticipant_delegation",
+		key_size_hint: Some(88),
+		val_size_hint: Some(128),
+		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
 		name: "logintoken_expiresatuserid",
 		..descriptor::RANDOM_SMALL
 	},
