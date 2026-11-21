@@ -28,7 +28,8 @@ use self::{consent::consent_html, entry::entry_html, error::error_html, result::
 use super::{
 	browser_session::{removal_cookie, session_token, session_user},
 	consume_login_token_with_provider, mint_login_token, oauth_error,
-	peek_login_token_with_provider, require_account_usable, sso_redirect_url, url_encode,
+	peek_login_token_with_provider, refresh_html, require_account_usable, sso_redirect_url,
+	url_encode,
 };
 use crate::ClientIp;
 
@@ -182,7 +183,7 @@ async fn handle_device_verify(
 		| false => {
 			let idp_id = services.oauth.providers.get_default_id();
 
-			device_sso_redirect(services, user_code, idp_id.as_deref())
+			device_sso_handoff(services, user_code, idp_id.as_deref())
 		},
 	}
 }
@@ -239,27 +240,43 @@ fn device_native_url(services: &Services, user_code: &str) -> Result<Url> {
 		.map_err(|_| err!(Request(InvalidParam("Failed to build native login URL"))))
 }
 
+/// Sends a code typed into the entry form on to the provider from a page of
+/// our own.
+///
+/// Chromium holds every redirect after a form submission to the entry page's
+/// `form-action 'self'`, so a redirect toward the provider's origin is
+/// blocked. The page's refresh is a navigation of its own.
+fn device_sso_handoff(
+	services: &Services,
+	user_code: &str,
+	idp_id: Option<&str>,
+) -> Result<Response> {
+	device_sso_url(services, user_code, idp_id)
+		.map(|sso_url| refresh_html(sso_url.as_str()))
+		.map(|html| device_html_response(StatusCode::OK, html))
+}
+
 pub(super) fn device_sso_redirect(
 	services: &Services,
 	user_code: &str,
 	idp_id: Option<&str>,
 ) -> Result<Response> {
+	device_sso_url(services, user_code, idp_id)
+		.map(|sso_url| Redirect::temporary(sso_url.as_str()))
+		.map(device_redirect_response)
+}
+
+fn device_sso_url(services: &Services, user_code: &str, idp_id: Option<&str>) -> Result<Url> {
 	let idp_id = idp_id
 		.ok_or_else(|| err!(Config("identity_provider", "No identity provider configured")))?;
 
 	let issuer = services.oauth.get_server()?.issuer_url()?;
 	let base = issuer.trim_end_matches('/');
-
-	let mut callback_url = Url::parse(&format!("{base}/_tuwunel/oidc/device_callback"))
+	let callback = format!("{base}/_tuwunel/oidc/device_callback");
+	let callback_url = Url::parse_with_params(&callback, [("user_code", user_code)])
 		.map_err(|_| err!(Request(InvalidParam("Failed to build device callback URL"))))?;
 
-	callback_url
-		.query_pairs_mut()
-		.append_pair("user_code", user_code);
-
-	let sso_url = sso_redirect_url(base, idp_id, &callback_url)?;
-
-	Ok(device_redirect_response(Redirect::temporary(sso_url.as_str())))
+	sso_redirect_url(base, idp_id, &callback_url)
 }
 
 /// The authentication return target: renders consent for the authenticated
