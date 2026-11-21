@@ -17,6 +17,7 @@ use tuwunel_core::{
 	utils::{
 		BoolExt, MutexMapGuard, OptionExt, ReadyExt,
 		future::OptionFutureExt,
+		rand::string_array,
 		random_string,
 		stream::{BroadbandExt, IterStream, TryIgnore, automatic_width},
 		string::to_small_string,
@@ -46,6 +47,12 @@ pub const MAX_DEVICE_ID_LENGTH: usize = 512;
 
 /// generated user access token length
 pub const TOKEN_LENGTH: usize = 32;
+
+/// Prefix of every refresh token.
+///
+/// Refresh and access tokens share one token map, and a bearer lookup refuses
+/// a token by this prefix, so no access token may start with it.
+const REFRESH_TOKEN_PREFIX: &str = "refresh_";
 
 /// Adds a new device to a user.
 ///
@@ -277,7 +284,7 @@ pub fn all_device_ids<'a>(
 		.map(|(_, device_id): (Ignore, &DeviceId)| device_id)
 }
 
-/// Find out which user a token belongs to, unless the token has expired.
+/// Find out which user an unexpired access token belongs to.
 ///
 /// An expired token stays recorded until its device moves on from it, so its
 /// client keeps reading a soft logout and a route granting access needs this
@@ -288,11 +295,27 @@ pub async fn find_from_unexpired_token(
 	&self,
 	token: &str,
 ) -> Option<(OwnedUserId, OwnedDeviceId)> {
-	self.find_from_token(token)
+	self.find_from_access_token(token)
 		.await
 		.ok()
 		.filter(|&(.., expires_at)| deadline_has_passed(expires_at).is_false())
 		.map(|(user_id, device_id, _)| (user_id, device_id))
+}
+
+/// Look up a user access token for request authentication.
+///
+/// A refresh token is refused by its prefix. The expiry is returned to the
+/// caller, so an expired token can still log out.
+#[implement(super::Service)]
+pub async fn find_from_access_token(
+	&self,
+	token: &str,
+) -> Result<(OwnedUserId, OwnedDeviceId, Option<SystemTime>)> {
+	if token.starts_with(REFRESH_TOKEN_PREFIX) {
+		return Err!(Request(NotFound("Not a user access token.")));
+	}
+
+	self.find_from_token(token).await
 }
 
 /// Find out which user an access or refresh token belongs to.
@@ -729,7 +752,10 @@ async fn set_refresh_token(
 	device_id: &DeviceId,
 	refresh_token: &str,
 ) -> Result {
-	debug_assert!(refresh_token.starts_with("refresh_"), "refresh_token missing prefix");
+	debug_assert!(
+		refresh_token.starts_with(REFRESH_TOKEN_PREFIX),
+		"refresh_token missing prefix"
+	);
 
 	let config = &self.services.server.config;
 	let ttl = config.authentication.refresh_token.ttl;
@@ -979,8 +1005,14 @@ pub async fn classify_refresh_token(&self, presented: &str) -> RefreshToken {
 	}
 }
 
+/// Generates a refresh token.
+///
+/// The prefix marks it as a refresh token, which bearer authentication
+/// refuses.
 #[must_use]
-pub fn generate_refresh_token() -> String { format!("refresh_{}", random_string(TOKEN_LENGTH)) }
+pub fn generate_refresh_token() -> String {
+	format!("{REFRESH_TOKEN_PREFIX}{}", string_array::<TOKEN_LENGTH>())
+}
 
 #[implement(super::Service)]
 pub fn add_to_device_event(
@@ -1298,7 +1330,49 @@ pub fn all_devices_metadata<'a>(
 
 #[cfg(test)]
 mod tests {
+	use ruma::{device_id, user_id};
+	use tuwunel_core::{config::Figment, result::NotFound};
+
 	use super::*;
+	use crate::test_utils::fixture;
+
+	#[tokio::test]
+	async fn access_lookup_only_returns_access_tokens() -> Result {
+		let Some(fixture) = fixture(Figment::new()).await? else {
+			return Ok(());
+		};
+
+		let users = &fixture.services.users;
+		let user = user_id!("@member:localhost");
+		let device = device_id!("DEVICE");
+		let (access, _) = users.generate_access_token(false);
+		let refresh = generate_refresh_token();
+
+		for token in [&access, &refresh] {
+			fixture.services.db["token_userdeviceid"]
+				.raw_put(token.as_str(), (user, device, None::<u64>));
+		}
+
+		assert_eq!(users.find_from_access_token(&access).await?.0, user);
+
+		assert!(
+			users
+				.find_from_access_token(&refresh)
+				.await
+				.is_not_found()
+		);
+
+		assert!(
+			users
+				.find_from_unexpired_token(&refresh)
+				.await
+				.is_none()
+		);
+
+		assert_eq!(users.find_from_token(&refresh).await?.0, user);
+
+		Ok(())
+	}
 
 	#[test]
 	fn absent_device_id_is_generated() {

@@ -6,6 +6,8 @@ use futures::{
 	channel::oneshot::{Receiver, Sender, channel},
 	future::{Either, join, select},
 };
+use reqwest::{Response, StatusCode};
+use serde_json::Value;
 use tokio::time::{sleep, timeout};
 use tuwunel_core::{
 	Err, Result, err,
@@ -59,7 +61,7 @@ fn refresh_device_lock() -> Result {
 	)
 }
 
-async fn with_grace(services: &Services, _base: &str) -> Result {
+async fn with_grace(services: &Services, base: &str) -> Result {
 	removed_device_is_issued_no_tokens(services).await?;
 	concurrent_refreshes_keep_one_successor(services).await?;
 	stale_grace_is_refused(services).await?;
@@ -69,7 +71,8 @@ async fn with_grace(services: &Services, _base: &str) -> Result {
 	expiring_login_refuses_a_refresh_in_flight(services).await?;
 	expiring_login_retires_the_refresh_it_waited_for(services).await?;
 	metadata_updates_keep_removal(services).await?;
-	issuing_forgets_older_expired_tokens(services).await
+	issuing_forgets_older_expired_tokens(services).await?;
+	refresh_token_is_no_bearer(services, base).await
 }
 
 /// A refresh or login still in flight when its device is removed must not
@@ -482,6 +485,78 @@ async fn indexed(services: &Services, user: &UserId, device: &DeviceId, token: &
 		.qry(&(user, device, token))
 		.await
 		.is_ok()
+}
+
+/// A refresh token authenticates no request as a bearer token, on the client
+/// API or at OIDC userinfo, and still rotates after both refusals.
+///
+/// The access token issued by the same exchange is the control at each
+/// endpoint, so a refusal is the token's kind and not its device's.
+async fn refresh_token_is_no_bearer(services: &Services, base: &str) -> Result {
+	let device = device_id!("BEARERDEVICE");
+	let (user, original) = session(services, "bearer", device).await?;
+	let (access, successor) = refresh(services, &original).await?;
+	let successor = successor?;
+
+	services.users.mark_oidc_device(&user, device, "");
+
+	let whoami = format!("{base}/_matrix/client/v3/account/whoami");
+	let refused = get_as(services, &whoami, &successor).await?;
+	let status = refused.status();
+	let body: Value = refused.json().await?;
+
+	if status != StatusCode::UNAUTHORIZED || body["errcode"] != "M_UNKNOWN_TOKEN" {
+		return Err!("expected 401 M_UNKNOWN_TOKEN for a refresh token, got {status}: {body}");
+	}
+
+	let accepted = get_as(services, &whoami, &access).await?;
+
+	identifies(accepted, "user_id", &user).await?;
+
+	let userinfo = format!("{base}/_tuwunel/oidc/userinfo");
+	let status = get_as(services, &userinfo, &successor)
+		.await?
+		.status();
+
+	if status != StatusCode::UNAUTHORIZED {
+		return Err!("expected 401 at userinfo for a refresh token, got {status}");
+	}
+
+	let accepted = get_as(services, &userinfo, &access).await?;
+
+	identifies(accepted, "sub", &user).await?;
+
+	if let Err(error) = refreshed_token(services, &successor).await {
+		return Err!("a refresh token refused as a bearer token stopped rotating: {error}");
+	}
+
+	Ok(())
+}
+
+async fn get_as(services: &Services, url: &str, token: &str) -> Result<Response> {
+	let response = services
+		.client
+		.clients
+		.default
+		.get(url)
+		.bearer_auth(token)
+		.send()
+		.await?;
+
+	Ok(response)
+}
+
+/// Checks that a request was accepted for `user`, whom the reply names in
+/// `field`.
+async fn identifies(response: Response, field: &str, user: &UserId) -> Result {
+	let status = response.status();
+	let body: Value = response.json().await?;
+
+	if status != StatusCode::OK || body[field] != user.as_str() {
+		return Err!("expected 200 naming {user} in {field}, got {status}: {body}");
+	}
+
+	Ok(())
 }
 
 /// Without a grace window, a token already spent when its request arrived is
