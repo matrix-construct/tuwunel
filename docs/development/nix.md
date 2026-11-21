@@ -53,9 +53,16 @@ pull requests degrade to read-only rather than failing.
 
 | Producer | Trigger | Scope |
 |---|---|---|
-| `smoke-nix` stage in `docker/Dockerfile.nix` | Every branch push that runs the Smoke NixOS job | `all-features` plus its full build closure |
+| `smoke-nix` stage in `docker/Dockerfile.nix` | Every branch push that runs the Smoke NixOS job | The default package (`.#default`) plus its full build closure |
 | `nix-pkg` stage in `docker/Dockerfile.nix` | Tags, `main` and `test`, where distro packaging is enabled | The default package plus its full build closure |
 | `.github/workflows/nix.yml` | Version tags and manual dispatch | Every package and devShell the flake exposes for the runner's system |
+
+Smoke NixOS runs only when the CI matrix includes the `release` profile,
+the `all` feature set, the `stable` toolchain and the `x86_64-v1-linux-gnu`
+target. These values select the job. The `smoke-nix` stage builds and runs
+`.#default` with Tuwunel's default features and the flake's compiler. With a
+cache token, it uploads that package and its build closure. The flake's
+`all-features` output is a separate package.
 
 The in-bake pushes are what keep CI fast: they upload build dependencies
 alongside the output, so a later run substitutes the toolchain and RocksDB
