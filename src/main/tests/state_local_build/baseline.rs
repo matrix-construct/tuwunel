@@ -18,6 +18,7 @@ use super::{
 		withheld_frontier_seeds_backfill,
 	},
 	derived::sibling_state_prevs_both_resolve,
+	foreign_room::ancestors_fall_back,
 	helpers::{
 		ExpectedPass, ExpectedWalkOutcome, assert_one_settled_walk, assert_prev_walk,
 		assert_recorded, counter_delta, create_room, create_room_version, held_fork,
@@ -166,6 +167,10 @@ pub(super) async fn enabled_baseline(
 	sibling_state_prevs_both_resolve(services, user_id, &sibling_room)
 		.await
 		.map_err(step(label))?;
+
+	ancestors_fall_back(services, base, token, user_id)
+		.await
+		.map_err(step("foreign ancestors"))?;
 
 	prev_walk_ends(services, base, token, user_id)
 		.await

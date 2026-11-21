@@ -39,6 +39,8 @@ mod derived;
 mod disabled;
 #[expect(dead_code)] // Membership routes are not driven here.
 mod federation;
+#[path = "state_local_build/foreign_room.rs"]
+mod foreign_room;
 #[path = "client/get.rs"]
 mod get;
 #[path = "state_local_build/helpers.rs"]
@@ -57,6 +59,8 @@ mod redelivery;
 mod required_state;
 #[path = "sliding_sync/resume.rs"]
 mod resume;
+#[path = "fixture/sign.rs"]
+mod sign;
 mod sliding_sync;
 #[path = "state_local_build/soft_fail.rs"]
 mod soft_fail;

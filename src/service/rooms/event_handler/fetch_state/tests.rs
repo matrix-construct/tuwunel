@@ -5,7 +5,7 @@ use ruma::{
 use serde_json::{from_str, from_value, json};
 use tuwunel_core::{Error, Result, config::Figment};
 
-use super::{Assembly, StateIdsResponse, distinct};
+use super::{Assembly, StateIdsResponse, distinct, room_state_key};
 use crate::test_utils::{fixture, pdu_json, with_state_key};
 
 #[test]
@@ -24,6 +24,26 @@ fn a_malformed_state_id_fails_the_response() {
 	let response: Result<StateIdsResponse, _> = from_str(r#"{"pdu_ids":["$one","one","$one"]}"#);
 
 	assert!(response.is_err(), "a malformed ID among repeats fails the whole response");
+}
+
+#[test]
+fn a_fetched_state_key_is_scoped_to_its_room() -> Result {
+	let room = room_id!("!one:example.com");
+	let name = pdu_json(
+		event_id!("$name"),
+		room,
+		user_id!("@alice:example.com"),
+		"m.room.name",
+		&json!({ "name": "Room one" }),
+	);
+
+	let pdu = from_value(with_state_key(name, ""))?;
+
+	assert_eq!(room_state_key(&pdu, room)?, "");
+	room_state_key(&pdu, room_id!("!two:example.com"))
+		.expect_err("a state key cannot be taken from another room");
+
+	Ok(())
 }
 
 #[tokio::test]

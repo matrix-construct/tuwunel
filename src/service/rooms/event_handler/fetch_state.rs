@@ -4,7 +4,7 @@ use futures::FutureExt;
 use ruma::{EventId, OwnedEventId, RoomId, RoomVersionId, ServerName, events::StateEventType};
 use serde::Deserialize;
 use tuwunel_core::{Err, Result, debug, debug_warn, err, implement};
-use tuwunel_matrix::Event;
+use tuwunel_matrix::{Event, PduEvent, pdu::check_room_id};
 
 use crate::{
 	fetcher::{Op, Opts},
@@ -108,9 +108,7 @@ async fn assemble_state(
 
 	let mut state: HashMap<ShortStateKey, OwnedEventId> = HashMap::with_capacity(state_vec.len());
 	for (pdu, _) in state_vec {
-		let state_key = pdu
-			.state_key()
-			.ok_or_else(|| err!(Database("Found non-state pdu in state events.")))?;
+		let state_key = room_state_key(&pdu, room_id)?;
 
 		let shortstatekey = self
 			.services
@@ -126,8 +124,7 @@ async fn assemble_state(
 				return Err!(Request(InvalidParam(
 					"State event's type and state_key ({:?},{:?}) exists multiple times.",
 					pdu.event_type(),
-					pdu.state_key()
-						.expect("all state events have state_key"),
+					state_key,
 				)));
 			},
 		}
@@ -160,4 +157,10 @@ fn distinct(mut pdu_ids: Vec<OwnedEventId>) -> (Vec<OwnedEventId>, usize) {
 	let repeated = received.saturating_sub(pdu_ids.len());
 
 	(pdu_ids, repeated)
+}
+
+fn room_state_key<'a>(pdu: &'a PduEvent, room_id: &RoomId) -> Result<&'a str> {
+	check_room_id(pdu, room_id)?;
+	pdu.state_key()
+		.ok_or_else(|| err!(Database("Found non-state pdu in state events.")))
 }

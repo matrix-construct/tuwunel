@@ -6,16 +6,18 @@ use tokio::time::{sleep, timeout};
 use tuwunel_core::{
 	Err, Result, async_noinline, err,
 	ruma::{
-		CanonicalJsonObject, EventId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId, UserId,
+		CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId,
+		RoomId, RoomVersionId, UserId,
 		events::room::{
 			member::{MembershipState, RoomMemberEventContent},
 			message::RoomMessageEventContent,
 			name::RoomNameEventContent,
 		},
+		uint,
 	},
 	utils::{BoolExt, result::NotFound, time::now_secs},
 };
-use tuwunel_database::Interfix;
+use tuwunel_database::{Deserialized, Interfix};
 use tuwunel_matrix::{
 	PduEvent,
 	pdu::{PduBuilder, into_outgoing_federation},
@@ -29,6 +31,8 @@ use tuwunel_service::{
 		short::ShortStateHash,
 	},
 };
+
+use crate::sign::sign;
 
 pub(super) type SignedPdu = (PduEvent, CanonicalJsonObject);
 pub(super) type HeldFork = (PduEvent, PduEvent, PduEvent, CanonicalJsonObject);
@@ -88,6 +92,7 @@ pub(super) enum ExpectedWalkOutcome {
 	Resolved,
 	AllCommitted,
 	Unevaluable,
+	Error,
 }
 
 impl From<Context> for u8 {
@@ -125,6 +130,24 @@ pub(super) async fn held_message_chain(
 		sign_outlier_message(services, user_id, room_id, "corruption top").await?;
 
 	Ok((held, top, top_json))
+}
+
+/// Holds a message older than the room between a new outlier and `frontier`.
+///
+/// The prev walk neither upgrades an event older than the room nor walks below
+/// it, so the local state walk is the first to read `frontier`.
+pub(super) async fn old_held_chain(
+	services: &Services,
+	user_id: &UserId,
+	room_id: &RoomId,
+	frontier: &EventId,
+) -> Result<SignedPdu> {
+	set_forward_extremity(services, room_id, frontier).await;
+
+	let (held, _) = sign_old_outlier_message(services, user_id, room_id, "old held").await?;
+
+	set_forward_extremity(services, room_id, held.event_id.as_ref()).await;
+	sign_outlier_message(services, user_id, room_id, "old held top").await
 }
 
 pub(super) async fn held_state_fork(
@@ -328,6 +351,32 @@ pub(super) async fn assert_no_memo(services: &Services, event_id: &EventId) -> R
 	Ok(())
 }
 
+pub(super) async fn plant_memo(
+	services: &Services,
+	event_id: &EventId,
+	shortstatehash: ShortStateHash,
+) -> Result {
+	let memo = services
+		.db
+		.get("eventid_resolvedstate")
+		.map_err(|error| err!("resolved-state memo map unavailable for {event_id}: {error}"))?;
+
+	memo.raw_aput::<{ size_of::<ShortStateHash>() }, _, _>(event_id.as_bytes(), shortstatehash);
+
+	let stored: ShortStateHash = memo
+		.get(event_id)
+		.await
+		.deserialized()
+		.map_err(|error| err!("resolved-state memo for {event_id} was unreadable: {error}"))?;
+
+	assert_eq!(
+		stored, shortstatehash,
+		"resolved-state memo for {event_id} stored the wrong state hash"
+	);
+
+	Ok(())
+}
+
 pub(super) async fn assert_fetches(
 	services: &Services,
 	room_id: &RoomId,
@@ -454,6 +503,11 @@ fn expected_walk_metrics(outcome: ExpectedWalkOutcome) -> StateLocalMetrics {
 		| ExpectedWalkOutcome::Unevaluable => StateLocalMetrics {
 			walk_attempts: 1,
 			fallback_unevaluable: 1,
+			..StateLocalMetrics::default()
+		},
+		| ExpectedWalkOutcome::Error => StateLocalMetrics {
+			walk_attempts: 1,
+			fallback_error: 1,
 			..StateLocalMetrics::default()
 		},
 	}
@@ -725,6 +779,26 @@ pub(super) async fn sign_outlier_message(
 	body: &str,
 ) -> Result<SignedPdu> {
 	let (pdu, pdu_json) = sign_message(services, user_id, room_id, body).await?;
+
+	services
+		.timeline
+		.add_pdu_outlier(&pdu.event_id, &pdu_json);
+
+	Ok((pdu, pdu_json))
+}
+
+pub(super) async fn sign_old_outlier_message(
+	services: &Services,
+	user_id: &UserId,
+	room_id: &RoomId,
+	body: &str,
+) -> Result<SignedPdu> {
+	let builder = PduBuilder {
+		timestamp: Some(MilliSecondsSinceUnixEpoch(uint!(1))),
+		..PduBuilder::timeline(&RoomMessageEventContent::text_plain(body))
+	};
+
+	let (pdu, pdu_json) = sign(services, user_id, room_id, builder).await?;
 
 	services
 		.timeline

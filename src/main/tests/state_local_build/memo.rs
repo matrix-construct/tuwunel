@@ -1,13 +1,9 @@
-use tuwunel_core::{
-	Result, err,
-	ruma::{EventId, UserId},
-};
-use tuwunel_database::Deserialized;
+use tuwunel_core::{Result, ruma::UserId};
 use tuwunel_service::{Services, rooms::short::ShortStateHash};
 
 use super::helpers::{
 	ExpectedWalkOutcome, append_message, assert_accepts, assert_fetches, assert_no_memo,
-	create_room, held_message_chain, set_forward_extremity, sign_outlier_message,
+	create_room, held_message_chain, plant_memo, set_forward_extremity, sign_outlier_message,
 	suppress_upgrade,
 };
 
@@ -84,30 +80,4 @@ pub(super) async fn walk_memo_failure_is_unevaluable(
 		"walk memo failure",
 	)
 	.await
-}
-
-async fn plant_memo(
-	services: &Services,
-	event_id: &EventId,
-	shortstatehash: ShortStateHash,
-) -> Result {
-	let memo = services
-		.db
-		.get("eventid_resolvedstate")
-		.map_err(|error| err!("resolved-state memo map unavailable for {event_id}: {error}"))?;
-
-	memo.raw_aput::<{ size_of::<ShortStateHash>() }, _, _>(event_id.as_bytes(), shortstatehash);
-
-	let stored: ShortStateHash = memo
-		.get(event_id)
-		.await
-		.deserialized()
-		.map_err(|error| err!("resolved-state memo for {event_id} was unreadable: {error}"))?;
-
-	assert_eq!(
-		stored, shortstatehash,
-		"resolved-state memo for {event_id} stored the wrong state hash"
-	);
-
-	Ok(())
 }
