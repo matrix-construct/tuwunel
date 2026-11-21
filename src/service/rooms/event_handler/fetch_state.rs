@@ -109,11 +109,11 @@ async fn assemble_state(
 	let mut state: HashMap<ShortStateKey, OwnedEventId> = HashMap::with_capacity(state_vec.len());
 	for (pdu, _) in state_vec {
 		let state_key = room_state_key(&pdu, room_id)?;
-
+		let event_type = pdu.event_type().to_cow_str().into();
 		let shortstatekey = self
 			.services
 			.short
-			.get_or_create_shortstatekey(&pdu.kind().to_string().into(), state_key)
+			.get_or_create_shortstatekey(&event_type, state_key)
 			.await;
 
 		match state.entry(shortstatekey) {
