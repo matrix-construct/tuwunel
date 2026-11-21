@@ -29,13 +29,13 @@
 
 | ✅ `yes` | 🟨 `part` | 🟥 `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 298 | 58 | 442 | 312 | 1110 |
+| 299 | 57 | 442 | 312 | 1110 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
-| merged | 194 | 19 | 11 | 57 | 281 |
+| merged | 195 | 18 | 11 | 57 | 281 |
 | open | 68 | 24 | 345 | 181 | 618 |
 | closed | 36 | 15 | 86 | 74 | 211 |
 
@@ -84,7 +84,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4222 | ✅ ● | 95/100 | Adding `state_after` to `/sync` | dialects honored; lazy-loaded state_after carries changed members |
 | MSC4213 | ✅ ● | 90/90 | Remove `server_name` parameter | join/knock use via; server_name still accepted via Ruma fallback |
 | MSC4210 | ✅ ● | 100/100 | Remove legacy mentions | deprecated mention push rules removed at /pushrules read time |
-| MSC4195 | 🟨 ◐ | 10/10 | MatrixRTC Transport using LiveKit Backend | Transport advertisement only; token and leave APIs absent; client media excluded |
+| MSC4195 | ✅ ● | 90/100 | MatrixRTC Transport using LiveKit Backend | Tokens, federation, kicks, webhook, delegation; no rate limit; MAYs dropped |
 | MSC4191 | ✅ ● | 100/100 | Account management for OAuth 2.0 API | all six actions advertised and handled; stable names alias prototypes |
 | MSC4190 | ✅ ● | 100/100 | Device management for application services | 201 on create; M_APPSERVICE_LOGIN_UNSUPPORTED on AS login+register |
 | MSC4189 | ✅ ◐ | 80/100 | Allowing guests to access uploaded media | guest tokens accepted on authenticated media routes |
@@ -296,7 +296,6 @@ for spec compliance.
 | MSC2676 | 🟨 ● | 50/60 | 1.4 | Message editing | edits accepted/relayed; no m.replace bundle or new_content apply |
 | MSC4319 | 🟨 ● | 50/50 | next | Room member events for invite and knock rooms in the `/sync` response | state/mod.rs:464 puts inviter member in stripped state; no `state` key |
 | MSC4551 | 🟨 ◐ | 40/70 | next | Sliding Sync Extensions: Receipts | Receipt delivery exists; initial/rescope gaps. Client application excluded. |
-| MSC4195 | 🟨 ◐ | 10/10 | next | MatrixRTC Transport using LiveKit Backend | Transport advertisement only; token and leave APIs absent; client media excluded |
 | MSC2229 | 🟨 ● | 0/20 | 1.0 | Allowing 3PID Owners to Rebind | [→ MSC2290] owner exemption at 3pid/add only; requestToken still rejects the ... |
 | MSC1759 | 🟥 ◐ | 10/20 | 1.0 | MSC 1759 - Rooms V2 | v2 algorithm in use for v3+; v2 itself not in supported_room_versions |
 | MSC1767 | 🟥 ◐ | 0/0 | next | Extensible events in Matrix | no extensible-events handling; relies on generic event relay |
@@ -319,7 +318,7 @@ in the [Out of scope](#out-of-scope) section.
 |---|---|---:|---|---|
 | MSC4578 | ✅ ◐ | 100/100 | Cross-client Shared Search Indexes of encrypted messages | Account-data passthrough; client indexing and encryption excluded. |
 | MSC4577 | ✅ ◐ | 100/100 | Soundboards for MatrixRTC calls | Account-data passthrough works; client playback and SFU grants excluded. |
-| MSC4576 | 🟥 ● | 0/0 | Only allow data publishing when also allowing audio/video publishing on LiveK... | No LiveKit JWT grant issuance; transport discovery does not satisfy |
+| MSC4576 | 🟥 ● | 0/0 | Only allow data publishing when also allowing audio/video publishing on LiveK... | Native LiveKit tokens omit canPublishData; equal only by LiveKit's default |
 | MSC4574 | 🟥 ● | 0/0 | linked state events | No m.state_content resolution or linked_event delivery |
 | MSC4573 | 🟥 ● | 0/0 | Atomically increasing versioned account data | No versioned account-data API; client conflict resolution excluded. |
 | MSC4569 | ✅ ◐ | 100/100 | Calendar | Room account-data passthrough; client calendar semantics excluded. |
