@@ -28,7 +28,7 @@ use tuwunel_core::{
 };
 use tuwunel_matrix::{
 	Event,
-	pdu::{PduBuilder, PduEvent},
+	pdu::{Content, PduBuilder, PduEvent},
 };
 use tuwunel_service::{Services, profile::check_member_content};
 
@@ -209,6 +209,24 @@ async fn send_state_event_for_key_helper(
 ) -> Result<OwnedEventId> {
 	allowed_to_send_state_event(services, sender, room_id, event_type, state_key, json).await?;
 
+	let pdu = PduBuilder {
+		event_type: event_type.clone().into(),
+		content: Content::from_raw_value(json.json()),
+		state_key: Some(state_key.into()),
+		timestamp,
+		..Default::default()
+	};
+
+	if let Some(invitee) = services.membership.remote_invitee(&pdu) {
+		// The invite takes the room's state lock itself, so this check cannot hold it.
+		check_member_content_size(services, sender, room_id, state_key, json).await?;
+
+		return services
+			.membership
+			.federate_invite(sender, &invitee, room_id, pdu)
+			.await;
+	}
+
 	let state_lock = services.state.mutex.lock(room_id).await;
 
 	if *event_type == StateEventType::RoomMember {
@@ -241,18 +259,7 @@ async fn send_state_event_for_key_helper(
 
 	let event_id = services
 		.timeline
-		.build_and_append_pdu(
-			PduBuilder {
-				event_type: event_type.to_string().into(),
-				content: serde_json::from_str(json.json().get())?,
-				state_key: Some(state_key.into()),
-				timestamp,
-				..Default::default()
-			},
-			sender,
-			room_id,
-			&state_lock,
-		)
+		.build_and_append_pdu(pdu, sender, room_id, &state_lock)
 		.await?;
 
 	Ok(event_id)

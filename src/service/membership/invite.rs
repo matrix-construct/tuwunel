@@ -1,11 +1,12 @@
 use futures::{FutureExt, future::join};
 use ruma::{
-	OwnedServerName, RoomId, UserId,
+	OwnedEventId, OwnedServerName, OwnedUserId, RoomId, UserId,
 	api::{
 		error::ErrorKind,
 		federation::membership::{RawStrippedState, create_invite},
 	},
 	events::{
+		TimelineEventType,
 		invite_permission_config::InvitePermission,
 		room::{
 			join_rules::JoinRule,
@@ -14,10 +15,13 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Result, at, err, implement,
+	Err, Result, async_noinline, at, err, implement,
 	utils::future::{ReadyBoolExt, and4},
 };
-use tuwunel_matrix::{event::gen_event_id_canonical_json, pdu::PduBuilder};
+use tuwunel_matrix::{
+	event::gen_event_id_canonical_json,
+	pdu::{Content, PduBuilder},
+};
 
 use super::Service;
 
@@ -39,8 +43,7 @@ pub async fn invite(
 		self.local_invite(sender_user, user_id, room_id, reason, is_direct)
 			.await?;
 	} else {
-		self.remote_invite(sender_user, user_id, room_id, reason, is_direct)
-			.boxed() // cold arm
+		self.remote_invite(sender_user, user_id, room_id, reason.map(String::as_str), is_direct)
 			.await?;
 	}
 
@@ -101,24 +104,57 @@ async fn remote_invite(
 	sender_user: &UserId,
 	user_id: &UserId,
 	room_id: &RoomId,
-	reason: Option<&String>,
+	reason: Option<&str>,
 	is_direct: bool,
 ) -> Result {
+	let content = RoomMemberEventContent {
+		is_direct,
+		reason: reason.map(ToOwned::to_owned),
+		..RoomMemberEventContent::new(MembershipState::Invite)
+	};
+
+	self.services
+		.profile
+		.fill_content(user_id, content)
+		.map(|content| PduBuilder::state(user_id.as_str(), &content))
+		.then(|invite| self.federate_invite(sender_user, user_id, room_id, invite))
+		.await?;
+
+	Ok(())
+}
+
+/// Invites a user on another server with a member event the caller built.
+///
+/// `user_id` is the event's state key, as `remote_invitee` returns it. The
+/// room's policy server, if any, signs the event, and the invitee's server
+/// countersigns it before it is stored, so a refusal from either fails the call
+/// and stores nothing. The content goes out as built, unknown keys included. The
+/// caller must not hold the room's state lock, which this takes.
+#[implement(Service)]
+// cold arm
+#[async_noinline]
+#[tracing::instrument(
+	name = "federate",
+	level = "debug",
+	skip_all,
+	fields(
+		%sender_user,
+		%room_id,
+		%user_id,
+	)
+)]
+pub async fn federate_invite<'a>(
+	&'a self,
+	sender_user: &'a UserId,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
+	invite: PduBuilder,
+) -> Result<OwnedEventId> {
 	let (pdu, pdu_json, room_version_id) = {
 		let state_lock = self.services.state.mutex.lock(room_id).await;
 
-		let content = self
-			.services
-			.profile
-			.fill_content(user_id, RoomMemberEventContent {
-				is_direct,
-				reason: reason.cloned(),
-				..RoomMemberEventContent::new(MembershipState::Invite)
-			})
-			.await;
-
 		let event = self.services.timeline.create_hash_and_sign_event(
-			PduBuilder::state(user_id.to_string(), &content),
+			invite,
 			sender_user,
 			room_id,
 			&state_lock,
@@ -227,7 +263,23 @@ async fn remote_invite(
 		.send_pdu_room(room_id, &pdu_id)
 		.await?;
 
-	Ok(())
+	Ok(event_id)
+}
+
+/// The invitee of a member event inviting a user on another server.
+///
+/// Such an event goes out through `federate_invite`. Appended directly, it
+/// reaches the invitee's server only in a transaction, which that server drops
+/// while it is not in the room.
+#[implement(Service)]
+pub fn remote_invitee(&self, pdu: &PduBuilder) -> Option<OwnedUserId> {
+	pdu.state_key
+		.as_deref()
+		.filter(|_| pdu.event_type == TimelineEventType::RoomMember)
+		.and_then(|state_key| <&UserId>::try_from(state_key).ok())
+		.filter(|user_id| !self.services.globals.user_is_local(user_id))
+		.filter(|_| is_invite(&pdu.content))
+		.map(ToOwned::to_owned)
 }
 
 #[implement(Service)]
@@ -288,4 +340,12 @@ async fn local_invite(
 	drop(state_lock);
 
 	Ok(())
+}
+
+fn is_invite(content: &Content) -> bool {
+	content
+		.get_field("membership")
+		.ok()
+		.flatten()
+		.is_some_and(|membership: MembershipState| membership == MembershipState::Invite)
 }
