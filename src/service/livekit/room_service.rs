@@ -4,18 +4,25 @@
 //! that follows no redirect and is bounded by a timeout. Only an HTTP 404
 //! carrying Twirp's `not_found` code (a participant LiveKit does not know)
 //! passes through as not found, for callers to tell apart from failure. Every
-//! other failure of a call answering a client is logged here under the
-//! method's name, never with LiveKit's message text, and answers 502 with no
+//! other failure of CreateRoom or RemoveParticipant is logged here under the
+//! method's name, never with LiveKit's message text, and becomes a 502 with no
 //! detail, since LiveKit's own status (a 401 for a wrong key, say) would
-//! mislead a Matrix client. A participant lookup answers no client, so its
-//! failures go back to the poller that asked.
+//! mislead a Matrix client. A participant lookup, which a poller repeats every
+//! few seconds, returns its failures unlogged to the poller that asked.
 
 use std::{borrow::Cow, time::Duration};
 
 use bytes::Bytes;
 use http::StatusCode;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use tuwunel_core::{Err, Error, Result, err, implement, utils::BoolExt, warn};
+use serde::{
+	Deserialize, Serialize,
+	de::{DeserializeOwned, IgnoredAny},
+};
+use tuwunel_core::{
+	Err, Error, Result, err, implement,
+	utils::{BoolExt, time::now_secs},
+	warn,
+};
 use url::{Position, Url};
 
 use super::{Conf, Service, names::Name, token::Grant};
@@ -46,6 +53,10 @@ pub(super) struct Room {
 struct ParticipantIdentity<'a> {
 	room: &'a str,
 	identity: &'a str,
+
+	// Unix seconds; only RemoveParticipant reads it, taking a minute ahead when it is absent.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	revoke_token_ts: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,13 +161,34 @@ pub(super) async fn get_participant(
 	room: &str,
 	identity: &str,
 ) -> Result<Presence> {
-	let request = ParticipantIdentity { room, identity };
+	let request = ParticipantIdentity { room, identity, revoke_token_ts: None };
 	let participant = self
 		.exchange(conf, &conf.get_participant, Grant::room_admin(room), &request)
 		.await
 		.and_then(|(status, body)| answer(status, &body));
 
 	presence(participant)
+}
+
+/// Asks LiveKit to remove a participant from a room, with the current time as
+/// the cutoff for revoking its tokens.
+///
+/// A LiveKit that does not enforce revocation lets the participant reconnect
+/// with a token it still holds. The caller gets a not-found error for a
+/// participant LiveKit does not know; any other failure is logged and becomes
+/// a 502.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn remove_participant(&self, conf: &Conf, room: &str, identity: &str) -> Result {
+	let request = ParticipantIdentity {
+		room,
+		identity,
+		revoke_token_ts: Some(now_secs()),
+	};
+
+	self.call(conf, &conf.remove_participant, Grant::room_admin(room), &request)
+		.await
+		.map(|_: IgnoredAny| ())
 }
 
 /// Posts one RoomService request and reads its answer.

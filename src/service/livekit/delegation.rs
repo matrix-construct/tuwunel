@@ -34,7 +34,7 @@ use super::{
 use crate::delayed_events::{DelayId, Event};
 
 // Random alphanumerics, about 95 bits.
-type Generation = ArrayString<GENERATION_LEN>;
+pub(super) type Generation = ArrayString<GENERATION_LEN>;
 
 // A WebSocket URL of a few dozen bytes.
 type Url = SmallString<[u8; 48]>;
@@ -269,9 +269,17 @@ pub async fn poll_delegations(&self, now: u64) {
 #[implement(Participant)]
 fn from_key(key: Result<(&str, &str)>) -> Option<Self> {
 	let (room, identity) = key
-		.inspect_err(|error| error!(%error, "Unreadable LiveKit delegation key"))
+		.inspect_err(|error| error!(%error, "Unreadable LiveKit participant key"))
 		.ok()?;
 
+	Self::from_names(room, identity)
+}
+
+/// Reads a participant from the room name and identity stored for it.
+///
+/// A room name or identity longer than a name's 43 bytes reads as none.
+#[implement(Participant)]
+pub(super) fn from_names(room: &str, identity: &str) -> Option<Self> {
 	let participant = Self {
 		room: Name::from(room).ok()?,
 		identity: Name::from(identity).ok()?,
@@ -508,7 +516,7 @@ async fn try_delegation(&self, participant: &Participant) -> Result<Option<Recor
 
 #[implement(Participant)]
 #[inline]
-fn key(&self) -> (&str, &str) { (&self.room, &self.identity) }
+pub(super) fn key(&self) -> (&str, &str) { (&self.room, &self.identity) }
 
 #[implement(Service)]
 fn put(&self, participant: &Participant, record: &Record) {

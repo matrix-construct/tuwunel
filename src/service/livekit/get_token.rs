@@ -217,6 +217,8 @@ fn answered(remote: &RumaError, status: StatusCode, errcodes: &[&str]) -> bool {
 }
 
 // lk-jwt-service's wording, for every refusal alike.
-fn forbidden() -> Error { err!(Request(Forbidden("Access to this room is not permitted."))) }
+pub(super) fn forbidden() -> Error {
+	err!(Request(Forbidden("Access to this room is not permitted.")))
+}
 
 fn foreign_url() -> Error { err!(Request(InvalidParam("No token is issued for that url."))) }

@@ -1,5 +1,5 @@
-//! Issues LiveKit access tokens for MatrixRTC calls and follows delegated
-//! leave events (MSC4195).
+//! Issues LiveKit access tokens for MatrixRTC calls, follows delegated leave
+//! events and removes departed users (MSC4195).
 //!
 //! A token admits one call member to the LiveKit room of one call slot. Room
 //! names and participant identities are hashes, so the SFU learns neither the
@@ -7,9 +7,12 @@
 //! RoomService before a token is signed, so a failing SFU yields no token. A
 //! member may also hand this server its delayed leave event, which is kept
 //! alive while LiveKit reports the member connected and sent once it leaves.
+//! When a user leaves a room or is banned from it, the participants this
+//! server recorded issuing it tokens for there are kicked from LiveKit.
 
 mod delegation;
 mod get_token;
+mod kick;
 mod names;
 mod room_service;
 #[cfg(test)]
@@ -19,14 +22,20 @@ mod token;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ruma::{RoomId, UserId};
+use futures::future::join;
+use loole::{Receiver, Sender, unbounded};
+use ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId};
 use tuwunel_core::{
-	Result, err, implement, jwt::EncodingKey, smallstr::SmallString, utils::MutexMap,
+	Result, err, implement,
+	jwt::EncodingKey,
+	smallstr::SmallString,
+	utils::{MutexMap, rand::string_array},
 };
 use tuwunel_database::Map;
 
 use self::{
-	delegation::Participant,
+	delegation::{Generation, Participant},
+	get_token::forbidden,
 	names::{identity, room_name},
 	room_service::Method,
 };
@@ -35,8 +44,10 @@ use crate::{Args, SelfServices, service::make_name};
 // The 15-byte keys `livekit-server generate-keys` prints stay inline.
 type ApiKey = SmallString<[u8; 16]>;
 
-/// Issues LiveKit tokens and follows delegations against the SFU configured
-/// at startup.
+type Departure = (OwnedRoomId, OwnedUserId);
+
+/// Issues LiveKit tokens, follows delegations and kicks departed users on the
+/// SFU configured at startup.
 ///
 /// It keeps the SFU's address and the signing key from the startup
 /// configuration, which a reload cannot change.
@@ -50,12 +61,23 @@ pub struct Service {
 	/// working on that participant.
 	locks: MutexMap<Participant, ()>,
 
+	/// Departures of users issued tokens in the room, for the worker to kick.
+	///
+	/// It is unbounded because a membership update must never wait on LiveKit,
+	/// and dropping a departure when a bounded queue was full would miss a
+	/// kick. An entry is a room and a user ID, queued once per departure of a
+	/// token holder, so a backlog grows only while departures outpace kicks
+	/// whose every RoomService call is bounded by its timeout. The channel
+	/// closes at shutdown, and the departures still queued are dropped.
+	departures: (Sender<Departure>, Receiver<Departure>),
+
 	/// The SFU's connection details, or `None` when native LiveKit is off.
 	conf: Option<Conf>,
 }
 
 struct Data {
 	lkparticipant_delegation: Arc<Map>,
+	roomuserid_lkparticipant: Arc<Map>,
 }
 
 /// Connection details of the configured SFU, fixed for the server's lifetime.
@@ -77,6 +99,10 @@ struct Conf {
 
 	/// RoomService's GetParticipant method, which polling a delegation calls.
 	get_participant: Method,
+
+	/// RoomService's RemoveParticipant method, which a kick calls to remove a
+	/// participant and revoke its tokens.
+	remove_participant: Method,
 }
 
 #[async_trait]
@@ -92,12 +118,14 @@ impl crate::Service for Service {
 
 		let db = Data {
 			lkparticipant_delegation: args.db["lkparticipant_delegation"].clone(),
+			roomuserid_lkparticipant: args.db["roomuserid_lkparticipant"].clone(),
 		};
 
 		let service = Self {
 			services: args.services.clone(),
 			db,
 			locks: MutexMap::new(),
+			departures: unbounded(),
 			conf,
 		};
 
@@ -111,9 +139,15 @@ impl crate::Service for Service {
 			return Ok(());
 		}
 
-		self.delegation_loop().await;
+		join(self.delegation_loop(), self.kick_loop()).await;
 
 		Ok(())
+	}
+
+	async fn interrupt(&self) {
+		let (departures, _) = &self.departures;
+
+		departures.close();
 	}
 
 	fn name(&self) -> &str { make_name(module_path!()) }
@@ -122,8 +156,13 @@ impl crate::Service for Service {
 /// Issues a token admitting a user's call member to the LiveKit room of a
 /// call slot.
 ///
-/// The room is created first, so a failing SFU yields no token. The caller
-/// has checked that the user may join the call.
+/// The room is created first, so a failing SFU yields no token. Once the token
+/// is signed, the participant is recorded for the kick when the user leaves
+/// the room, under a fresh generation, so a kick already under way never
+/// deletes the record. The caller has checked that the user may join the
+/// call; the user must still be joined once the record is written, so if the
+/// user departs meanwhile, either the kick finds the record or this sees the
+/// departure, refuses the token and deletes the record.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 async fn issue_token(
@@ -137,7 +176,28 @@ async fn issue_token(
 	let room = room_name(room_id, slot_id);
 
 	self.create_room(conf, &room).await?;
-	conf.join_token(&identity(user_id, member_id), &room)
+
+	let identity = identity(user_id, member_id);
+	let token = conf.join_token(&identity, &room)?;
+	let generation: Generation = string_array();
+	let key = (room_id, user_id, room.as_str(), identity.as_str(), generation.as_str());
+
+	self.db.roomuserid_lkparticipant.put_raw(key, []);
+
+	// Read after the write, so a departure's kick either finds the record or is seen here.
+	let joined = self
+		.services
+		.state_cache
+		.is_joined(user_id, room_id)
+		.await;
+
+	if !joined {
+		self.db.roomuserid_lkparticipant.del(key);
+
+		return Err(forbidden());
+	}
+
+	Ok(token)
 }
 
 /// Whether native LiveKit is configured.
@@ -175,6 +235,7 @@ impl Conf {
 			key: EncodingKey::from_secret(api_secret.as_bytes()),
 			create_room: Method::new(url, "CreateRoom")?,
 			get_participant: Method::new(url, "GetParticipant")?,
+			remove_participant: Method::new(url, "RemoveParticipant")?,
 		})
 	}
 }

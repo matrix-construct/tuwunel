@@ -463,6 +463,14 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM
 	},
 	Descriptor {
+		name: "roomuserid_lkparticipant",
+		ttl: 60 * 60 * 24 * 7, // a participant connected for longer escapes its kick
+		// A row per token, of about 200 bytes: some 2.7 million, a week at 380,000 a day.
+		// An evicted row escapes its kick, so the cap sits far above organic load.
+		limit_size: 1024 * 1024 * 512,
+		..descriptor::RANDOM_SMALL_CACHE
+	},
+	Descriptor {
 		name: "roomuserid_knockedcount",
 		val_size_hint: Some(8),
 		..descriptor::RANDOM_SMALL

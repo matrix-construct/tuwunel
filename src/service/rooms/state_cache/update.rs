@@ -170,6 +170,12 @@ pub async fn update_membership(
 		| MembershipState::Leave | MembershipState::Ban => {
 			self.handle_leave(room_id, user_id, count).await?;
 
+			#[cfg(feature = "livekit")]
+			self.services
+				.livekit
+				.on_departure(room_id, user_id)
+				.await;
+
 			// A departure drops the room from the account-wide badge total.
 			if self.services.globals.user_is_local(user_id) {
 				self.services
