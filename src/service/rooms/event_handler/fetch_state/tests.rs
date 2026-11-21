@@ -60,19 +60,28 @@ async fn a_repeated_state_id_assembles_and_bad_state_is_refused() -> Result {
 	let joined = event_id!("$joined");
 	let left = event_id!("$left");
 	let other_create = event_id!("$other");
+	let foreign = event_id!("$foreign");
+	let chat = event_id!("$chat");
+	let other_room = room_id!("!other:localhost");
 	let seeds = [
-		(create, "m.room.create", "", json!({})),
-		(other_create, "m.room.create", "", json!({})),
-		(joined, "m.room.member", member, json!({"membership": "join"})),
-		(left, "m.room.member", member, json!({"membership": "leave"})),
+		(create, room_id, "m.room.create", Some(""), json!({})),
+		(other_create, room_id, "m.room.create", Some(""), json!({})),
+		(joined, room_id, "m.room.member", Some(member), json!({"membership": "join"})),
+		(left, room_id, "m.room.member", Some(member), json!({"membership": "leave"})),
+		(foreign, other_room, "m.room.name", Some(""), json!({"name": "other"})),
+		(chat, room_id, "m.room.message", None, json!({"body": "hello"})),
 	];
 
-	for (event_id, kind, state_key, content) in seeds {
-		let event = pdu_json(event_id, room_id, sender, kind, &content);
+	for (event_id, room, kind, state_key, content) in seeds {
+		let event = pdu_json(event_id, room, sender, kind, &content);
+		let event = match state_key {
+			| Some(state_key) => with_state_key(event, state_key),
+			| None => event,
+		};
 
 		services
 			.timeline
-			.add_pdu_outlier(event_id, &from_value(with_state_key(event, state_key))?);
+			.add_pdu_outlier(event_id, &from_value(event)?);
 	}
 
 	let assemble = async |ids: &[&EventId]| {
@@ -139,6 +148,22 @@ async fn a_repeated_state_id_assembles_and_bad_state_is_refused() -> Result {
 			"{error}"
 		);
 	}
+
+	let error = assemble(&[create, foreign])
+		.await
+		.expect_err("an event of another room cannot be this room's state");
+
+	assert_eq!(error.kind(), ErrorKind::InvalidParam, "{error}");
+	assert!(error.message().contains("wrong room"), "{error}");
+
+	let error = assemble(&[create, chat])
+		.await
+		.expect_err("a message cannot be state");
+
+	assert!(
+		matches!(&error, Error::Database(message) if message.contains("non-state pdu")),
+		"{error}"
+	);
 
 	Ok(())
 }
