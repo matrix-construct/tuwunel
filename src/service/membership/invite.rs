@@ -104,7 +104,7 @@ async fn remote_invite(
 	reason: Option<&String>,
 	is_direct: bool,
 ) -> Result {
-	let (pdu, pdu_json, invite_room_state, room_version_id) = {
+	let (pdu, pdu_json, room_version_id) = {
 		let state_lock = self.services.state.mutex.lock(room_id).await;
 
 		let content = self
@@ -129,16 +129,22 @@ async fn remote_invite(
 		let (pdu, pdu_json) = event?;
 		let room_version_id = room_version_id?;
 
-		let invite_room_state = self
-			.services
-			.state
-			.summary_pdus(&pdu, &pdu_json, &room_version_id)
-			.await;
-
-		drop(state_lock);
-
-		(pdu, pdu_json, invite_room_state, room_version_id)
+		(pdu, pdu_json, room_version_id)
 	};
+
+	// MSC4284: the policy server signs before the invitee's server sees the event.
+	let pdu_json = self
+		.services
+		.event_handler
+		.sign_outgoing_pdu(pdu_json, &pdu)
+		.boxed() // size firewall
+		.await?;
+
+	let invite_room_state = self
+		.services
+		.state
+		.summary_pdus(&pdu, &pdu_json, &room_version_id)
+		.await;
 
 	let event = self
 		.services
