@@ -1,8 +1,11 @@
 use ruma::{
-	CanonicalJsonObject, RoomVersionId, event_id,
+	CanonicalJsonObject, RoomVersionId,
+	api::error::ErrorKind,
+	event_id,
 	events::{
 		AnyMessageLikeEvent, AnySyncMessageLikeEvent, AnySyncTimelineEvent, AnyTimelineEvent,
 	},
+	room_id,
 	serde::Raw,
 	user_id,
 };
@@ -10,11 +13,13 @@ use serde_json::{
 	json,
 	value::{RawValue as RawJsonValue, to_raw_value},
 };
+use tuwunel_core::Error;
 
 use super::{Content, Count, DELAY_ID, Pdu, Unsigned, into_outgoing_federation};
 use crate::{
 	Event,
 	event::{STICKY_KEY, STICKY_TTL_KEY, Sticky},
+	room_version::rules,
 };
 
 fn message_pdu() -> Pdu {
@@ -1100,6 +1105,54 @@ fn remove_aggregations_leaves_absent_untouched() {
 
 		assert_eq!(kept.json().get(), unsigned, "rewrote unsigned without aggregations");
 	}
+}
+
+#[test]
+fn incoming_create_keeps_its_room_identity() {
+	let room = room_id!("!create");
+	let event = event_id!("$create");
+	let rules = rules(&RoomVersionId::V12).expect("v12 rules");
+	let create: CanonicalJsonObject = serde_json::from_value(json!({
+		"type": "m.room.create",
+		"sender": "@alice:example.com",
+		"state_key": "",
+		"content": { "room_version": "12" },
+		"prev_events": [],
+		"auth_events": [],
+		"origin_server_ts": 1,
+		"depth": 1,
+		"hashes": { "sha256": "hash" },
+	}))
+	.expect("create event object");
+
+	let (pdu, object) = Pdu::from_object_federation(room, event, create.clone(), &rules)
+		.expect("restore the room ID of its create event");
+
+	assert_eq!(pdu.room_id(), room);
+	assert_eq!(pdu.event_id(), event);
+	assert_eq!(object["room_id"].as_str(), Some(room.as_str()));
+	assert_eq!(object["event_id"].as_str(), Some(event.as_str()));
+
+	let error = Pdu::from_object_federation(room, event_id!("$other"), create.clone(), &rules)
+		.expect_err("only the create event named by the room is valid");
+
+	assert_invalid_param(&error, "is not the create event of");
+
+	let explicit = with_room_id(create, "!explicit:example.com");
+	let error = Pdu::from_object_federation(room, event, explicit, &rules)
+		.expect_err("an explicit room ID must agree with the expected room");
+
+	assert_invalid_param(&error, "in wrong room");
+}
+
+fn assert_invalid_param(error: &Error, fragment: &str) {
+	assert_eq!(error.kind(), ErrorKind::InvalidParam, "{error}");
+	assert!(error.message().contains(fragment), "{error}");
+}
+
+fn with_room_id(mut create: CanonicalJsonObject, room_id: &str) -> CanonicalJsonObject {
+	create.insert("room_id".into(), room_id.into());
+	create
 }
 
 #[test]
