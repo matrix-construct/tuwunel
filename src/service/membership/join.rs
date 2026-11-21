@@ -950,7 +950,7 @@ async fn join_local(
 
 	let room_version_id = self.require_supported_remote_room_version(&make_join_response)?;
 	let room_version_rules = room_version::rules(&room_version_id)?;
-	let (join_event, event_id, _) = self
+	let (join_event, event_id, authoriser) = self
 		.create_join_event(
 			room_id,
 			sender_user,
@@ -961,6 +961,10 @@ async fn join_local(
 			extra_content,
 		)
 		.await?;
+
+	if !self.fallback_authoriser_allowed(authoriser) {
+		return Err(error);
+	}
 
 	let send_join_response = self
 		.execute_send_join(&remote_server, room_id, &event_id, join_event, &room_version_id)
@@ -992,6 +996,17 @@ async fn join_local(
 	drop(federation_lock);
 
 	Ok(())
+}
+
+/// A fallback can obtain remote authority, but cannot grant local authority.
+///
+/// A remote template naming one of this server's users would stand in for
+/// local authority that the failed local attempt never established, so the
+/// caller keeps that attempt's error instead. The authoriser is taken by value
+/// so the caller holds no copy across the send_join round trip.
+#[implement(Service)]
+fn fallback_authoriser_allowed(&self, authoriser: Option<OwnedUserId>) -> bool {
+	authoriser.is_none_or(|user| !self.services.globals.user_is_local(&user))
 }
 
 #[implement(Service)]

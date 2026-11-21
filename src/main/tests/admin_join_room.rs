@@ -11,6 +11,7 @@ use tuwunel_service::Services;
 use self::{
 	client::{Client, register},
 	fixture::boot,
+	restricted::restricted,
 };
 
 mod client;
@@ -18,6 +19,9 @@ mod fixture;
 
 #[path = "client/admin_api.rs"]
 mod admin_api;
+
+#[path = "client/restricted.rs"]
+mod restricted;
 
 const ADMIN_TOKEN: &str = "admin-join-room-admin-access-token";
 const OWNER_TOKEN: &str = "admin-join-room-owner-access-token";
@@ -95,24 +99,6 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	joins(&met_room).await?;
 	joins(&unmet_room).await?;
 	refuses(&weak_room).await
-}
-
-/// A restricted room's `createRoom` body admitting `allowed`'s members.
-///
-/// The initial join rule overrides the `private_chat` preset's, so only
-/// membership of the allowed room lets a user in without an invite.
-fn restricted(allowed: &RoomId) -> Value {
-	json!({
-		"preset": "private_chat",
-		"initial_state": [{
-			"type": "m.room.join_rules",
-			"state_key": "",
-			"content": {
-				"join_rule": "restricted",
-				"allow": [{ "type": "m.room_membership", "room_id": allowed }],
-			},
-		}],
-	})
 }
 
 async fn admin_join(
