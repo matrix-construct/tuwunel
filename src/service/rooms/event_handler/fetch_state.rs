@@ -11,9 +11,21 @@ use crate::{
 	rooms::short::ShortStateKey,
 };
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Deserialize)]
 struct StateIdsResponse {
 	pdu_ids: Vec<OwnedEventId>,
+}
+
+struct Assembly<'a> {
+	origin: &'a ServerName,
+	responder: &'a ServerName,
+	room_id: &'a RoomId,
+	room_version: &'a RoomVersionId,
+	recursion_level: usize,
+	create_event_id: &'a EventId,
 }
 
 /// Call /state_ids to find out what the state at this pdu is. We trust the
@@ -49,6 +61,43 @@ pub(super) async fn fetch_state(
 
 	let StateIdsResponse { pdu_ids } = serde_json::from_slice(&outcome.bytes)
 		.map_err(|e| err!(BadServerResponse("malformed state_ids response: {e}")))?;
+
+	let assembly = Assembly {
+		origin,
+		responder: &outcome.origin,
+		room_id,
+		room_version,
+		recursion_level,
+		create_event_id,
+	};
+
+	self.assemble_state(pdu_ids, assembly)
+		.await
+		.map(Some)
+}
+
+/// Walks each distinct state ID and keys the events by type and state key.
+///
+/// A repeated ID names the same event again, so it is dropped before the walks;
+/// two different events for one type and state key still refuse the state.
+#[implement(super::Service)]
+async fn assemble_state(
+	&self,
+	pdu_ids: Vec<OwnedEventId>,
+	Assembly {
+		origin,
+		responder,
+		room_id,
+		room_version,
+		recursion_level,
+		create_event_id,
+	}: Assembly<'_>,
+) -> Result<HashMap<ShortStateKey, OwnedEventId>> {
+	let (pdu_ids, repeated) = distinct(pdu_ids);
+
+	if repeated > 0 {
+		debug_warn!(%responder, %room_id, repeated, "Dropped repeated state IDs");
+	}
 
 	debug!("Fetching state events");
 	let state_ids = pdu_ids.iter().map(AsRef::as_ref);
@@ -99,5 +148,16 @@ pub(super) async fn fetch_state(
 		return Err!(Database("Incoming event refers to wrong create event."));
 	}
 
-	Ok(Some(state))
+	Ok(state)
+}
+
+fn distinct(mut pdu_ids: Vec<OwnedEventId>) -> (Vec<OwnedEventId>, usize) {
+	let received = pdu_ids.len();
+
+	pdu_ids.sort_unstable();
+	pdu_ids.dedup();
+
+	let repeated = received.saturating_sub(pdu_ids.len());
+
+	(pdu_ids, repeated)
 }
