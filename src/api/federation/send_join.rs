@@ -89,8 +89,8 @@ async fn create_join_event(
 ) -> Result<create_join_event::v2::RoomState> {
 	require_known_room(services, room_id, origin).await?;
 
-	// We need to return the state prior to joining, let's keep a reference to that
-	// here
+	// The response carries this snapshot, taken before the join is handled; a
+	// retry gets the state now, not the state before its original join.
 	let shortstatehash = services
 		.state
 		.get_room_shortstatehash(room_id)
