@@ -3,7 +3,7 @@ use ruma::{
 	user_id,
 };
 use serde_json::{from_str, from_value, json};
-use tuwunel_core::{Result, config::Figment};
+use tuwunel_core::{Error, Result, config::Figment};
 
 use super::{Assembly, StateIdsResponse, distinct};
 use crate::test_utils::{fixture, pdu_json, with_state_key};
@@ -19,8 +19,15 @@ fn state_ids_keep_each_event_once() -> Result {
 	Ok(())
 }
 
+#[test]
+fn a_malformed_state_id_fails_the_response() {
+	let response: Result<StateIdsResponse, _> = from_str(r#"{"pdu_ids":["$one","one","$one"]}"#);
+
+	assert!(response.is_err(), "a malformed ID among repeats fails the whole response");
+}
+
 #[tokio::test]
-async fn a_repeated_state_id_assembles_and_a_conflict_is_refused() -> Result {
+async fn a_repeated_state_id_assembles_and_bad_state_is_refused() -> Result {
 	let Some(fixture) = fixture(Figment::new()).await? else {
 		return Ok(());
 	};
@@ -32,8 +39,10 @@ async fn a_repeated_state_id_assembles_and_a_conflict_is_refused() -> Result {
 	let create = event_id!("$create");
 	let joined = event_id!("$joined");
 	let left = event_id!("$left");
+	let other_create = event_id!("$other");
 	let seeds = [
 		(create, "m.room.create", "", json!({})),
+		(other_create, "m.room.create", "", json!({})),
 		(joined, "m.room.member", member, json!({"membership": "join"})),
 		(left, "m.room.member", member, json!({"membership": "leave"})),
 	];
@@ -46,8 +55,13 @@ async fn a_repeated_state_id_assembles_and_a_conflict_is_refused() -> Result {
 			.add_pdu_outlier(event_id, &from_value(with_state_key(event, state_key))?);
 	}
 
-	let assemble = async |ids: [&EventId; 3]| {
-		let ids = ids.map(ToOwned::to_owned).into();
+	let assemble = async |ids: &[&EventId]| {
+		let ids = ids
+			.iter()
+			.copied()
+			.map(ToOwned::to_owned)
+			.collect();
+
 		let assembly = Assembly {
 			origin: sender.server_name(),
 			responder: sender.server_name(),
@@ -63,7 +77,7 @@ async fn a_repeated_state_id_assembles_and_a_conflict_is_refused() -> Result {
 			.await
 	};
 
-	let state = assemble([create, joined, joined]).await?;
+	let state = assemble(&[create, joined, joined]).await?;
 	let create_key = services
 		.short
 		.get_shortstatekey(&StateEventType::RoomCreate, "")
@@ -76,7 +90,7 @@ async fn a_repeated_state_id_assembles_and_a_conflict_is_refused() -> Result {
 
 	assert_eq!(state, [(create_key, create.to_owned()), (member_key, joined.to_owned())].into());
 
-	let conflict = assemble([create, joined, left])
+	let conflict = assemble(&[create, joined, left])
 		.await
 		.expect_err("two events for one state key cannot both be state");
 
@@ -84,6 +98,27 @@ async fn a_repeated_state_id_assembles_and_a_conflict_is_refused() -> Result {
 
 	assert_eq!(conflict.kind(), ErrorKind::InvalidParam, "{conflict}");
 	assert!(message.contains("exists multiple times"), "{conflict}");
+
+	let repeated_create = assemble(&[create, create, joined]).await?;
+
+	assert_eq!(repeated_create, state);
+
+	let lone_create = assemble(&[create]).await?;
+
+	assert_eq!(lone_create, [(create_key, create.to_owned())].into());
+
+	let without_original_create: [&[&EventId]; 3] = [&[], &[joined], &[other_create, joined]];
+
+	for ids in without_original_create {
+		let error = assemble(ids)
+			.await
+			.expect_err("the state must hold the original create event");
+
+		assert!(
+			matches!(&error, Error::Database(message) if message.contains("wrong create event")),
+			"{error}"
+		);
+	}
 
 	Ok(())
 }
