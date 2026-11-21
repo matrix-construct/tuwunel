@@ -9,6 +9,8 @@ mod get;
 mod keypair;
 mod request;
 mod sign;
+#[cfg(test)]
+mod tests;
 mod verify;
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
@@ -146,7 +148,7 @@ async fn add_signing_keys(&self, new_keys: ServerSigningKeys) {
 		.raw_put(origin, Json(&keys));
 }
 
-/// Checks whether every signature key required by an event is cached.
+/// Checks whether every signature key required by an event is held locally.
 ///
 /// Invalid signature metadata, database errors, and malformed stored key data
 /// all produce `false`; this method never fetches missing keys.
@@ -170,13 +172,19 @@ pub async fn required_keys_exist(
 		.await
 }
 
-/// Checks whether one current or retired verify key is cached for a server.
+/// Checks whether a server's current or retired verify key is held locally.
 ///
-/// The check is based on key-ID presence only and does not evaluate the stored
-/// key document's validity interval. Read or decoding errors produce `false`.
+/// This server's active key counts without a stored copy, as
+/// [`Self::verify_keys_for`] adds it for signature verification. Any other key
+/// counts only when stored, by key ID alone, without evaluating the stored
+/// document's validity interval. Read or decoding errors produce `false`.
 #[implement(Service)]
 pub async fn verify_key_exists(&self, origin: &ServerName, key_id: &ServerSigningKeyId) -> bool {
 	type KeysMap<'a> = BTreeMap<&'a ServerSigningKeyId, &'a RawJsonValue>;
+
+	if self.services.globals.server_is_ours(origin) && self.verify_keys.contains_key(key_id) {
+		return true;
+	}
 
 	let Ok(keys) = self
 		.db

@@ -8,9 +8,7 @@ use tuwunel_matrix::PduEvent;
 
 use crate::{
 	Services,
-	test_utils::{
-		json_events, keyed_fixture, pdu_json, signed_state, with_field, with_state_key,
-	},
+	test_utils::{fixture, json_events, pdu_json, signed_state, with_field, with_state_key},
 };
 
 /// A remote knock records only the room's verified full PDUs and its legacy
@@ -20,7 +18,7 @@ use crate::{
 /// summary claims for a local user is not recorded.
 #[tokio::test]
 async fn a_remote_knock_records_only_its_verified_summary() -> Result {
-	let Some(fixture) = keyed_fixture(Figment::new()).await? else {
+	let Some(fixture) = fixture(Figment::new()).await? else {
 		return Ok(());
 	};
 
@@ -123,7 +121,7 @@ async fn a_remote_knock_records_only_its_verified_summary() -> Result {
 /// Both notification and highlight counts reset without appending an event.
 #[tokio::test]
 async fn a_remote_knock_clears_unread_counts() -> Result {
-	let Some(fixture) = keyed_fixture(Figment::new()).await? else {
+	let Some(fixture) = fixture(Figment::new()).await? else {
 		return Ok(());
 	};
 

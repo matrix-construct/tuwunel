@@ -18,7 +18,7 @@ use tuwunel_matrix::{pdu::PduBuilder, room_version::rules as room_version_rules}
 use super::{Join, merge_member_content};
 use crate::{
 	Services,
-	test_utils::{fixture, keyed_fixture, pdu_id, signed_state, with_field},
+	test_utils::{fixture, pdu_id, signed_state, with_field},
 };
 
 const MAX_BYTES: usize = 4096;
@@ -29,7 +29,7 @@ const MAX_BYTES: usize = 4096;
 /// An event of another room in the same response is not stored.
 #[tokio::test]
 async fn an_altered_send_join_event_is_stored_redacted() -> Result {
-	let Some(fixture) = keyed_fixture(Figment::new()).await? else {
+	let Some(fixture) = fixture(Figment::new()).await? else {
 		return Ok(());
 	};
 
@@ -66,7 +66,7 @@ async fn an_altered_send_join_event_is_stored_redacted() -> Result {
 /// altered content.
 #[tokio::test]
 async fn a_send_join_event_replaces_only_an_altered_outlier() -> Result {
-	let Some(fixture) = keyed_fixture(Figment::new()).await? else {
+	let Some(fixture) = fixture(Figment::new()).await? else {
 		return Ok(());
 	};
 

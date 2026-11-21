@@ -11,7 +11,7 @@ use std::{
 
 use futures::future::ready;
 use ruma::{
-	CanonicalJsonObject, DeviceId, EventId, OwnedEventId, RoomId, RoomVersionId, UInt, UserId,
+	CanonicalJsonObject, DeviceId, EventId, OwnedEventId, RoomId, RoomVersionId, UserId,
 	events::{
 		AnyStrippedStateEvent, StateEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
@@ -38,7 +38,6 @@ use tuwunel_core::{
 	metrics::Metrics,
 	utils::{random_string, sys::command_without_env_prefixes},
 };
-use tuwunel_database::Json;
 use tuwunel_matrix::{PduCount, PduId, RawPduId, event::gen_event_id};
 
 use crate::{
@@ -73,33 +72,6 @@ pub(crate) struct Warnings {
 
 const CHILD_TEST_ENV: &str = "SERVICE_TEST_CHILD";
 const CHILD_DATABASE_ENV: &str = "SERVICE_TEST_DATABASE";
-
-/// Builds a [`fixture`] with this server's verify key stored as a fetched key
-/// would be.
-///
-/// Verification limited to stored keys then accepts this server's signatures,
-/// as it does once a key fetch has stored the key.
-pub(crate) async fn keyed_fixture(config: Figment) -> Result<Option<Fixture>> {
-	Ok(fixture(config)
-		.await?
-		.inspect(|fixture| store_own_verify_key(&fixture.services)))
-}
-
-fn store_own_verify_key(services: &Services) {
-	let server_name = services.globals.server_name();
-	let (key_id, verify_key) = services.server_keys.active_verify_key();
-
-	let keys = json!({
-		"server_name": server_name,
-		"verify_keys": { key_id.as_str(): { "key": verify_key.key } },
-		"old_verify_keys": {},
-		"signatures": {},
-		// The farthest future that canonical JSON's integer range can carry.
-		"valid_until_ts": UInt::MAX,
-	});
-
-	services.db["server_signingkeys"].raw_put(server_name, Json(&keys));
-}
 
 /// Runs the calling test in a child process and builds its services there.
 ///
@@ -224,9 +196,9 @@ pub(crate) fn with_field(mut pdu: JsonValue, key: &str, value: JsonValue) -> Jso
 
 /// Builds a v11 state event signed by this server.
 ///
-/// The event carries a real content hash and signature, so it verifies with the
-/// key [`keyed_fixture`] stores. It is returned in its wire form with its
-/// derived ID.
+/// The event carries a real content hash and signature, so it verifies with
+/// this server's active key. It is returned in its wire form with its derived
+/// ID.
 pub(crate) fn signed_state(
 	services: &Services,
 	room_id: &RoomId,
