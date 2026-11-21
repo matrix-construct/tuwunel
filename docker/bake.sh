@@ -79,9 +79,14 @@ builder_name="${GITHUB_ACTOR:-owo}"
 # nightly to the `rust_toolchains` array as intended. see bake.hcl
 rust_nightly="${rust_nightly:-nightly}"
 
+# Translates 'stable' in `rust_toolchains` to some other value, the moving
+# stable channel by default. Release artifacts build on this toolchain; pin a
+# specific release here the same way as for nightly. see bake.hcl
+rust_stable="${rust_stable:-stable}"
+
 # Translates 'msrv' in `rust_toolchains` to the toolchain pinned in
-# rust-toolchain.toml, for all callers; 'stable' reaches rustup as the moving
-# stable channel. see bake.hcl
+# rust-toolchain.toml, the minimum supported version, for all callers. see
+# bake.hcl
 toolchain_toml="$docker_dir/../rust-toolchain.toml"
 rust_msrv=$(grep "channel = " "$toolchain_toml" | cut -d'=' -f2 | sed 's/\s"\|"$//g')
 

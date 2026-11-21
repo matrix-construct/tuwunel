@@ -54,21 +54,19 @@ target; used for clippy, doc tests, and integration tests.
 
 ## Rust Toolchains
 
-| Toolchain key | Resolved to | Used for |
+| Toolchain | Version | Used for |
 |---|---|---|
-| `nightly` | The current nightly (or a specific nightly in CI) | Default for all builds; required for some flags and `rustfmt` options |
-| `msrv` | The MSRV from `rust-toolchain.toml` | Release packages, Nix smoke test |
-| `stable` | The current stable release | One clippy cell (test profile, all features) |
+| `nightly` | Current nightly unless CI pins a version | Default for `docker/bake.sh`. Some compiler flags and `rustfmt` options require nightly. |
+| `stable` | Current stable release unless CI pins a version | Release binaries, containers, Debian, RPM and Nix packages. CI also runs Clippy, unit, integration and smoke tests on stable. |
+| `msrv` | Minimum supported Rust version from `rust-toolchain.toml` | Clippy, unit and integration tests, and release smoke testing on `x86_64-v1-linux-gnu`. |
 
-The `bake.sh` script reads `rust-toolchain.toml` to resolve `msrv` to the
-project's minimum supported Rust version, ensuring released binaries are always
-built against a pinned toolchain rather than whatever stable happens to be
-current. Nix additionally verifies this with a SHA256 check in `flake.nix`.
+The builder installs the current stable release when it builds the toolchain
+layer. Use `[ci clean-rust]` to refresh it. To pin a version in CI, set the
+`RUST_STABLE` or `RUST_NIGHTLY` repository variable. For `msrv`, `bake.sh`
+reads the version from `rust-toolchain.toml`.
 
-`stable` is the moving stable channel, installed when a builder's toolchain
-layer is built and refreshed with `[ci clean-rust]`. Its one clippy cell
-catches lints that a newer stable adds and that neither the older pin nor
-nightly reports the same way.
+Nix takes its stable compiler from the locked `fenix` input. Update that input
+to advance the Nix toolchain.
 
 
 ## Rust Targets (Cross-compilation)
@@ -145,22 +143,19 @@ testing because it produces faster incremental builds.
 
 ## Matrix Combinations in Practice
 
-The CI does not test every possible combination — the cross-product of all
-dimensions would be in the thousands. Instead, each workflow job selects a slice
-of the matrix appropriate to its task:
+The table shows representative configurations. Each workflow starts with the
+selected matrix and excludes combinations. For example, Clippy skips the
+`bench` profile, and the smoke job skips `stable` and `msrv` for `test` builds.
 
 | Job | Profiles | Feature sets | Toolchains | CPU targets |
 |---|---|---|---|---|
-| `clippy` | test, release, bench | none, default, all | nightly, msrv, stable (one cell) | v1 |
-| `unit` | test | all | nightly | v1 |
-| `bench` | bench | all | nightly | v3 |
-| `memcheck` | bench | all | nightly | v3 |
-| `smoke` | test, release | default, all | nightly | v1, v3 |
-| `rust-sdk-integ` | test, release | all | nightly | v1 |
-| `complement` | test, release | all | nightly | v1 |
-| `binary` (package) | release | default | msrv | v1, v2, v3, v4, aarch64-v8 |
-| `container` (package) | release | default | msrv | v3 |
-| `distro` (package) | release | default | msrv | v1 |
-
-The `test.yml` workflow embeds about 51 explicit exclusions to remove
-combinations that are redundant, impossible, or not worth the resource cost.
+| `clippy` | `test`, `release` | `none`, `default`, `all` | `nightly`, `msrv`, `stable` | `v1` |
+| `unit` | `test` | `all` | `nightly`, `msrv`, `stable` | `v1` |
+| `bench` | `bench` | `all` | `nightly` | `v3` |
+| `memcheck` | `bench` | `all` | `nightly` | `v3` |
+| `smoke` | `test`, `release` | `default`, `all` | `nightly`, `msrv`, `stable` | `v1`, `v3` |
+| `rust-sdk-integ` | `test`, `bench` | `all` | `nightly` | `v1`, `v3` |
+| `complement` | `test`, `bench` | `logging` | `nightly` | `v1`, `v3` |
+| `binary` (package) | `release` | `default` | `stable` | `v1`, `v2`, `v3`, `v4`, `aarch64-v8` |
+| `container` (package) | `release` | `default` | `stable` | `v3` |
+| `distro` (package) | `release` | `default` | `stable` | `v1` |

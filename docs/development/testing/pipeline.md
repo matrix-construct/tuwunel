@@ -74,16 +74,12 @@ inevitably fail on the same error. Only one instance of this is usually run.
 
 #### Clippy (`clippy`)
 
-`cargo clippy` runs with `--deny warnings` — any lint warning is a build
-failure. Crucially, clippy runs for **every combination** of the build matrix:
-all cargo profiles, all feature sets, msrv and nightly toolchains, plus one
-cell on the current stable. This catches warnings that only manifest under
-specific feature combinations or with a specific compiler, which individual
-developers rarely exercise locally.
+`cargo clippy` treats warnings as errors (`-D warnings`). CI checks the
+selected profiles and feature sets on `nightly`, `stable` and `msrv`, subject to
+the matrix exclusions. A warning specific to one feature set or compiler fails
+that job.
 
 - Bake target: `clippy`
-- Policy: zero warnings permitted across all matrix dimensions
-
 
 
 ## 2. Testing Phase
@@ -103,12 +99,12 @@ cheaper jobs passing.
 
 #### Cargo Unit and Integration Tests (`unit`)
 
-`cargo test` runs the module-level unit tests and any crate-associated or
-binary-associated integration. Runs on `test` profile with `all` features
-and `nightly` toolchain.
+The `unit` job runs `cargo test` with the `test` profile and the `all` feature
+set on each selected toolchain (`nightly`, `stable` and `msrv` by default).
+The `unit` Bake target runs unit tests in libraries and binaries. The `integ`
+target runs the integration tests.
 
-- Bake target: `unit`
-- Valgrind variant: `unit-valgrind`
+- Valgrind variant of `unit`: `unit-valgrind`
 
 #### Cargo Benchmarks (`bench`)
 
@@ -143,20 +139,16 @@ requests to reduce costs of scaling public contribution.
 
 #### Nix Smoke Test (`nix`)
 
-This job checks that `nix build` produces a working binary. The Nix build
-also runs Cargo unit tests inside the Nix sandbox. Integration tests cannot
-run there. See [Nix tests](../nix.md#tests) for the sandbox limitations.
+On branch pushes, including pushes to `main` and `test`, this job requires the
+`release` profile, the `all` feature set, the `stable` toolchain and the
+`x86_64-v1-linux-gnu` target in the selected matrix. Pull requests skip it.
 
-The build also checks its inputs:
+The job uses `nix run` to start Tuwunel and run its smoke tests. The build
+uses the stable compiler from the locked `fenix` input and requires all
+dependency Git commits to be reachable from a branch.
 
-- Requires all dependency Git commits to be reachable from a branch
-- Validates that the SHA256 hash in `flake.nix` matches the current
-  `rust-toolchain.toml` version. This catches MSRV bumps where the flake was
-  not updated.
-
-The job runs on branch pushes, `main` and `test` included, when the selected
-matrix includes the `release` profile, the `all` feature set, the `msrv`
-toolchain and the `x86_64-v1-linux-gnu` target. Pull requests skip it.
+The Nix build runs Cargo unit tests inside the sandbox. Integration tests
+cannot run there. See [Nix tests](../nix.md#tests) for the sandbox limitations.
 
 - Bake target: `smoke-nix`
 - Dockerfile: `docker/Dockerfile.nix`
@@ -221,8 +213,8 @@ Builds the Rust API documentation with `cargo doc`. Runs on `release` profile,
 
 #### mdBook (`book`)
 
-Builds this documentation site using [mdBook](https://rust-lang.github.io/mdBook/).
-Runs on `release` profile, `msrv`, `x86_64-v1`.
+CI builds this site with [mdBook](https://rust-lang.github.io/mdBook/) on
+`x86_64-v1` using the `release` profile and the `stable` toolchain.
 
 - Bake target: `book`
 - Output: `/book/`

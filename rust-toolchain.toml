@@ -1,9 +1,11 @@
-# This is the authoritiative configuration of this project's Rust toolchain.
+# This pins the project's minimum supported Rust version. CI lints and tests
+# against it as the `msrv` toolchain; release builds and the Nix flake use the
+# current stable release instead.
 #
 # Other files that need upkeep when this changes:
 #
-# * `Cargo.toml`
-# * `flake.nix`
+# * `Cargo.toml` (`rust-version`)
+# * `flake.nix` (components and targets only)
 #
 # Search in those files for `rust-toolchain.toml` to find the relevant places.
 # If you're having trouble making the relevant changes, bug a maintainer.
