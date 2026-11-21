@@ -7,7 +7,7 @@ mod tests;
 
 use std::{
 	borrow::Cow,
-	collections::{BTreeMap, HashSet},
+	collections::{BTreeMap, BTreeSet, HashSet},
 };
 
 use futures::{
@@ -696,6 +696,9 @@ async fn collect_required_state(
 		unread: unread_keys,
 	} = selection;
 
+	let previous = previous.map(fingerprint_index);
+	let unread = fingerprint_index(unread_keys);
+
 	let lazy = required_state
 		.iter()
 		.any(is_equal_to!(&(StateEventType::RoomMember, "$LAZY".into())));
@@ -773,6 +776,7 @@ async fn collect_required_state(
 			};
 
 			let state_mode = previous
+				.as_ref()
 				.filter(|previous| {
 					!fingerprints_cover(previous, &event_type, state_key.as_str(), sender_user)
 				})
@@ -799,7 +803,7 @@ async fn collect_required_state(
 			let pdu_id = services.timeline.get_pdu_id(&event_id).await.ok();
 			let count = pdu_id.map(RawPduId::pdu_count);
 			let left_unread =
-				fingerprints_cover(unread_keys, &event_type, state_key.as_str(), sender_user);
+				fingerprints_cover(&unread, &event_type, state_key.as_str(), sender_user);
 
 			let comparable = !lazy && !left_unread && state_mode != StateMode::Full;
 
@@ -856,6 +860,8 @@ async fn collect_required_state(
 		.map(|collected| collected.finish(snapshot, unread_keys))
 		.await
 }
+
+fn fingerprint_index(keys: &[u64]) -> BTreeSet<u64> { keys.iter().copied().collect() }
 
 /// The room's current snapshot and the base a delta compares requested state with.
 ///
@@ -930,7 +936,7 @@ fn wildcard_state<'a>(
 /// A fingerprint covers its own key, every key of its type when it is a wildcard,
 /// and the syncing user's key when it is `$ME`.
 fn fingerprints_cover(
-	fingerprints: &[u64],
+	fingerprints: &BTreeSet<u64>,
 	event_type: &StateEventType,
 	state_key: &str,
 	sender_user: &UserId,
