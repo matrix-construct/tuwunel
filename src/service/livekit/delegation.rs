@@ -1,9 +1,10 @@
 //! Follows delegated delayed leave events (MSC4195).
 //!
 //! A call member hands this server the delayed event that announces its
-//! departure. The server polls LiveKit for the member's participant: once it
-//! has connected, the event is restarted well before it falls due, and once
-//! it is gone, the event is sent at once. A participant that never connects is
+//! departure. The server polls LiveKit for the member's participant, and asks
+//! again whenever a webhook reports it joining, leaving or aborting its
+//! connection: once it has connected, the event is restarted well before it
+//! falls due, and once it is gone, the event is sent at once. A participant that never connects is
 //! let go, and its event fires on its own time.
 
 use std::time::{Duration, Instant};
@@ -288,17 +289,26 @@ pub(super) fn from_names(room: &str, identity: &str) -> Option<Self> {
 	Some(participant)
 }
 
-/// Follows one delegation for one poll.
+/// Follows one delegation for one poll, which a webhook about its
+/// participant also runs.
 ///
-/// A delegation made on another SFU, or whose event has ended, is dropped
-/// without asking LiveKit, and one whose event cannot be read is kept for the
-/// next poll. LiveKit is asked with no lock held, so a new delegation never
+/// Polls of one participant run one at a time, so an older answer never acts
+/// after a newer one; nothing runs on a read-only database, which could record
+/// no outcome. A participant without a delegation is left alone. A delegation
+/// made on another SFU, or whose event has ended, is dropped without asking
+/// LiveKit, and one whose event cannot be read is kept for the next poll.
+/// LiveKit is asked without the delegation's lock, so a new delegation never
 /// waits on it; the delegation must then be unchanged under the lock, or the
 /// answer is stale and dropped, and its event is read again before anything
 /// is done.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self, conf))]
-async fn step(&self, conf: &Conf, participant: &Participant, now: u64) {
+pub(super) async fn step(&self, conf: &Conf, participant: &Participant, now: u64) {
+	if self.services.db.is_read_only() {
+		return;
+	}
+
+	let _poll = self.polls.lock(participant).await;
 	let Some(record) = self.delegation(participant).await else {
 		return;
 	};

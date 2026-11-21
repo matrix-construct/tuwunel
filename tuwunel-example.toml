@@ -2756,6 +2756,17 @@
 #     api_key = "APIb3c1e9f07d"
 #     api_secret = "replace-with-the-livekit-api-secret"
 #
+# Then point LiveKit's webhook at this server. Without it, a user who left
+# or was banned from a room can rejoin its call for up to an hour with a
+# token issued before, and a delegated leave waits for the next poll. In
+# LiveKit's configuration, set `webhook.api_key` to this `api_key` and list
+# this server's `/_tuwunel/livekit/webhook` URL in `webhook.urls`:
+#
+#     webhook:
+#       api_key: APIb3c1e9f07d
+#       urls:
+#         - https://matrix.example.com/_tuwunel/livekit/webhook
+#
 # Tips:
 # - Startup refuses a section with only some of the three set, or a `url`
 #   that is not `ws://` or `wss://` or that carries a user name or password.

@@ -23,7 +23,7 @@ use crate::{
 	send_message_event_or_delayed_route, send_state_event_or_delayed_route, sso_callback_route,
 };
 #[cfg(feature = "livekit")]
-use crate::{delegate_delayed_leave_route, get_livekit_token_route};
+use crate::{delegate_delayed_leave_route, get_livekit_token_route, livekit_webhook_route};
 
 /// Builds the client endpoint routes.
 ///
@@ -57,6 +57,7 @@ pub fn build(server: &Server) -> Router<State> {
 		router
 			.ruma_route(&get_livekit_token_route)
 			.ruma_route(&delegate_delayed_leave_route)
+			.route("/_tuwunel/livekit/webhook", post(livekit_webhook_route))
 	} else {
 		router
 	};

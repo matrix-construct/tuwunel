@@ -1,5 +1,5 @@
 //! Issues LiveKit access tokens for MatrixRTC calls, follows delegated leave
-//! events and removes departed users (MSC4195).
+//! events, removes departed users and receives LiveKit's webhooks (MSC4195).
 //!
 //! A token admits one call member to the LiveKit room of one call slot. Room
 //! names and participant identities are hashes, so the SFU learns neither the
@@ -8,7 +8,8 @@
 //! member may also hand this server its delayed leave event, which is kept
 //! alive while LiveKit reports the member connected and sent once it leaves.
 //! When a user leaves a room or is banned from it, the participants this
-//! server recorded issuing it tokens for there are kicked from LiveKit.
+//! server recorded issuing it tokens for there are kicked from LiveKit, and a
+//! webhook reporting one of them joining again has it removed once more.
 
 mod delegation;
 mod get_token;
@@ -18,6 +19,7 @@ mod room_service;
 #[cfg(test)]
 mod tests;
 mod token;
+mod webhook;
 
 use std::sync::Arc;
 
@@ -27,7 +29,7 @@ use loole::{Receiver, Sender, unbounded};
 use ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId};
 use tuwunel_core::{
 	Result, err, implement,
-	jwt::EncodingKey,
+	jwt::{DecodingKey, EncodingKey},
 	smallstr::SmallString,
 	utils::{MutexMap, rand::string_array},
 };
@@ -46,8 +48,11 @@ type ApiKey = SmallString<[u8; 16]>;
 
 type Departure = (OwnedRoomId, OwnedUserId);
 
-/// Issues LiveKit tokens, follows delegations and kicks departed users on the
-/// SFU configured at startup.
+// A token's row in the kick's index: room, user, LiveKit room, identity and generation.
+type Issued<'a> = (&'a RoomId, &'a UserId, &'a str, &'a str, &'a str);
+
+/// Issues LiveKit tokens, follows delegations, kicks departed users and
+/// receives webhooks for the SFU configured at startup.
 ///
 /// It keeps the SFU's address and the signing key from the startup
 /// configuration, which a reload cannot change.
@@ -60,6 +65,16 @@ pub struct Service {
 	/// The map holds an entry only while a delegation request or a poll is
 	/// working on that participant.
 	locks: MutexMap<Participant, ()>,
+
+	/// Makes each poll of a participant act on LiveKit's answer before the next
+	/// poll of it asks.
+	///
+	/// A webhook and the worker may poll the same participant at once. A poll
+	/// holds this across its RoomService call, so a later poll asks only once
+	/// the earlier one has acted; a delegation request never takes it, so it
+	/// never waits on LiveKit. The map holds an entry only while a poll is
+	/// working on that participant.
+	polls: MutexMap<Participant, ()>,
 
 	/// Departures of users issued tokens in the room, for the worker to kick.
 	///
@@ -77,6 +92,7 @@ pub struct Service {
 
 struct Data {
 	lkparticipant_delegation: Arc<Map>,
+	lkparticipant_roomuserid: Arc<Map>,
 	roomuserid_lkparticipant: Arc<Map>,
 }
 
@@ -93,6 +109,9 @@ struct Conf {
 
 	/// Signing key made from the API secret.
 	key: EncodingKey,
+
+	/// Verifying key made from the API secret, for webhook tokens.
+	webhook_key: DecodingKey,
 
 	/// RoomService's CreateRoom method.
 	create_room: Method,
@@ -118,6 +137,7 @@ impl crate::Service for Service {
 
 		let db = Data {
 			lkparticipant_delegation: args.db["lkparticipant_delegation"].clone(),
+			lkparticipant_roomuserid: args.db["lkparticipant_roomuserid"].clone(),
 			roomuserid_lkparticipant: args.db["roomuserid_lkparticipant"].clone(),
 		};
 
@@ -125,6 +145,7 @@ impl crate::Service for Service {
 			services: args.services.clone(),
 			db,
 			locks: MutexMap::new(),
+			polls: MutexMap::new(),
 			departures: unbounded(),
 			conf,
 		};
@@ -157,12 +178,15 @@ impl crate::Service for Service {
 /// call slot.
 ///
 /// The room is created first, so a failing SFU yields no token. Once the token
-/// is signed, the participant is recorded for the kick when the user leaves
-/// the room, under a fresh generation, so a kick already under way never
-/// deletes the record. The caller has checked that the user may join the
-/// call; the user must still be joined once the record is written, so if the
-/// user departs meanwhile, either the kick finds the record or this sees the
-/// departure, refuses the token and deletes the record.
+/// is signed, the participant is recorded twice. One record maps it to the
+/// room and user, for a webhook to check the user's membership when it joins.
+/// The other lists it under the room and user, for the kick when the user
+/// leaves, under a fresh generation so that a kick already under way never
+/// deletes it. The caller has checked that the user may join the call, and
+/// issuance checks the membership again once both records are written. If
+/// the user departed meanwhile, either the kick finds its record or the
+/// recheck sees the departure, refuses the token and deletes the kick's
+/// record.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 async fn issue_token(
@@ -182,7 +206,7 @@ async fn issue_token(
 	let generation: Generation = string_array();
 	let key = (room_id, user_id, room.as_str(), identity.as_str(), generation.as_str());
 
-	self.db.roomuserid_lkparticipant.put_raw(key, []);
+	self.record(key);
 
 	// Read after the write, so a departure's kick either finds the record or is seen here.
 	let joined = self
@@ -198,6 +222,20 @@ async fn issue_token(
 	}
 
 	Ok(token)
+}
+
+/// Records an issued token's participant for both its readers, in one batch.
+///
+/// The webhook's record maps the participant to its room and user, which its
+/// names hash, so every token for it writes the same record. The kick's
+/// record lists the participant under the room and user, one per token.
+#[implement(Service)]
+fn record(&self, key @ (room_id, user_id, room, identity, _): Issued<'_>) {
+	let mut txn = self.services.db.txn();
+
+	txn.put(&self.db.lkparticipant_roomuserid, (room, identity), (room_id, user_id));
+	txn.put_raw(&self.db.roomuserid_lkparticipant, key, []);
+	txn.execute();
 }
 
 /// Whether native LiveKit is configured.
@@ -229,10 +267,13 @@ fn conf(&self) -> Result<&Conf> {
 
 impl Conf {
 	fn new((url, api_key, api_secret): (&str, &str, &str)) -> Result<Self> {
+		let secret = api_secret.as_bytes();
+
 		Ok(Self {
 			url: url.to_owned(),
 			api_key: api_key.into(),
-			key: EncodingKey::from_secret(api_secret.as_bytes()),
+			key: EncodingKey::from_secret(secret),
+			webhook_key: DecodingKey::from_secret(secret),
 			create_room: Method::new(url, "CreateRoom")?,
 			get_participant: Method::new(url, "GetParticipant")?,
 			remove_participant: Method::new(url, "RemoveParticipant")?,

@@ -1,4 +1,5 @@
-use http::{Response, StatusCode};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE};
+use http::{HeaderValue, Response, StatusCode};
 use ruma::{
 	api::{
 		EndpointError,
@@ -10,8 +11,8 @@ use ruma::{
 use serde_json::{Value as JsonValue, json};
 use tuwunel_core::{
 	Error, Result, err,
-	jwt::{Algorithm, DecodingKey, Validation, decode},
-	utils::time::now_secs,
+	jwt::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode},
+	utils::{hash::sha256::hash as sha256, time::now_secs},
 };
 
 use super::{
@@ -21,6 +22,7 @@ use super::{
 	names::{derive, identity, room_name},
 	room_service::{Method, Presence, Room, answer, created, failed, not_created, presence},
 	token::Grant,
+	webhook::{body_digest, signed},
 };
 use crate::delayed_events::Event;
 
@@ -410,6 +412,88 @@ fn unstable_retry_sends_the_unstable_call_slot() {
 			assert_eq!(member_id, &request.member_id);
 		}
 	}
+}
+
+/// A webhook passes only with LiveKit's token over its exact body.
+///
+/// A token without an expiry, not yet valid, or naming its issuer in a list
+/// is refused, and so is a join token, signed with the same key and issuer
+/// but carrying no digest. Every refusal is unauthorized.
+#[test]
+fn webhook_verification() {
+	let conf = conf();
+	let body: &[u8] = br#"{"event":"participant_left"}"#;
+	let other: &[u8] = br#"{"event":"participant_joined"}"#;
+	let digest = body_digest(body);
+	let exp = now_secs().saturating_add(300);
+	let expired = now_secs().saturating_sub(120);
+	let unexpiring = json!({ "iss": "livekit-test-key", "sha256": digest.as_str() });
+	let listed = json!({ "iss": ["livekit-test-key"], "exp": exp, "sha256": digest.as_str() });
+	let early = json!({
+		"iss": "livekit-test-key",
+		"nbf": now_secs().saturating_add(120),
+		"exp": exp,
+		"sha256": digest.as_str(),
+	});
+
+	let url_safe = URL_SAFE.encode(sha256(body));
+	let unpadded = digest.trim_end_matches('=');
+	let valid = webhook_token(SECRET, "livekit-test-key", exp, &digest);
+	let join_token = conf
+		.join_token("participant-identity", "livekit-room")
+		.expect("a join token signs");
+
+	// Python's hashlib and base64 over the same bytes.
+	assert_eq!(digest.as_str(), "G/bZeXmQouW7LMS3pOdk00EQ+eZ3RWhBlE/XRcXyCj0=");
+	assert_ne!(url_safe, digest.as_str());
+	verify(&conf, Some(&valid), body).expect("the valid webhook passes");
+
+	let refused = [
+		(None, body),
+		(Some(valid.clone()), other),
+		(Some(format!("Bearer {valid}")), body),
+		(Some(webhook_token("another-secret", "livekit-test-key", exp, &digest)), body),
+		(Some(webhook_token(SECRET, "another-key", exp, &digest)), body),
+		(Some(webhook_token(SECRET, "livekit-test-key", expired, &digest)), body),
+		(Some(sign(SECRET, &unexpiring)), body),
+		(Some(sign(SECRET, &early)), body),
+		(Some(sign(SECRET, &listed)), body),
+		(Some(webhook_token(SECRET, "livekit-test-key", exp, unpadded)), body),
+		(Some(webhook_token(SECRET, "livekit-test-key", exp, &url_safe)), body),
+		(Some(join_token), body),
+	];
+
+	for (authorization, body) in refused {
+		let error = verify(&conf, authorization.as_deref(), body)
+			.expect_err("a webhook that does not verify is refused");
+
+		assert_eq!(error.status_code(), StatusCode::UNAUTHORIZED, "{authorization:?}");
+	}
+}
+
+fn webhook_token(secret: &str, iss: &str, exp: u64, digest: &str) -> String {
+	let fields = json!({
+		"iss": iss,
+		"nbf": now_secs(),
+		"exp": exp,
+		"sha256": digest,
+	});
+
+	sign(secret, &fields)
+}
+
+fn sign(secret: &str, fields: &JsonValue) -> String {
+	let key = EncodingKey::from_secret(secret.as_bytes());
+
+	encode(&Header::new(Algorithm::HS256), fields, &key).expect("a webhook token signs")
+}
+
+fn verify(conf: &Conf, authorization: Option<&str>, body: &[u8]) -> Result {
+	let header = authorization
+		.map(|token| HeaderValue::from_str(token).expect("a token is a header value"));
+
+	conf.webhook_digest(header.as_ref())
+		.and_then(|digest| signed(&digest, body))
 }
 
 fn remote(status: StatusCode, body: &str) -> Error {
