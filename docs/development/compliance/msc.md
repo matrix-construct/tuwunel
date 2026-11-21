@@ -73,7 +73,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4291 | ✅ ● | 100/100 | Room IDs as hashes of the create event | v12 upgrade create event omits deprecated predecessor.event_id |
 | MSC4289 | ✅ ● | 100/100 | Explicitly privilege room creators | Room v12 creator privilege; complement 22 pass, 0 fail across six named tests |
 | MSC4287 | ✅ ● | 100/100 | Sharing key backup preference between clients | global account-data passthrough (2026-06-22 ruling); m.key_backup round-trips |
-| MSC4284 | ✅ ● | 90/90 | Policy Servers | on by default: /sign, verify, refetch, soft-fail; remote invites skip /sign |
+| MSC4284 | ✅ ● | 90/90 | Policy Servers | on by default: /sign incl. remote invites, verify, refetch, soft-fail |
 | MSC4278 | ✅ ● | 100/100 | Media preview controls | global+room passthrough ok; seeded-value mutability met; no content validation |
 | MSC4277 | ✅ ● | 100/100 | Harmonizing the reporting endpoints | all 3 wired; score removed; user report 200 regardless to deter enumeration |
 | MSC4267 | ✅ ● | 90/100 | Automatically forgetting rooms on leave | auto-forget on Leave/Ban; stable + unstable capability advertised |
