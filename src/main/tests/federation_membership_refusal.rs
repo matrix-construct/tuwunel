@@ -3,6 +3,7 @@
 use std::{fs::remove_dir_all, net::TcpListener, path::PathBuf, time::Duration};
 
 use futures::future::join;
+use reqwest::StatusCode;
 use serde_json::{
 	Value, json,
 	value::{RawValue as RawJsonValue, to_raw_value},
@@ -127,6 +128,11 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert_malformed(services, base, Route::Knock, &room_id, &knock_event).await?;
 	ban(services, &admin, &knocking, &room_id).await?;
 	assert_refused(services, base, Route::Knock, &room_id, &knock_event).await?;
+
+	let replay_room = create_room(services, base, token).await?;
+	let replaying = register(services, "replaying-refusal").await?;
+
+	assert_replay_needs_membership(services, base, &replay_room, &replaying).await?;
 
 	let disabled_room = create_room(services, base, token).await?;
 	let outsider = register(services, "joining-disabled").await?;
@@ -281,6 +287,49 @@ async fn assert_refused(
 	Ok(())
 }
 
+/// A join replayed through `send_join` returns state only while its user is
+/// joined.
+///
+/// The replay finds the join already accepted, so the user's membership now,
+/// not the stored event, decides whether the room's state goes back.
+async fn assert_replay_needs_membership(
+	services: &Services,
+	base: &str,
+	room_id: &RoomId,
+	user_id: &UserId,
+) -> Result {
+	let join_event = prepare(services, user_id, room_id, MembershipState::Join).await?;
+
+	answered(services, base, Route::Join, room_id, &join_event, StatusCode::OK).await?;
+
+	let replay =
+		answered(services, base, Route::Join, room_id, &join_event, StatusCode::OK).await?;
+
+	assert!(
+		replay["state"]
+			.as_array()
+			.is_some_and(|state| !state.is_empty()),
+		"{replay}"
+	);
+
+	let leave_event = prepare(services, user_id, room_id, MembershipState::Leave).await?;
+
+	answered(services, base, Route::Leave, room_id, &leave_event, StatusCode::OK).await?;
+
+	let refusal = forbidden(services, base, Route::Join, room_id, &join_event).await?;
+
+	assert!(
+		refusal["error"]
+			.as_str()
+			.is_some_and(|error| error.contains("no longer joined")),
+		"{refusal}"
+	);
+
+	assert!(refusal["state"].is_null(), "{refusal}");
+
+	Ok(())
+}
+
 /// A join into a room whose federation this server disabled is refused.
 ///
 /// The event names this server as its origin, as a peer's copy of this
@@ -320,12 +369,26 @@ async fn forbidden(
 	room_id: &RoomId,
 	event: &MembershipPdu,
 ) -> Result<Value> {
+	let body = answered(services, base, route, room_id, event, StatusCode::FORBIDDEN).await?;
+
+	assert_eq!(body["errcode"], "M_FORBIDDEN", "{route:?}: {body}");
+
+	Ok(body)
+}
+
+async fn answered(
+	services: &Services,
+	base: &str,
+	route: Route,
+	room_id: &RoomId,
+	event: &MembershipPdu,
+	expected: StatusCode,
+) -> Result<Value> {
 	let (status, body) = route
 		.send(services, base, room_id, &event.event_id, event.pdu.clone())
 		.await?;
 
-	assert_eq!(status, 403, "{route:?}: {body}");
-	assert_eq!(body["errcode"], "M_FORBIDDEN", "{route:?}: {body}");
+	assert_eq!(status, expected.as_u16(), "{route:?}: {body}");
 
 	Ok(body)
 }
