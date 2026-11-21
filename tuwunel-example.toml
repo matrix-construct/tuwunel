@@ -6520,14 +6520,17 @@
 #support_page =
 
 # LiveKit JWT endpoint.
-# Required for Element Call / MatrixRTC (MSC4143).
+#
+# The URL of lk-jwt-service, for Element Call / MatrixRTC (MSC4143).
+# `[global.livekit]` issues tokens without it, though clients that cannot
+# ask this server for a token still need lk-jwt-service.
 #
 # Note: You must also set `client` above to your homeserver URL.
 #
-# This is the setting to use for a LiveKit backend. Clients receive it as
-# a `livekit` transport, listed last: after any `rtc_transports` entries
-# and after the `m.livekit` transport of `[global.livekit]`. MSC4143
-# reads that list as the server's order of preference.
+# Clients receive it as a `livekit` transport, listed last: after any
+# `rtc_transports` entries and after the `m.livekit` transport of
+# `[global.livekit]`. MSC4143 reads that list as the server's order of
+# preference.
 #
 # reloadable: yes
 #
@@ -6535,14 +6538,12 @@
 
 # Custom MatrixRTC transports.
 #
-# If you're looking to setup Element Call / MatrixRTC with Livekit,
-# you should not use this option and instead set `livekit_url`.
-# This is only required if you want to configure a non-livekit MatrixRTC
-# transport. There are no known client implementations that support any
-# other transport types.
-#
-# This option was previously the only way to configure a Livekit
-# transport; for that, use `livekit_url` now.
+# For a LiveKit SFU, `livekit_url` advertises lk-jwt-service and
+# `[global.livekit]` advertises its own transport; add entries here for
+# what those two do not cover. A LiveKit entry with only a `url` sends
+# clients to this server for their token. With `[global.livekit]` set,
+# add a `livekit` entry whose `url` is `livekit.url` for clients that
+# ignore `m.livekit`, such as Element Call 0.28.1 and 0.28.2.
 #
 # Entries are advertised in the order listed here, ahead of the
 # `m.livekit` transport of `[global.livekit]` and the `livekit_url`
@@ -6561,7 +6562,7 @@
 #
 # [[global.well_known.rtc_transports]]
 # type = "livekit"
-# livekit_service_url = "https://livekit.yourdomain.com"
+# url = "wss://livekit.yourdomain.com"
 #
 # reloadable: yes
 #

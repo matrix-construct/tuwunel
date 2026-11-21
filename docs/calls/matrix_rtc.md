@@ -1,29 +1,23 @@
 # MatrixRTC/Element Call Setup
 
-MatrixRTC is the modern Matrix calling framework used by Element Call and
-other recent clients. The media itself is carried by a Selective Forwarding
-Unit (SFU); Tuwunel does not embed an SFU, so an external one is required.
-[Livekit](https://github.com/livekit/livekit) is the SFU implementation
-supported here, paired with the
-[lk-jwt-service](https://github.com/element-hq/lk-jwt-service) which issues
-the access tokens clients use to join Livekit rooms.
+Element Call and other MatrixRTC clients need a separate server to forward
+audio and video between callers. This server is called a selective
+forwarding unit (SFU). This setup uses [Livekit](https://github.com/livekit/livekit)
+as the SFU and [lk-jwt-service](https://github.com/element-hq/lk-jwt-service)
+to issue the access tokens callers need to join a Livekit room. If you
+want Tuwunel to issue the tokens, check which clients support
+[native mode](#native-mode) before you start.
 
-This guide shows you how to deploy MatrixRTC/Element Call using Docker and
-Docker Compose, as Livekit only provides prebuilt Docker images. It is
-possible to run Livekit using their installation script, however this method
-is not supported or recommended.
+Use Docker or Docker Compose to run Livekit. Livekit also offers an
+installation script, but we do not support or recommend that method.
 
-> [!NOTE]
-> In the following documentation, `yourdomain.com` is whatever you have set
-> as `server_name` in your `tuwunel.toml`. This needs to be replaced with the
-> actual domain. It is assumed that you will be hosting MatrixRTC at
-> `matrix-rtc.yourdomain.com`. If you wish to host this service at a
-> different subdomain, this needs to be replaced as well.
+Replace `yourdomain.com` throughout with the `server_name` in your
+`tuwunel.toml`. The examples use `matrix-rtc.yourdomain.com` for Livekit.
+If you choose another subdomain, substitute it wherever that address appears.
 
-> [!NOTE]
-> This guide provides example configuration for Caddy, Nginx, and Traefik
-> reverse proxies. Others can be used, but the configuration will need to be
-> adapted.
+You also need a reverse proxy to forward requests to your calling services.
+Section 5 has examples for Caddy, Nginx, and Traefik. If you use another
+proxy, adapt the routing rules for it.
 
 ## 1. Set Up DNS
 
@@ -452,16 +446,15 @@ Element Call should now be working.
 
 ### Delayed events
 
-Tuwunel supports delayed events with no setup.
+When someone joins a call, Element Call schedules a
+[delayed event](https://github.com/matrix-org/matrix-spec-proposals/pull/4140)
+on the server to remove them from the call. The client postpones the event
+while it stays connected. If the client crashes or loses its connection,
+the event takes effect and the caller drops off the participant list.
+The client can also ask lk-jwt-service, or Tuwunel in
+[native mode](#native-mode), to postpone and send the event on its behalf.
 
-Element Call relies on
-[delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140)
-to remove callers who disappear. When someone joins a call, their client
-schedules their leave on the server and keeps postponing it while the call
-runs. If the client crashes or loses its connection, the postponing stops and
-the server sends the leave, so the caller drops out of the call instead of
-lingering in it. lk-jwt-service can postpone and send that leave on a caller's
-behalf.
+Delayed events work with Tuwunel's default settings.
 
 The limits are in the `[global.rooms.delayed_events]` section of your
 `tuwunel.toml` configuration file.
@@ -473,6 +466,16 @@ The limits are in the `[global.rooms.delayed_events]` section of your
 
 Setting either to `0` disables delayed events and stops advertising them to
 clients, so callers who drop out stay listed in the call.
+
+If anyone uses Element Call `0.28.1` or `0.28.2` in native mode, keep
+`max_delay_s` at `3600` or more. This also applies to Element X releases
+that include those versions. These clients schedule the leave an hour
+ahead. With a lower limit, Tuwunel refuses the leave request and the
+caller joins without a scheduled leave.
+
+Element Call `0.29` and later shorten the delay to fit a lower
+`max_delay_s`. Tuwunel can take over a scheduled leave only if its
+delay is at least 60 seconds.
 
 ### Sticky events
 
@@ -489,6 +492,135 @@ join the room.
 
 Clients renew their membership while a call runs, and the delayed leave
 described above ends it when a client disappears.
+
+### Native mode
+
+Use native mode if you want Tuwunel to issue Livekit tokens. Check which
+clients your callers use before you remove lk-jwt-service. Only clients
+that can ask their Matrix homeserver for a token can use native mode.
+
+| Client | In native mode |
+| --- | --- |
+| Element Call `0.29` and later (from `0.29.0-rc.1`) | Uses the `m.livekit` transport Tuwunel advertises. |
+| Element Call `0.28.1` and `0.28.2`, and Element X `26.11.0` and later in its built-in Element Call | Needs the `livekit` entry from step 2 below. Element X `26.11` releases embed Element Call `0.28.2`. |
+| Element Call `0.28.0` and earlier, Element X before `26.11.0`, and the experimental native calls of Element X for iOS | Cannot use native mode. Element Call and older Element X releases need lk-jwt-service. |
+
+Tuwunel creates each call's Livekit room and gives a token only to a user
+joined to the call's Matrix room. It answers token requests from other
+Matrix servers for their users, and asks other servers for tokens for yours.
+
+Tuwunel records which call participant each token admits. When someone
+leaves a Matrix room or is banned from it, Tuwunel uses those records
+to remove them from calls they joined in that room with its tokens.
+When Livekit tells Tuwunel that a participant has joined a call (step 3),
+Tuwunel uses its records to check whether that caller still belongs to
+the Matrix room. Tuwunel discards the records after about seven days, or
+sooner if a flood of token requests fills the space for them. If the
+record for either check is gone, the participant can stay in the call.
+
+If you also need lk-jwt-service for older clients, read
+[Running both token services](#running-both-token-services) before you start.
+
+Default builds include the `livekit` feature. If your build omits it,
+Tuwunel refuses to start with any of the three `[global.livekit]`
+settings set. Leave that section unset to use lk-jwt-service alone.
+
+To run native mode alone, follow sections 1 through 6 with these changes.
+
+1. Skip the `matrix-rtc-jwt` container in step 2.1 (Docker Compose) or
+   step 6.2 (plain Docker). In section 5, forward every request for
+   `matrix-rtc.yourdomain.com` to Livekit.
+2. Skip section 3. In `tuwunel.toml`, add the settings below. Use your
+   Livekit subdomain in both URLs. Replace `MRTCKEY` and `MRTCSECRET`
+   with the key and secret from `livekit.yaml`. Leave any user name or
+   password out of the `[global.livekit]` `url`. Tuwunel refuses to
+   start if that address contains either.
+
+   ```toml
+   [global.livekit]
+   url = "wss://matrix-rtc.yourdomain.com"
+   api_key = "MRTCKEY"
+   api_secret = "MRTCSECRET"
+
+   [[global.well_known.rtc_transports]]
+   type = "livekit"
+   url = "wss://matrix-rtc.yourdomain.com"
+   ```
+
+   Tuwunel sends clients the WebSocket `url` as written. Clients use it
+   to connect to Livekit. Tuwunel also needs to reach the same address
+   over HTTPS, here `https://matrix-rtc.yourdomain.com`.
+
+   Tuwunel advertises the address as an `m.livekit` transport (calling
+   service) on its `rtc/transports` endpoint and in the `.well-known` file
+   it serves. The extra `livekit` entry is for clients that recognize only
+   that type. Its `url` must exactly match the one in `[global.livekit]`.
+   If you serve `.well-known` yourself, omit the `org.matrix.msc4143.rtc_foci`
+   key from step 3.2. Current clients read Tuwunel's endpoint.
+
+   Check your existing `rtc_transports` entries. Remove any `m.livekit` or
+   `livekit` entry that points to another `url` and has no
+   `livekit_service_url`. Clients that choose it get a `400` error when
+   they ask Tuwunel for a token, and the call fails. Tuwunel warns about
+   these entries at startup and on reload. You can also remove an
+   `m.livekit` entry that repeats Tuwunel's own address.
+
+3. Configure the webhook so Livekit tells Tuwunel when a caller joins or
+   leaves. Add the following to `livekit.yaml` in your MatrixRTC directory.
+   Replace `MRTCKEY` with the same key as in step 2. Use a URL where
+   Livekit can reach Tuwunel.
+
+   ```yaml
+   webhook:
+     api_key: MRTCKEY
+     urls:
+       - https://matrix.yourdomain.com/_tuwunel/livekit/webhook
+   ```
+
+   If Livekit uses host networking and both services run on the same host,
+   you can use `http://127.0.0.1:8008/_tuwunel/livekit/webhook`. If the
+   URL goes through a reverse proxy, it must forward `/_tuwunel/` to
+   Tuwunel.
+
+   > [!WARNING]
+   > Without the webhook, someone who leaves a Matrix room or is banned
+   > can use an earlier token to rejoin its call for up to an hour.
+   > Tuwunel also waits until its next check with Livekit before sending
+   > a leave on a caller's behalf.
+
+4. Restart Livekit and Tuwunel. Tuwunel refuses a configuration reload
+   that changes `[global.livekit]`. Run the
+   [transport check](#clients-report-that-the-server-has-no-matrixrtc-transport)
+   and look for an `m.livekit` entry with your `url` in `transports`.
+
+If an [application service](#application-service-mode) claims `rtc/livekit`,
+turning on native mode directs its token and delegated leave requests to
+Tuwunel. The startup warning names the affected registration.
+
+Tuwunel follows only the Livekit server its `url` names. If you move
+native mode to another Livekit server, let the calls on the old one end
+before you shut it down. Tuwunel no longer removes departed users from
+those calls, and a caller's delegated leave there is sent only when its
+own delay runs out.
+
+#### Running both token services
+
+Older clients need lk-jwt-service to join. If you run it alongside
+native mode on the same Livekit server, use lk-jwt-service `v0.10.0`
+or later. Earlier versions use a different name for the same call and
+put callers in separate Livekit rooms. Even with a compatible version,
+older clients receive no audio or video from callers in native mode,
+whose clients announce a transport the older clients do not read.
+
+Follow sections 1 through 6 in full, including the lk-jwt-service
+container and its proxy routes. Keep the `livekit_url` setting and
+discovery configuration from section 3. Add the TOML settings shown in
+native mode step 2, then follow steps 3 and 4 to configure the webhook,
+restart both servers, and check the result.
+
+Tuwunel lists custom `rtc_transports` entries first,
+then its own `m.livekit` transport, then `livekit_url`. Newer clients
+can still use native mode.
 
 ### Application service mode
 
@@ -900,10 +1032,10 @@ again once the script has restarted Livekit.
 
 Element X and Element Call read the server's transports from the
 `rtc/transports` endpoint (step 3). Tuwunel builds the list from
-`livekit_url` and `[[global.well_known.rtc_transports]]` in
-`tuwunel.toml`, listing custom entries first.
+`[[global.well_known.rtc_transports]]`, `[global.livekit]` and
+`livekit_url` in `tuwunel.toml`, in that order.
 
-With neither set, the endpoint answers with an empty list and those
+With none of them set, the endpoint answers with an empty list and those
 clients report that no transport is available, even when
 `.well-known/matrix/client` carries a correct
 `org.matrix.msc4143.rtc_foci` key. This is the usual cause when
@@ -917,10 +1049,11 @@ your access token. A request without a token returns `M_MISSING_TOKEN`.
 curl -s -H "Authorization: Bearer $TOKEN" https://matrix.yourdomain.com/_matrix/client/v1/rtc/transports
 ```
 
-An empty `transports` array means neither `livekit_url` nor custom
-transports are configured. Set `livekit_url` as in step 3.1 and restart
-Tuwunel. Run the command again and check that `transports` includes your
-`livekit_service_url`.
+If `transports` is empty, set `livekit_url` as in step 3.1 for
+lk-jwt-service, or configure `[global.livekit]` for
+[native mode](#native-mode). Restart Tuwunel and run the command again.
+For lk-jwt-service, look for your `livekit_service_url` in `transports`.
+For native mode, look for `m.livekit` with your Livekit `url`.
 
 ### Element X fails every call with `OPEN_ID_ERROR`
 
