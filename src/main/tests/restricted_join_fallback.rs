@@ -17,7 +17,10 @@ use axum::{
 use serde_json::{Value, json};
 use tuwunel_core::{
 	Result,
-	ruma::{OwnedServerName, OwnedUserId, RoomId, ServerName, UserId},
+	ruma::{
+		OwnedServerName, OwnedUserId, RoomId, ServerName, UserId,
+		events::room::member::{MembershipState, RoomMemberEventContent},
+	},
 };
 use tuwunel_service::Services;
 
@@ -48,7 +51,7 @@ const STUB_OPTIONS: [&str; 2] = [
 	"network.http.ip_range_denylist=[]",
 ];
 
-/// A resident server whose join template names one authoriser.
+/// A resident server whose join template names one authoriser, or none.
 ///
 /// It answers a make_join with its template and any other request with an
 /// empty success, and notes whether a make_join or a send_join ever reached it.
@@ -63,9 +66,9 @@ struct Resident {
 ///
 /// The join reaches a remote resident only after this server refused it, and a
 /// template naming a local user as its authoriser ends it with that refusal,
-/// unchanged, before any send_join. A template one of the resident's own users
-/// authorises is still sent back as a send_join, which shows the stub sees one
-/// when it comes.
+/// unchanged, before any send_join. A template naming one of the resident's
+/// own users, or no authoriser at all, is still sent back as a send_join, which
+/// shows the stub sees one when it comes.
 #[test]
 fn local_authority_stays_out_of_remote_join_fallbacks() -> Result {
 	boot("restricted-join-fallback", STUB_OPTIONS, exercise)
@@ -83,10 +86,12 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	let room_id = owner.create_room(&restricted(&allowed)).await?;
-	let (local_authority, _local_stub) = resident(services, |_| Ok(alice)).await?;
+	let (local_authority, _local_stub) = resident(services, |_| Ok(Some(alice))).await?;
 	let (remote_authority, _remote_stub) =
-		resident(services, |name| Ok(UserId::parse_with_server_name("member", name)?)).await?;
+		resident(services, |name| Ok(Some(UserId::parse_with_server_name("member", name)?)))
+			.await?;
 
+	let (no_authority, _no_stub) = resident(services, |_| Ok(None)).await?;
 	let refusal = join(&joiner, &room_id, None).await?;
 	let fallback = join(&joiner, &room_id, Some(&local_authority.name)).await?;
 
@@ -109,10 +114,18 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		"a join the resident's own user authorised was not sent"
 	);
 
+	join(&joiner, &room_id, Some(&no_authority.name)).await?;
+
+	assert!(
+		no_authority.send_join.load(Ordering::Relaxed),
+		"a join naming no authoriser was not sent"
+	);
+
 	Ok(())
 }
 
-/// Starts a resident whose template names the authoriser chosen for its name.
+/// Starts a resident whose template names the authoriser chosen for its name,
+/// if any.
 ///
 /// Its server name is the listener's loopback address. The template carries
 /// only what building the join needs, in the room version rooms here default
@@ -122,19 +135,20 @@ async fn resident<Authoriser>(
 	authoriser: Authoriser,
 ) -> Result<(Arc<Resident>, Stub)>
 where
-	Authoriser: FnOnce(&ServerName) -> Result<OwnedUserId>,
+	Authoriser: FnOnce(&ServerName) -> Result<Option<OwnedUserId>>,
 {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let name = ServerName::parse(format!("127.0.0.1:{}", listener.local_addr()?.port()))?;
-	let authoriser = authoriser(&name)?;
+	let content = RoomMemberEventContent {
+		join_authorized_via_users_server: authoriser(&name)?,
+		..RoomMemberEventContent::new(MembershipState::Join)
+	};
+
 	let template = json!({
 		"room_version": services.server.config.rooms.default_version,
 		"event": {
 			"type": "m.room.member",
-			"content": {
-				"membership": "join",
-				"join_authorised_via_users_server": authoriser,
-			},
+			"content": content,
 			"prev_events": [],
 			"auth_events": [],
 			"depth": 1,
