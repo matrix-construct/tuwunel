@@ -20,7 +20,7 @@ use ruma::{
 };
 use serde::Serialize;
 use serde_json::{Value as JsonValue, from_value, json, to_value};
-use tokio::{process::Command, runtime::Handle};
+use tokio::{process::Command, runtime::Handle, task::coop::unconstrained};
 use tracing::{
 	Level,
 	dispatcher::DefaultGuard,
@@ -358,12 +358,15 @@ pub(crate) fn membership_update<'a>(
 	MembershipUpdate::self_sent(room_id, user_id, content, PduCount::Normal(count))
 }
 
-/// Polls a pinned future once with `waker` and returns the result.
+/// Polls a pinned future once with `waker`, outside tokio's cooperative budget.
 ///
 /// Watch tests poll a subscriber before and after a write to see whether the
-/// write woke it.
+/// write woke it. With the budget spent, a tokio resource would return
+/// `Pending` without registering and have the runtime wake `waker` at its next
+/// yield, which a probe would take for a notification. Wakes from any other
+/// source, the future itself included, still reach `waker`.
 pub(crate) fn poll_once<F: Future>(future: Pin<&mut F>, waker: &Waker) -> Poll<F::Output> {
-	future.poll(&mut Context::from_waker(waker))
+	pin!(unconstrained(future)).poll(&mut Context::from_waker(waker))
 }
 
 /// Asserts that a future waits while a guard is held, then releases the guard
@@ -450,4 +453,50 @@ pub(crate) fn warned(&self, name: &str, value: &str) -> bool {
 
 impl Drop for DatabasePath {
 	fn drop(&mut self) { remove_dir_all(&self.0).ok(); }
+}
+
+mod tests {
+	use std::{
+		pin::pin,
+		sync::{
+			Arc,
+			atomic::{AtomicUsize, Ordering},
+		},
+		task::{Wake, Waker},
+	};
+
+	use tokio::{
+		sync::watch::channel,
+		task::{consume_budget, coop::has_budget_remaining},
+	};
+
+	use super::poll_once;
+
+	#[derive(Default)]
+	struct Wakes(AtomicUsize);
+
+	#[tokio::test]
+	async fn poll_once_registers_a_watch_with_the_budget_spent() {
+		let (sender, mut receiver) = channel(0);
+		let wakes = Arc::new(Wakes::default());
+		let waker = Waker::from(wakes.clone());
+		let mut changed = pin!(receiver.changed()); // first poll reborrows through Pin::as_mut
+
+		while has_budget_remaining() {
+			consume_budget().await;
+		}
+
+		assert!(poll_once(changed.as_mut(), &waker).is_pending());
+		assert!(!has_budget_remaining(), "the probe must leave the spent budget spent");
+
+		sender.send_replace(1);
+		assert_eq!(wakes.0.load(Ordering::SeqCst), 1, "the send must wake the probe");
+		assert!(poll_once(changed, &waker).is_ready());
+	}
+
+	impl Wake for Wakes {
+		fn wake(self: Arc<Self>) { self.wake_by_ref(); }
+
+		fn wake_by_ref(self: &Arc<Self>) { self.0.fetch_add(1, Ordering::SeqCst); }
+	}
 }
