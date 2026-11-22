@@ -292,10 +292,20 @@ async fn handle_admitted<'a>(
 		create_event.ok_or_else(|| err!(Request(NotFound("Room is unknown to this server"))))?;
 
 	let room_version = from_create_event(&create_event)?;
+	let create_event_id = create_event.event_id();
 	let recursion_level = 0;
 
 	let (incoming_pdu, pdu) = self
-		.handle_outlier_pdu(origin, room_id, event_id, pdu, &room_version, recursion_level, false)
+		.handle_outlier_pdu(
+			origin,
+			room_id,
+			event_id,
+			pdu,
+			&room_version,
+			create_event_id,
+			recursion_level,
+			false,
+		)
 		.await?;
 
 	let (incoming_pdu, pdu) = incoming_pdu.with_built_unsigned(pdu, unsigned)?;
@@ -340,7 +350,6 @@ async fn handle_admitted<'a>(
 
 	self.prev_walk.enter(gapped);
 
-	let create_event_id = create_event.event_id();
 	let upgrade = PrevUpgrade {
 		origin,
 		room_id,
@@ -415,14 +424,36 @@ fn sender(pdu: &CanonicalJsonObject) -> Result<&UserId> {
 /// deleted.
 ///
 /// Only a missing record reads as absent; any other read error is returned
-/// rather than taken for an unknown room.
+/// rather than taken for an unknown room. The create's ID anchors every event
+/// admitted to the room, so a stored create naming another ID than the room's
+/// state does is a storage error.
 #[implement(super::Service)]
 async fn room_create_event(&self, room_id: &RoomId) -> Result<Option<PduEvent>> {
-	self.services
+	let Some(create_id) = self
+		.services
 		.state_accessor
-		.room_state_get(room_id, &StateEventType::RoomCreate, "")
+		.room_state_get_id(room_id, &StateEventType::RoomCreate, "")
 		.map(NotFound::present)
-		.await
+		.await?
+	else {
+		return Ok(None);
+	};
+
+	let Some(create) = self
+		.services
+		.timeline
+		.get_pdu(&create_id)
+		.map(NotFound::present)
+		.await?
+	else {
+		return Ok(None);
+	};
+
+	if create.event_id() != create_id {
+		return Err!(Database("The create event {create_id} of {room_id} names another ID."));
+	}
+
+	Ok(Some(create))
 }
 
 /// Apply a federated leave that rescinds an out-of-band invite for a local

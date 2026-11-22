@@ -102,7 +102,7 @@ async fn assemble_state(
 	debug!("Fetching state events");
 	let state_ids = pdu_ids.iter().map(AsRef::as_ref);
 	let state_vec = self
-		.fetch_auth(origin, room_id, state_ids, room_version, recursion_level)
+		.fetch_auth(origin, room_id, state_ids, room_version, create_event_id, recursion_level)
 		.boxed() // cold arm: federation fallback
 		.await;
 

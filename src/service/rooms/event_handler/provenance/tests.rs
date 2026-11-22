@@ -7,7 +7,7 @@ use ruma::{
 };
 use serde_json::{Value, from_value, json};
 use tokio::time::timeout;
-use tuwunel_core::{Result, config::Figment, err};
+use tuwunel_core::{Error, Result, config::Figment, err};
 use tuwunel_matrix::{PduEvent, room_version::rules as room_version_rules};
 
 use super::{
@@ -169,7 +169,7 @@ async fn the_known_create_is_read_from_current_state() -> Result {
 ///
 /// Another create event for the room is refused before it is stored. An event
 /// whose auth events name a previously stored alternate create is refused too,
-/// and so is an event naming no create.
+/// whether admitted directly or pushed, and so is an event naming no create.
 #[tokio::test]
 async fn an_outlier_must_name_the_known_create() -> Result {
 	let Some(fixture) = fixture(Figment::new()).await? else {
@@ -188,33 +188,77 @@ async fn an_outlier_must_name_the_known_create() -> Result {
 		auth_events: &[&create_id, &join_id],
 	})?;
 
-	let (misnamed_id, misnamed) = state_event(services, room_id, StateEvent {
+	let misnamed = state_event(services, room_id, StateEvent {
 		kind: "m.room.name",
 		state_key: "",
 		content: &json!({ "name": "other" }),
 		auth_events: &[&other_id, &join_id],
 	})?;
 
-	let (unnamed_id, unnamed) = state_event(services, room_id, StateEvent {
+	let unnamed = state_event(services, room_id, StateEvent {
 		kind: "m.room.topic",
 		state_key: "",
 		content: &json!({ "topic": "unnamed" }),
 		auth_events: &[&join_id],
 	})?;
 
-	admit(services, local, room_id, &named_id, named).await?;
+	admit(services, local, room_id, &create_id, &named_id, named).await?;
 
 	assert!(services.timeline.pdu_exists(&named_id).await);
 
-	assert_forbidden(&admit(services, local, room_id, &other_id, other.clone()).await);
+	let another = admit(services, local, room_id, &create_id, &other_id, other.clone()).await;
+
+	assert_forbidden(&another);
 	assert!(!services.timeline.pdu_exists(&other_id).await, "another create is not stored");
 
 	store(services, &StateEventType::RoomCreate, "", &other_id, other).await?;
 
-	for (event_id, event) in [(misnamed_id, misnamed), (unnamed_id, unnamed)] {
-		assert_forbidden(&admit(services, local, room_id, &event_id, event).await);
+	assert_forbidden(&receive(services, local, room_id, misnamed.clone()).await);
+
+	for (event_id, event) in [misnamed, unnamed] {
+		assert_forbidden(&admit(services, local, room_id, &create_id, &event_id, event).await);
 		assert!(!services.timeline.pdu_exists(&event_id).await, "{event_id} is not stored");
 	}
+
+	Ok(())
+}
+
+/// A pushed event is not admitted when the stored create event's ID differs
+/// from the ID in the room's state.
+///
+/// That ID anchors provenance, so the mismatch fails as a storage error rather
+/// than checking events against the stored copy's own ID.
+#[tokio::test]
+async fn a_create_naming_another_id_fails_admission() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room_id = room_id!("!misfiled:localhost");
+	let local = server_name!("localhost");
+	let [(create_id, create), (join_id, join)] = room(services, room_id)?;
+	let (other_id, _) = other_create(services, room_id)?;
+	let misfiled = with_field(create, "event_id", json!(other_id));
+	let create = store_outlier(services, &StateEventType::RoomCreate, "", &create_id, misfiled);
+	let create = create.await?;
+	let join =
+		store(services, &StateEventType::RoomMember, "@bob:localhost", &join_id, join).await?;
+
+	save_room_state(services, room_id, Arc::new([create, join].into())).await?;
+
+	let name = state_event(services, room_id, StateEvent {
+		kind: "m.room.name",
+		state_key: "",
+		content: &json!({ "name": "misfiled" }),
+		auth_events: &[&create_id, &join_id],
+	})?;
+
+	let name_id = name.0.clone();
+	let received = receive(services, local, room_id, name).await;
+
+	assert!(matches!(received, Err(Error::Database(_))), "{received:?}");
+	assert!(!services.timeline.pdu_exists(&name_id).await, "the event is not stored");
 
 	Ok(())
 }
@@ -420,21 +464,23 @@ async fn store(
 	store_outlier(services, kind, state_key, event_id, event).await
 }
 
-/// Admits an event as an outlier of a v11 room.
+/// Admits an event as an outlier of a v11 room against the room's create event.
 ///
 /// Its auth events must already be held, since none are fetched.
 async fn admit(
 	services: &Services,
 	origin: &ServerName,
 	room_id: &RoomId,
+	create_id: &EventId,
 	event_id: &EventId,
 	event: Value,
 ) -> Result<(PduEvent, CanonicalJsonObject)> {
 	let version = RoomVersionId::V11;
+	let event = from_value(event)?;
 
 	services
 		.event_handler
-		.handle_outlier_pdu(origin, room_id, event_id, from_value(event)?, &version, 0, true)
+		.handle_outlier_pdu(origin, room_id, event_id, event, &version, create_id, 0, true)
 		.await
 }
 

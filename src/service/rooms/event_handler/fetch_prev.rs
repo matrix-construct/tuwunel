@@ -6,7 +6,7 @@ use futures::{
 };
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId,
-	RoomId, RoomVersionId, ServerName, int, uint,
+	int, uint,
 };
 use serde_json::value::RawValue as RawJsonValue;
 use tokio::time::{Instant, timeout_at};
@@ -61,13 +61,13 @@ pub(super) struct PrevFetch {
 )]
 pub(super) async fn fetch_prev<'a, Events>(
 	&self,
-	PrevUpgrade {
+	upgrade @ PrevUpgrade {
 		origin,
 		room_id,
-		event_id: incoming_event_id,
 		room_version,
 		recursion_level,
 		first_normal_ts,
+		create_event_id,
 		..
 	}: PrevUpgrade<'_>,
 	initial_set: Events,
@@ -95,15 +95,7 @@ where
 		.unwrap_or(has_gap);
 
 	has_gap
-		.then_async(|| {
-			self.prefetch_missing_events(
-				origin,
-				room_id,
-				incoming_event_id,
-				room_version,
-				recursion_level,
-			)
-		})
+		.then_async(|| self.prefetch_missing_events(upgrade))
 		.await;
 
 	let mut todo_outlier_stack: FuturesOrdered<_> = initial_set
@@ -125,7 +117,14 @@ where
 		.map_ok(async |event_id| {
 			let events = once(event_id.as_ref());
 			let auth = self
-				.fetch_auth(origin, room_id, events, room_version, recursion_level)
+				.fetch_auth(
+					origin,
+					room_id,
+					events,
+					room_version,
+					create_event_id,
+					recursion_level,
+				)
 				.await;
 
 			(event_id, auth)
@@ -202,6 +201,7 @@ where
 							room_id,
 							once(prev_prev.as_ref()),
 							room_version,
+							create_event_id,
 							recursion_level,
 						)
 						.await;
@@ -296,11 +296,13 @@ where
 #[tracing::instrument(name = "missing", level = "debug", skip_all)]
 async fn prefetch_missing_events(
 	&self,
-	origin: &ServerName,
-	room_id: &RoomId,
-	incoming_event_id: &EventId,
-	room_version: &RoomVersionId,
-	recursion_level: usize,
+	upgrade @ PrevUpgrade {
+		origin,
+		room_id,
+		event_id: incoming_event_id,
+		room_version,
+		..
+	}: PrevUpgrade<'_>,
 ) {
 	let boundary: EventWindow = self
 		.services
@@ -330,9 +332,9 @@ async fn prefetch_missing_events(
 		.into_iter()
 		.stream()
 		.for_each_concurrent(automatic_width(), async |pdu| {
-			self.land_missing_event(origin, room_id, &pdu, room_version, recursion_level)
-				.await
-				.ok();
+			self.land_missing_event(upgrade, &pdu)
+				.map(Result::ok)
+				.await;
 		})
 		.await;
 }
@@ -343,11 +345,15 @@ async fn prefetch_missing_events(
 #[tracing::instrument(name = "land", level = "trace", skip_all)]
 async fn land_missing_event(
 	&self,
-	origin: &ServerName,
-	room_id: &RoomId,
+	PrevUpgrade {
+		origin,
+		room_id,
+		room_version,
+		recursion_level,
+		create_event_id,
+		..
+	}: PrevUpgrade<'_>,
 	pdu: &RawJsonValue,
-	room_version: &RoomVersionId,
-	recursion_level: usize,
 ) -> Result {
 	let value: CanonicalJsonObject = serde_json::from_str(pdu.get())
 		.map_err(|e| err!(BadServerResponse("missing-events pdu is not canonical json: {e}")))?;
@@ -370,6 +376,7 @@ async fn land_missing_event(
 		&event_id,
 		value,
 		room_version,
+		create_event_id,
 		recursion_level,
 		false,
 	))

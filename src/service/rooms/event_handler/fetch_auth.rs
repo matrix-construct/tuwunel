@@ -43,6 +43,7 @@ pub(super) async fn fetch_auth<'a, Events>(
 	room_id: &RoomId,
 	events: Events,
 	room_version: &RoomVersionId,
+	create_event_id: &EventId,
 	recursion_level: usize,
 ) -> Vec<(PduEvent, Option<CanonicalJsonObject>)>
 where
@@ -94,6 +95,7 @@ where
 						&next_id,
 						value.clone(),
 						room_version,
+						create_event_id,
 						expected!(recursion_level + 1),
 						true,
 					));

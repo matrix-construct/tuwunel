@@ -47,6 +47,7 @@ pub(super) async fn handle_outlier_pdu(
 	event_id: &EventId,
 	mut pdu_json: CanonicalJsonObject,
 	room_version: &RoomVersionId,
+	create_event_id: &EventId,
 	recursion_level: usize,
 	auth_events_known: bool,
 ) -> Result<(PduEvent, CanonicalJsonObject)> {
@@ -102,9 +103,7 @@ pub(super) async fn handle_outlier_pdu(
 	let (event, pdu_json) =
 		PduEvent::from_object_federation(room_id, event_id, pdu_json, &room_rules)?;
 
-	let create = self.known_create_id(room_id).await?;
-
-	self.check_event_provenance(&event, &room_rules, create.as_deref())?;
+	self.check_event_provenance(&event, &room_rules, Some(create_event_id))?;
 
 	if !auth_events_known {
 		// 4. fetch any missing auth events doing all checks listed here starting at 1.
@@ -119,6 +118,7 @@ pub(super) async fn handle_outlier_pdu(
 			room_id,
 			event.auth_events(),
 			room_version,
+			create_event_id,
 			recursion_level,
 		))
 		.await;
