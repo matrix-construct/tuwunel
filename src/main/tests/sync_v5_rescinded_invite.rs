@@ -76,6 +76,17 @@ struct History {
 	unreadable: bool,
 }
 
+/// The event a never-member's departure row is replayed onto.
+///
+/// Either way the response must carry the state at the rejection.
+enum Replay {
+	/// A message before the rejection, whose snapshot still holds the invite.
+	Earlier,
+
+	/// A message after the rejection, once history opened to everyone.
+	Later,
+}
+
 /// Each case exercises room history visibility around a rejected invite.
 ///
 /// A change between the legacy snapshot and the `state_after` snapshot gives
@@ -184,7 +195,12 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	accounts.left_visibility(Opened::Renamed).await?;
 	accounts.moved_rejection_keeps_leave().await?;
-	accounts.replayed_rejection_drops_invite().await?;
+	accounts
+		.replayed_rejection(Replay::Earlier)
+		.await?;
+
+	accounts.replayed_rejection(Replay::Later).await?;
+	accounts.legacy_membership().await?;
 
 	accounts.forgotten_member().await?;
 	accounts.recorded_ban_stays_a_ban().await?;
@@ -467,25 +483,44 @@ async fn moved_rejection_keeps_leave(&self) -> Result {
 	Ok(())
 }
 
-/// A never-member's `state_after` never carries their invite when the departure
-/// count names an earlier event.
+/// After an invite rejection, `state_after` uses the snapshot at the rejection.
 ///
-/// That event's snapshot predates the rejection, and no rejection is there to
-/// apply.
+/// A replayed row can name an earlier event, whose snapshot still holds the
+/// invite. It can also name a later one, recorded after history opened to
+/// everyone. Neither takes the place of the rejection and its private snapshot.
 #[implement(Accounts, params = "<'_>")]
 #[tracing::instrument(level = "debug", skip_all)]
-async fn replayed_rejection_drops_invite(&self) -> Result {
+async fn replayed_rejection(&self, onto: Replay) -> Result {
 	let &Self { services, invitee, .. } = self;
 	let owner = &self.inviter_client;
 	let client = &self.invitee_client;
 	let (room_id, before) = self.invited_room().await?;
+	let name = json!({ "name": "before rejection" });
+	let name = owner
+		.put_event(&format!("rooms/{room_id}/state/m.room.name"), &name)
+		.await?;
+
 	let earlier = owner
 		.send_text(&room_id, "earlier", "before rejection")
 		.await?;
 
 	client.act(&room_id, "leave").await?;
 
-	let count = services.timeline.get_pdu_count(&earlier).await?;
+	let leave = self.member_event_id(&room_id, invitee).await?;
+	let replayed = match onto {
+		| Replay::Earlier => earlier,
+		| Replay::Later => {
+			let path = format!("rooms/{room_id}/state/m.room.history_visibility");
+			let content = json!({ "history_visibility": "world_readable" });
+
+			owner.put_event(&path, &content).await?;
+			owner
+				.send_text(&room_id, "later", "after opening")
+				.await?
+		},
+	};
+
+	let count = services.timeline.get_pdu_count(&replayed).await?;
 	let update =
 		membership_update(&room_id, invitee, MembershipState::Leave, count.into_unsigned());
 
@@ -495,18 +530,72 @@ async fn replayed_rejection_drops_invite(&self) -> Result {
 		.await?;
 
 	let query = format!("{before}&full_state=true&org.matrix.msc4222.use_state_after=true");
-	let replayed = client.sync_v3(Some(&query)).await?;
-	let state = state_after_events(&replayed, &room_id);
+	let sync = client.sync_v3(Some(&query)).await?;
+	let state = state_after_events(&sync, &room_id);
+	let member = own_member(state, invitee);
+
+	assert_eq!(member["event_id"], leave.as_str(), "replayed leave: {sync}");
+	assert_eq!(member["content"]["membership"], "leave", "replayed leave: {sync}");
+	assert!(!has_event(state, &name), "replayed visibility: {sync}");
+
+	// Legacy state starts no later than the rejection, even when the timeline
+	// window reaches past it, and then carries the rejection itself.
+	let last_only = json!({ "room": { "timeline": { "limit": 1 } } });
+	let query = format!("{before}&full_state=true&{}", filter_query(&last_only));
+	let legacy = client.sync_v3(Some(&query)).await?;
+	let state = &legacy["rooms"]["leave"][room_id.as_str()]["state"]["events"];
+
+	assert_eq!(own_member(state, invitee)["event_id"], leave.as_str(), "legacy leave: {legacy}");
+	assert!(!has_event(state, &name), "legacy visibility: {legacy}");
+
+	Ok(())
+}
+
+/// A never-member's legacy state carries only the membership the client lacks.
+///
+/// Changing the room's topic after the invite does not make an incremental
+/// sync resend the invite. When the timeline filter excludes membership events,
+/// a full-state sync carries the leave in the room's state.
+#[implement(Accounts, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn legacy_membership(&self) -> Result {
+	let &Self { invitee, .. } = self;
+	let owner = &self.inviter_client;
+	let client = &self.invitee_client;
+	let (room_id, before) = self.invited_room().await?;
+	let topic = json!({ "topic": "between the invite and the rejection" });
+
+	owner
+		.put_event(&format!("rooms/{room_id}/state/m.room.topic"), &topic)
+		.await?;
+
+	client.act(&room_id, "leave").await?;
+
+	let leave = self.member_event_id(&room_id, invitee).await?;
+	let last_only = json!({ "room": { "timeline": { "limit": 1 } } });
+	let query = format!("{before}&{}", filter_query(&last_only));
+	let incremental = client.sync_v3(Some(&query)).await?;
+	let room = &incremental["rooms"]["leave"][room_id.as_str()];
 
 	assert!(
-		replayed["rooms"]["leave"][room_id.as_str()].is_object(),
-		"left room: {replayed}"
+		has_event(&room["timeline"]["events"], &leave),
+		"incremental leave: {incremental}"
 	);
 
-	assert_ne!(
+	assert!(
+		own_member(&room["state"]["events"], invitee).is_null(),
+		"unchanged invite: {incremental}"
+	);
+
+	let members_hidden = json!({ "room": { "timeline": { "not_types": ["m.room.member"] } } });
+	let query = format!("{before}&full_state=true&{}", filter_query(&members_hidden));
+	let filtered = client.sync_v3(Some(&query)).await?;
+	let state = &filtered["rooms"]["leave"][room_id.as_str()]["state"]["events"];
+
+	assert_eq!(
 		own_member(state, invitee)["content"]["membership"],
-		"invite",
-		"replayed invite: {replayed}"
+		"leave",
+		"filtered leave: {filtered}"
 	);
 
 	Ok(())

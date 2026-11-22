@@ -367,13 +367,15 @@ async fn own_departure(
 		.inspect_err(|error| warn!(%room_id, %user_id, %error, "Unreadable own departure event"))
 		.ok()
 		.flatten()
-		.filter(|event| {
-			matches!(
-				event.membership_for(user_id),
-				Some(MembershipState::Leave | MembershipState::Ban)
-			)
-		})
+		.filter(|event| is_departure(event, user_id))
 		.map(|event| event.served_unfolded_to(Some(user_id)))
+}
+
+fn is_departure(event: &PduEvent, user_id: &UserId) -> bool {
+	matches!(
+		event.membership_for(user_id),
+		Some(MembershipState::Leave | MembershipState::Ban)
+	)
 }
 
 /// Builds a minimal leave event for a left room whose state supplies none.

@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use futures::{
-	FutureExt, StreamExt, TryFutureExt,
-	future::{join3, join4},
+	FutureExt, Stream, StreamExt, TryFutureExt,
+	future::{join, join3},
 };
+use itertools::Either;
 use ruma::{
 	OwnedEventId, OwnedRoomId, RoomId, UserId,
 	api::client::{
@@ -11,7 +12,7 @@ use ruma::{
 		sync::sync_events::v3::{LeftRoom, RoomAccountData, StateEvents, Timeline},
 	},
 	events::{
-		AnyRawAccountDataEvent,
+		AnyRawAccountDataEvent, StateEventType,
 		TimelineEventType::*,
 		room::{history_visibility::HistoryVisibility, member::MembershipState},
 	},
@@ -26,7 +27,7 @@ use tuwunel_core::{
 		BoolExt, FutureBoolExt, IterStream, ReadyExt, TryFutureExtExt,
 		future::{ReadyBoolExt, ReadyEqExt},
 		option::OptionExt,
-		result::MapExpect,
+		result::{MapExpect, NotFound},
 		stream::{BroadbandExt, WidebandExt},
 	},
 	warn,
@@ -36,18 +37,69 @@ use tuwunel_matrix::{
 	event::{Matches, trim_event_fields},
 	pdu::{PduCount, PduEvent},
 };
-use tuwunel_service::Services;
+use tuwunel_service::{Services, rooms::short::ShortStateHash};
 
 use super::{
 	super::{
-		load_timeline, own_departure, stand_in_leave, strip_state_unsigned, timeline_prev_batch,
+		is_departure, load_timeline, own_departure, stand_in_leave, strip_state_unsigned,
+		timeline_prev_batch,
 	},
-	StateAfter, StateChangeParams, StateChanges, missing_room_state,
+	StateAfter, StateChangeParams, missing_room_state,
 	state::calculate_state_changes,
 };
 use crate::{ignored_filter, is_empty_account_data_event, with_membership};
 
 type TimelineEventIds = SmallVec<[OwnedEventId; 1]>;
+
+/// Carries the requester's departure and the snapshots its state is judged by.
+///
+/// `after` is the snapshot `state_after` is served from and `left` the one the
+/// legacy field falls back to. For a user who never joined, both refer to the
+/// snapshot recorded before the departure event, and the caller applies that
+/// event.
+struct Departure {
+	once_joined: bool,
+	event: Option<PduEvent>,
+	after: Option<ShortStateHash>,
+	left: Option<ShortStateHash>,
+}
+
+struct LoadParams<'a> {
+	sender_user: &'a UserId,
+	room_id: &'a RoomId,
+	since: u64,
+	horizon: u64,
+	full_state: bool,
+	state_after: StateAfter,
+	filter: &'a FilterDefinition,
+	departure: Option<PduEvent>,
+}
+
+struct DepartureParams<'a> {
+	sender_user: &'a UserId,
+	room_id: &'a RoomId,
+	since: u64,
+	horizon: u64,
+	after_requested: bool,
+	departure: Option<PduEvent>,
+}
+
+struct ServedState {
+	sees_room_state: bool,
+	recorded: Option<ShortStateHash>,
+	full_state: bool,
+	state_after: StateAfter,
+	since: Option<ShortStateHash>,
+	horizon: Option<ShortStateHash>,
+	after: Option<ShortStateHash>,
+}
+
+struct TimelineParams<'a> {
+	sender_user: &'a UserId,
+	filter: &'a FilterDefinition,
+	limit: usize,
+	encrypted: bool,
+}
 
 pub(super) fn collect_rooms<'a>(
 	services: &'a Services,
@@ -138,22 +190,25 @@ async fn handle_left_room(
 
 	let is_banned = services.metadata.is_banned(room_id);
 
-	// Last, so a refusal on the same poll spares its reads.
-	let is_out_of_band = departed_out_of_band(services, room_id, sender_user, since);
+	let refused = forgotten || is_not_found.or2(is_disabled, is_banned).await;
 
-	if forgotten
-		|| is_not_found
-			.or3(is_disabled, is_banned, is_out_of_band)
-			.await
-	{
-		let departure = forgotten
-			.then_async(async || {
-				own_departure(services, room_id, sender_user)
-					.await
-					.map(Event::into_format)
-			})
-			.await
-			.flatten();
+	// Read once: admission judges it, and a never-member's state is anchored on it.
+	let needs_departure = forgotten || !refused;
+	let departure = needs_departure
+		.then_async(|| own_departure(services, room_id, sender_user))
+		.map(Option::flatten)
+		.await;
+
+	if refused || {
+		let membership = departure
+			.as_ref()
+			.and_then(|event| event.membership_for(sender_user));
+
+		departed_out_of_band(services, room_id, membership, since).await
+	} {
+		let departure = departure
+			.filter(|_| forgotten)
+			.map(Event::into_format);
 
 		let event =
 			departure.map_or_else(|| stand_in_leave(services, room_id, sender_user), Ok)?;
@@ -183,8 +238,7 @@ async fn handle_left_room(
 		.map(PduCount::into_unsigned)
 		.unwrap_or(left_count);
 
-	load_left_room(
-		services,
+	load_left_room(services, LoadParams {
 		sender_user,
 		room_id,
 		since,
@@ -192,7 +246,8 @@ async fn handle_left_room(
 		full_state,
 		state_after,
 		filter,
-	)
+		departure,
+	})
 	.await
 }
 
@@ -208,22 +263,21 @@ async fn handle_left_room(
 async fn departed_out_of_band(
 	services: &Services,
 	room_id: &RoomId,
-	sender_user: &UserId,
+	membership: Option<MembershipState>,
 	since: u64,
 ) -> bool {
-	let no_later_event = since != 0
+	let Some(membership) = membership else {
+		return true;
+	};
+
+	membership != MembershipState::Ban
+		&& since != 0
 		&& services
 			.timeline
 			.last_timeline_count(None, room_id, None)
-			.await
 			.inspect_err(|error| warn!(target: "tuwunel_api_client::sync::v3", %room_id, %since, %error, "Unreadable last event count"))
-			.is_ok_and(|last| last <= PduCount::Normal(since));
-
-	own_departure(services, room_id, sender_user)
-		.await
-		.is_none_or(|event| {
-			no_later_event && event.membership_for(sender_user) != Some(MembershipState::Ban)
-		})
+			.map(|last| last.is_ok_and(|last| last <= PduCount::Normal(since)))
+			.await
 }
 
 #[tracing::instrument(
@@ -232,16 +286,18 @@ async fn departed_out_of_band(
 	level = "debug",
 	skip_all
 )]
-#[expect(clippy::too_many_arguments)]
 async fn load_left_room(
 	services: &Services,
-	sender_user: &UserId,
-	room_id: &RoomId,
-	since: u64,
-	horizon: u64,
-	full_state: bool,
-	state_after: StateAfter,
-	filter: &FilterDefinition,
+	LoadParams {
+		sender_user,
+		room_id,
+		since,
+		horizon,
+		full_state,
+		state_after,
+		filter,
+		departure,
+	}: LoadParams<'_>,
 ) -> Result<Option<LeftRoom>> {
 	let initial = since == 0;
 	let timeline_limit: usize = filter
@@ -264,119 +320,71 @@ async fn load_left_room(
 	.await
 	.unwrap_or_default();
 
-	let since_shortstatehash = since
-		.lt(&horizon)
-		.then_async(|| {
-			services
-				.timeline
-				.next_shortstatehash(room_id, PduCount::Normal(since))
-				.ok()
-		})
-		.map(Option::flatten);
-
-	let horizon_shortstatehash = timeline_pdus
-		.first()
-		.map(at!(0))
-		.map_async(|count| {
-			services
-				.timeline
-				.get_shortstatehash(room_id, count)
-				.inspect_err(log_horizon_error)
-				.ok()
-		});
+	let first = timeline_pdus.first().map(at!(0));
+	let snapshots = window_snapshots(services, room_id, since, horizon, first);
 
 	let after_requested = state_after.requested();
-	let positional_after = || {
-		services
-			.timeline
-			.shortstatehash_after(room_id, PduCount::Normal(horizon))
-			.inspect_err(inspect_debug_log)
-	};
+	let departure = resolve_departure(services, DepartureParams {
+		sender_user,
+		room_id,
+		since,
+		horizon,
+		after_requested,
+		departure,
+	});
 
-	// MSC4222 `state_after` describes the state at the leave; a positional lookup
-	// can select another branch's state for a user who never joined.
-	let after_shortstatehash = services
-		.state_cache
-		.once_joined(sender_user, room_id)
-		.then(async |once_joined| {
-			let positional = once_joined && after_requested;
-			let after_shortstatehash = positional.then_async(positional_after).await;
+	let ((since_shortstatehash, horizon_shortstatehash), departure) = join(snapshots, departure)
+		.boxed() // erase region
+		.await;
 
-			(once_joined, after_shortstatehash)
-		});
+	let Departure {
+		once_joined,
+		event: departure,
+		after: after_shortstatehash,
+		left: left_shortstatehash,
+	} = departure;
 
-	let left_shortstatehash = services
-		.timeline
-		.get_shortstatehash(room_id, PduCount::Normal(horizon))
-		.inspect_err(inspect_debug_log)
-		.ok();
+	// A never-member's legacy state starts no later than their departure; a
+	// timeline reaching past it leaves the departure's own snapshot to serve.
+	let starts_in_time = once_joined
+		|| horizon_shortstatehash.is_none()
+		|| starts_by_departure(services, room_id, first, departure.as_ref()).await;
 
-	let (
-		since_shortstatehash,
-		horizon_shortstatehash,
-		(once_joined, after_shortstatehash),
-		left_shortstatehash,
-	) = join4(
-		since_shortstatehash,
-		horizon_shortstatehash,
-		after_shortstatehash,
-		left_shortstatehash,
-	)
-	.boxed() // erase region
-	.await;
+	let horizon_shortstatehash = horizon_shortstatehash.filter(|_| starts_in_time);
 
-	let horizon_shortstatehash = horizon_shortstatehash.flatten();
-	let after_shortstatehash = after_shortstatehash.flat_ok();
-
-	let served_shortstatehash = state_after
+	let recorded_shortstatehash = state_after
 		.snapshot(after_shortstatehash, horizon_shortstatehash)
 		.or(left_shortstatehash);
 
-	// Only a recorded snapshot is judged by its own visibility; current state
-	// standing in for a missing one grants nothing.
-	let sees_room_state = once_joined
-		|| served_shortstatehash
-			.map_async(|shortstatehash| {
-				services
-					.state_accessor
-					.history_visibility(shortstatehash)
-					.eq(&HistoryVisibility::WorldReadable)
-			})
-			.map(Option::unwrap_or_default)
-			.await;
+	let sees_room_state =
+		may_see_room_state(services, once_joined, recorded_shortstatehash).await;
 
-	let served_shortstatehash = match served_shortstatehash {
-		| Some(served_shortstatehash) => served_shortstatehash,
-		| None =>
-			services
-				.state
-				.get_room_shortstatehash(room_id)
-				.map_err(|_| missing_room_state(room_id))
-				.await?,
-	};
-
-	let StateChanges { state_events, .. } =
-		calculate_state_changes(services, sender_user, room_id, StateChangeParams {
-			full_state: full_state || initial,
-			state_after,
-			since_shortstatehash,
-			horizon_shortstatehash,
-			after_shortstatehash,
-			current_shortstatehash: served_shortstatehash,
-			joined_since_last_sync: false,
-			witness: None,
-			include_heroes: true,
-		})
-		.await?;
+	let state_events = served_state(services, sender_user, room_id, ServedState {
+		sees_room_state,
+		recorded: recorded_shortstatehash,
+		full_state: full_state || initial,
+		state_after,
+		since: since_shortstatehash,
+		horizon: horizon_shortstatehash,
+		after: after_shortstatehash,
+	})
+	.await?;
 
 	let is_sender_membership = |event: &PduEvent| {
 		*event.kind() == RoomMember && event.state_key() == Some(sender_user.as_str())
 	};
 
-	// A late notice, or the rejection a never-member's own snapshot precedes.
+	let in_timeline = in_timeline(&timeline_pdus);
+
+	// A never-member's departure applies to `state_after`, and to the legacy field
+	// when the timeline does not send it.
 	let rejected_after = !once_joined && after_requested;
-	let overlaid = since >= horizon || rejected_after;
-	let departure = departure_event(services, sender_user, room_id, horizon, overlaid).await;
+	let departure = departure.filter(|departure| {
+		once_joined
+			|| after_requested
+			|| !in_timeline(departure)
+			|| !filter.room.timeline.matches(departure)
+	});
 
 	let has_departure = departure.is_some();
 
@@ -415,10 +423,7 @@ async fn load_left_room(
 
 	let event_fields = filter.event_fields.as_deref();
 
-	let in_timeline = in_timeline(&timeline_pdus);
-
 	let state_events = state_events
-		.into_iter()
 		.filter(|pdu| !superseded(pdu))
 		.chain(departure)
 		.filter(|pdu| filter.room.state.matches(pdu))
@@ -442,20 +447,14 @@ async fn load_left_room(
 		.as_ref()
 		.map(ToString::to_string);
 
-	let timeline_events = timeline_pdus
-		.into_iter()
-		.stream()
-		.wide_filter_map(|item| ignored_filter(services, item, sender_user))
-		.map(at!(1))
-		.ready_filter(|pdu| filter.room.timeline.matches(pdu))
-		.take(timeline_limit)
-		.wide_then(|pdu| with_membership(services, pdu, sender_user, encrypted))
-		.wide_then(|pdu| {
-			services
-				.pdu_metadata
-				.bundle_aggregations(sender_user, pdu)
-		})
-		.collect::<Vec<_>>();
+	let timeline_events = timeline_events(services, timeline_pdus, TimelineParams {
+		sender_user,
+		filter,
+		limit: timeline_limit,
+		encrypted,
+	})
+	.map(|pdu| trim_event_fields(pdu.into_format(), event_fields))
+	.collect();
 
 	let account_data_events = services
 		.account_data
@@ -475,12 +474,114 @@ async fn load_left_room(
 		timeline: Timeline {
 			prev_batch,
 			limited: limited || timeline_limit == 0,
-			events: timeline_events
-				.into_iter()
-				.map(|pdu| trim_event_fields(pdu.into_format(), event_fields))
-				.collect(),
+			events: timeline_events,
 		},
 	}))
+}
+
+/// Reads the snapshots at the client's position and at the timeline's start.
+///
+/// The first is read only when the client's position precedes the departure,
+/// and the second only when the timeline has a first event.
+async fn window_snapshots(
+	services: &Services,
+	room_id: &RoomId,
+	since: u64,
+	horizon: u64,
+	first: Option<PduCount>,
+) -> (Option<ShortStateHash>, Option<ShortStateHash>) {
+	let since_shortstatehash = since
+		.lt(&horizon)
+		.then_async(|| {
+			services
+				.timeline
+				.next_shortstatehash(room_id, PduCount::Normal(since))
+				.ok()
+		})
+		.map(Option::flatten);
+
+	let first_shortstatehash = first
+		.map_async(|count| {
+			services
+				.timeline
+				.get_shortstatehash(room_id, count)
+				.inspect_err(log_horizon_error)
+				.ok()
+		})
+		.map(Option::flatten);
+
+	join(since_shortstatehash, first_shortstatehash).await
+}
+
+/// Resolves the requester's departure and the snapshots tied to it.
+///
+/// For a former member the departure count selects both snapshots, and the
+/// `state_after` lookup uses the timeline position. For a user who never
+/// joined, the caller supplies the departure it verified in current state, and
+/// both fields use that event's snapshot regardless of any recorded count.
+#[tracing::instrument(level = "trace", skip_all)]
+async fn resolve_departure(
+	services: &Services,
+	DepartureParams {
+		sender_user,
+		room_id,
+		since,
+		horizon,
+		after_requested,
+		departure,
+	}: DepartureParams<'_>,
+) -> Departure {
+	let once_joined = services
+		.state_cache
+		.once_joined(sender_user, room_id)
+		.await;
+
+	if !once_joined {
+		let recorded = |event_id| {
+			services
+				.state
+				.pdu_shortstatehash(event_id)
+				.map(NotFound::present)
+				.inspect_err(move |error| warn!(target: "tuwunel_api_client::sync::v3", %room_id, %event_id, %error, "Unreadable departure snapshot"))
+				.map(|anchor| anchor.ok().flatten())
+		};
+
+		let anchor = departure
+			.as_ref()
+			.map(Event::event_id)
+			.map_async(recorded)
+			.map(Option::flatten)
+			.await;
+
+		return Departure {
+			once_joined,
+			event: departure,
+			after: anchor,
+			left: anchor,
+		};
+	}
+
+	// MSC4222 `state_after` describes the state at the leave.
+	let after = after_requested
+		.then_async(|| {
+			services
+				.timeline
+				.shortstatehash_after(room_id, PduCount::Normal(horizon))
+				.inspect_err(inspect_debug_log)
+		})
+		.map(FlatOk::flat_ok);
+
+	let left = services
+		.timeline
+		.get_shortstatehash(room_id, PduCount::Normal(horizon))
+		.inspect_err(inspect_debug_log)
+		.ok();
+
+	let event = departure_event(services, sender_user, room_id, horizon, since >= horizon);
+
+	let (after, left, event) = join3(after, left, event).await;
+
+	Departure { once_joined, event, after, left }
 }
 
 async fn departure_event(
@@ -503,11 +604,164 @@ async fn departure_event(
 		.await
 }
 
-fn is_departure(event: &PduEvent, sender_user: &UserId) -> bool {
-	matches!(
-		event.membership_for(sender_user),
-		Some(MembershipState::Leave | MembershipState::Ban)
-	)
+/// Reports whether the timeline starts no later than the departure.
+///
+/// An unknown start or departure count reports false.
+async fn starts_by_departure(
+	services: &Services,
+	room_id: &RoomId,
+	first: Option<PduCount>,
+	departure: Option<&PduEvent>,
+) -> bool {
+	let Some((first, event_id)) = first.zip(departure.map(Event::event_id)) else {
+		return false;
+	};
+
+	services
+		.timeline
+		.get_pdu_count(event_id)
+		.map(NotFound::present)
+		.inspect_err(|error| warn!(target: "tuwunel_api_client::sync::v3", %room_id, %event_id, %error, "Unreadable departure count"))
+		.map(|departed_at| {
+			departed_at
+				.ok()
+				.flatten()
+				.is_some_and(|departed_at| first <= departed_at)
+		})
+		.await
+}
+
+/// Decides whether the requester may see more of a left room's state than their
+/// own membership.
+///
+/// Only a recorded snapshot is judged by its own visibility; current state
+/// standing in for a missing one grants nothing.
+async fn may_see_room_state(
+	services: &Services,
+	once_joined: bool,
+	recorded: Option<ShortStateHash>,
+) -> bool {
+	once_joined
+		|| recorded
+			.map_async(|shortstatehash| {
+				services
+					.state_accessor
+					.history_visibility(shortstatehash)
+					.eq(&HistoryVisibility::WorldReadable)
+			})
+			.map(Option::unwrap_or_default)
+			.await
+}
+
+/// Builds the state a left room's response draws from.
+///
+/// A requester confined to their own membership skips building the room's
+/// state: the legacy field takes their membership in the snapshot served, and
+/// `state_after` only the departure the caller applies. Current state stands in
+/// for a missing recorded snapshot only where a snapshot is read.
+#[tracing::instrument(level = "trace", skip_all)]
+async fn served_state(
+	services: &Services,
+	sender_user: &UserId,
+	room_id: &RoomId,
+	ServedState {
+		sees_room_state,
+		recorded,
+		full_state,
+		state_after,
+		since,
+		horizon,
+		after,
+	}: ServedState,
+) -> Result<impl Iterator<Item = PduEvent>> {
+	let served = async || match recorded {
+		| Some(recorded) => Ok(recorded),
+		| None =>
+			services
+				.state
+				.get_room_shortstatehash(room_id)
+				.map_err(|_| missing_room_state(room_id))
+				.await,
+	};
+
+	if sees_room_state {
+		let params = StateChangeParams {
+			full_state,
+			state_after,
+			since_shortstatehash: since,
+			horizon_shortstatehash: horizon,
+			after_shortstatehash: after,
+			current_shortstatehash: served().await?,
+			joined_since_last_sync: false,
+			witness: None,
+			include_heroes: true,
+		};
+
+		return calculate_state_changes(services, sender_user, room_id, params)
+			.map_ok(|changes| Either::Left(changes.state_events.into_iter()))
+			.await;
+	}
+
+	let baseline = since.filter(|_| !full_state);
+	let membership = state_after
+		.requested()
+		.is_false()
+		.then_async(async || {
+			let served = served().await?;
+
+			Ok::<_, Error>(own_membership(services, sender_user, served, baseline).await)
+		})
+		.map(Option::transpose)
+		.map_ok(Option::flatten)
+		.await?;
+
+	Ok(Either::Right(membership.into_iter()))
+}
+
+/// Returns the requester's membership event when a state response includes it.
+///
+/// A full response always includes it, and an incremental one only when it
+/// changed since the client's position.
+#[tracing::instrument(level = "trace", skip_all)]
+async fn own_membership(
+	services: &Services,
+	sender_user: &UserId,
+	shortstatehash: ShortStateHash,
+	since: Option<ShortStateHash>,
+) -> Option<PduEvent> {
+	if since == Some(shortstatehash) {
+		return None;
+	}
+
+	let member = |shortstatehash| {
+		services
+			.state_accessor
+			.state_get_shortid(shortstatehash, &StateEventType::RoomMember, sender_user.as_str())
+			.map(NotFound::present)
+			.inspect_err(move |error| warn!(target: "tuwunel_api_client::sync::v3", %sender_user, %shortstatehash, %error, "Unreadable membership in a left room's snapshot"))
+	};
+
+	let current = member(shortstatehash)
+		.map(|current| current.ok().flatten())
+		.await?;
+
+	// A failed baseline read cannot show a change, so nothing is sent.
+	let previous = since
+		.try_map_async(member)
+		.map_ok(Option::flatten)
+		.map(Result::ok)
+		.await?;
+
+	previous
+		.ne(&Some(current))
+		.then_async(|| {
+			services
+				.timeline
+				.get_pdu_from_shorteventid(current)
+				.ok()
+		})
+		.map(Option::flatten)
+		.await
 }
 
 /// A user who never joined gets only the state describing their own membership
@@ -516,6 +770,30 @@ fn is_departure(event: &PduEvent, sender_user: &UserId) -> bool {
 /// The same rule covers the membership a zero timeline limit moves into state.
 fn visible_state(sender_user: &UserId, sees_room_state: bool) -> impl Fn(&PduEvent) -> bool {
 	move |pdu| sees_room_state || pdu.is_type_and_state_key(&RoomMember, sender_user.as_str())
+}
+
+fn timeline_events<'a, Pdus>(
+	services: &'a Services,
+	timeline_pdus: Pdus,
+	TimelineParams { sender_user, filter, limit, encrypted }: TimelineParams<'a>,
+) -> impl Stream<Item = PduEvent> + Send + 'a
+where
+	Pdus: IntoIterator<Item = (PduCount, PduEvent)>,
+	Pdus::IntoIter: Send + 'a,
+{
+	timeline_pdus
+		.into_iter()
+		.stream()
+		.wide_filter_map(move |item| ignored_filter(services, item, sender_user))
+		.map(at!(1))
+		.ready_filter(move |pdu| filter.room.timeline.matches(pdu))
+		.take(limit)
+		.wide_then(move |pdu| with_membership(services, pdu, sender_user, encrypted))
+		.wide_then(move |pdu| {
+			services
+				.pdu_metadata
+				.bundle_aggregations(sender_user, pdu)
+		})
 }
 
 /// Records a failed horizon read, quietly when the row is simply absent.
