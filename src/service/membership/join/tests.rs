@@ -4,10 +4,13 @@ use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedServerName, RoomId,
 	RoomVersionId, UserId,
 	api::error::ErrorKind,
-	events::room::{
-		create::RoomCreateEventContent,
-		join_rules::{JoinRule, RoomJoinRulesEventContent},
-		member::{MembershipState, RoomMemberEventContent},
+	events::{
+		StateEventType,
+		room::{
+			create::RoomCreateEventContent,
+			join_rules::{JoinRule, RoomJoinRulesEventContent},
+			member::{MembershipState, RoomMemberEventContent},
+		},
 	},
 	room_id, user_id,
 };
@@ -922,6 +925,93 @@ async fn an_event_citing_a_denied_send_join_event_is_dropped() -> Result {
 	assert!(!services.timeline.pdu_exists(&forged_id).await, "the denied join is dropped");
 	assert!(!services.timeline.pdu_exists(&invite_id).await, "its dependent is dropped");
 	assert!(state.values().any(|id| id == &topic_id));
+
+	Ok(())
+}
+
+/// A send_join response's member event for another local user installs as
+/// given, over the departure this server holds for that user.
+///
+/// A first response leaves alice's own leave as her current membership; a
+/// second bans her, and the ban replaces the leave in the room's current state.
+#[tokio::test]
+async fn a_send_join_member_event_installs_over_a_local_departure() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room_id = room_id!("!departed:localhost");
+	let alice = user_id!("@alice:localhost");
+	let [(create_id, create), (join_id, join)] = room(services, room_id)?;
+	let (rules_id, rules) = state_event(services, room_id, StateEvent {
+		kind: "m.room.join_rules",
+		state_key: "",
+		content: &json!({ "join_rule": "public" }),
+		auth_events: &[&create_id, &join_id],
+	})?;
+
+	let membership = |content, auth: &[&OwnedEventId]| {
+		let prev_events: Vec<_> = auth.last().into_iter().collect();
+		let event = json!({
+			"type": "m.room.member",
+			"state_key": alice,
+			"content": content,
+			"room_id": room_id,
+			"sender": alice,
+			"origin_server_ts": 1,
+			"depth": auth.len().saturating_add(1),
+			"prev_events": prev_events,
+			"auth_events": auth,
+		});
+
+		signed(services, &RoomVersionId::V11, event)
+	};
+
+	let joined = json!({ "membership": "join" });
+	let (alice_join_id, alice_join) = membership(joined, &[&create_id, &rules_id])?;
+	let left = json!({ "membership": "leave" });
+	let (leave_id, leave) = membership(left, &[&create_id, &alice_join_id])?;
+	let (ban_id, ban) = state_event(services, room_id, StateEvent {
+		kind: "m.room.member",
+		state_key: alice.as_str(),
+		content: &json!({ "membership": "ban" }),
+		auth_events: &[&create_id, &join_id],
+	})?;
+
+	let _shortroomid = services
+		.short
+		.get_or_create_shortroomid(room_id)
+		.await;
+
+	let current = async || {
+		services
+			.state_accessor
+			.room_state_get(room_id, &StateEventType::RoomMember, alice.as_str())
+			.await
+			.map(|event| event.event_id)
+	};
+
+	let departed = [create.clone(), join.clone(), rules, leave];
+	let held = ingest_response(services, room_id, from_ref(&alice_join), &departed).await?;
+	let state_lock = services.state.mutex.lock(room_id).await;
+
+	services
+		.membership
+		.apply_send_join_state(room_id, &held, &state_lock)
+		.await?;
+
+	assert_eq!(current().await?, leave_id, "alice's leave is her current membership");
+	assert!(services.state_cache.is_left(alice, room_id).await);
+
+	let state = ingest_response(services, room_id, &[], &[create, join, ban]).await?;
+
+	services
+		.membership
+		.apply_send_join_state(room_id, &state, &state_lock)
+		.await?;
+
+	assert_eq!(current().await?, ban_id, "the response's ban replaces it");
 
 	Ok(())
 }
