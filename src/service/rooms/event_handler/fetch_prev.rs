@@ -24,7 +24,7 @@ use tuwunel_matrix::{
 	room::state::resolution::topological_sort,
 };
 
-use super::handle_prev_pdu::PrevUpgrade;
+use super::eval::Eval;
 use crate::fetcher::{EventWindow, Op, Opts};
 
 pub(super) type Pdus = HashMap<OwnedEventId, (PduEvent, CanonicalJsonObject)>;
@@ -61,15 +61,8 @@ pub(super) struct PrevFetch {
 )]
 pub(super) async fn fetch_prev<'a, Events>(
 	&self,
-	upgrade @ PrevUpgrade {
-		origin,
-		room_id,
-		room_version,
-		recursion_level,
-		first_normal_ts,
-		create_event_id,
-		..
-	}: PrevUpgrade<'_>,
+	eval @ Eval { origin, room_id, .. }: Eval<'_>,
+	first_normal_ts: MilliSecondsSinceUnixEpoch,
 	initial_set: Events,
 ) -> Result<PrevFetch>
 where
@@ -95,7 +88,7 @@ where
 		.unwrap_or(has_gap);
 
 	has_gap
-		.then_async(|| self.prefetch_missing_events(upgrade))
+		.then_async(|| self.prefetch_missing_events(eval))
 		.await;
 
 	let mut todo_outlier_stack: FuturesOrdered<_> = initial_set
@@ -116,16 +109,7 @@ where
 		})
 		.map_ok(async |event_id| {
 			let events = once(event_id.as_ref());
-			let auth = self
-				.fetch_auth(
-					origin,
-					room_id,
-					events,
-					room_version,
-					create_event_id,
-					recursion_level,
-				)
-				.await;
+			let auth = self.fetch_auth(eval, events).await;
 
 			(event_id, auth)
 		})
@@ -196,14 +180,7 @@ where
 				let prev_prev = prev_prev.to_owned();
 				let fetch = async move {
 					let fetch = self
-						.fetch_auth(
-							origin,
-							room_id,
-							once(prev_prev.as_ref()),
-							room_version,
-							create_event_id,
-							recursion_level,
-						)
+						.fetch_auth(eval, once(prev_prev.as_ref()))
 						.await;
 
 					(prev_prev, fetch)
@@ -296,13 +273,13 @@ where
 #[tracing::instrument(name = "missing", level = "debug", skip_all)]
 async fn prefetch_missing_events(
 	&self,
-	upgrade @ PrevUpgrade {
+	eval @ Eval {
 		origin,
 		room_id,
 		event_id: incoming_event_id,
 		room_version,
 		..
-	}: PrevUpgrade<'_>,
+	}: Eval<'_>,
 ) {
 	let boundary: EventWindow = self
 		.services
@@ -332,7 +309,7 @@ async fn prefetch_missing_events(
 		.into_iter()
 		.stream()
 		.for_each_concurrent(automatic_width(), async |pdu| {
-			self.land_missing_event(upgrade, &pdu)
+			self.land_missing_event(eval, &pdu)
 				.map(Result::ok)
 				.await;
 		})
@@ -345,14 +322,7 @@ async fn prefetch_missing_events(
 #[tracing::instrument(name = "land", level = "trace", skip_all)]
 async fn land_missing_event(
 	&self,
-	PrevUpgrade {
-		origin,
-		room_id,
-		room_version,
-		recursion_level,
-		create_event_id,
-		..
-	}: PrevUpgrade<'_>,
+	eval @ Eval { room_id, room_version, .. }: Eval<'_>,
 	pdu: &RawJsonValue,
 ) -> Result {
 	let value: CanonicalJsonObject = serde_json::from_str(pdu.get())
@@ -368,18 +338,14 @@ async fn land_missing_event(
 		})?;
 
 	let event_id = gen_event_id(&value, room_version)?;
+	let missing = Eval {
+		event_id: &event_id,
+		auth_events_known: false,
+		..eval
+	};
 
 	// cold arm: missing events
-	Box::pin(self.handle_outlier_pdu(
-		origin,
-		room_id,
-		&event_id,
-		value,
-		room_version,
-		create_event_id,
-		recursion_level,
-		false,
-	))
-	.await
-	.map(|_| ())
+	Box::pin(self.handle_outlier_pdu(missing, value))
+		.await
+		.map(|_| ())
 }

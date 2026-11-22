@@ -1,6 +1,6 @@
 use futures::TryStreamExt;
 use ruma::{
-	CanonicalJsonObject, EventId, RoomId, RoomVersionId, ServerName,
+	CanonicalJsonObject, EventId,
 	events::{StateEventType, TimelineEventType},
 	room_version_rules::RoomVersionRules,
 	serde::Raw,
@@ -14,6 +14,8 @@ use tuwunel_matrix::{
 	room::state::resolution::{AuthCheckOutcome, FetchEvent, FetchState, auth_check},
 	room_version,
 };
+
+use super::eval::Eval;
 
 /// The auth events of one event, each read once from storage.
 ///
@@ -39,17 +41,18 @@ struct AuthEvent {
     skip_all,
     fields(lev = %recursion_level)
 ))]
-#[expect(clippy::too_many_arguments)]
 pub(super) async fn handle_outlier_pdu(
 	&self,
-	origin: &ServerName,
-	room_id: &RoomId,
-	event_id: &EventId,
+	eval @ Eval {
+		room_id,
+		event_id,
+		room_version,
+		create_event_id,
+		recursion_level,
+		auth_events_known,
+		..
+	}: Eval<'_>,
 	mut pdu_json: CanonicalJsonObject,
-	room_version: &RoomVersionId,
-	create_event_id: &EventId,
-	recursion_level: usize,
-	auth_events_known: bool,
 ) -> Result<(PduEvent, CanonicalJsonObject)> {
 	debug!(?event_id, ?auth_events_known, %recursion_level, "handle outlier");
 
@@ -113,15 +116,7 @@ pub(super) async fn handle_outlier_pdu(
 		// NOTE: Step 5 is not applied anymore because it failed too often
 		debug!("Fetching auth events");
 		// size firewall
-		Box::pin(self.fetch_auth(
-			origin,
-			room_id,
-			event.auth_events(),
-			room_version,
-			create_event_id,
-			recursion_level,
-		))
-		.await;
+		Box::pin(self.fetch_auth(eval, event.auth_events())).await;
 	}
 
 	// 6. Reject "due to auth events" if the event doesn't pass auth based on the

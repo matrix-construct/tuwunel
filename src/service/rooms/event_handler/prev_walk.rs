@@ -16,7 +16,7 @@ use tuwunel_core::{
 };
 
 pub use self::history::{PrevWalkPass, PrevWalkRoom};
-use super::{Service, fetch_prev::PrevFetch, handle_prev_pdu::PrevUpgrade};
+use super::{Service, eval::Eval, fetch_prev::PrevFetch};
 
 mod history;
 #[cfg(test)]
@@ -161,7 +161,7 @@ pub(super) struct InFlightWalks {
 pub(super) struct PrevWalk<'a> {
 	service: &'a Service,
 	id: u64,
-	upgrade: &'a PrevUpgrade<'a>,
+	eval: &'a Eval<'a>,
 	started: Instant,
 	walk: Option<Walk>,
 	settled: Option<(Outcome, usize)>,
@@ -291,16 +291,14 @@ pub(super) fn enter(&self, gapped: bool) {
 }
 
 #[implement(PrevWalk, generics = "<'a>", params = "<'a>")]
-pub(super) fn start(service: &'a Service, upgrade: &'a PrevUpgrade<'a>) -> Self {
+pub(super) fn start(service: &'a Service, eval: &'a Eval<'a>) -> Self {
 	let started = Instant::now();
-	let id = service
-		.prev_walks_in_flight
-		.insert(upgrade, started);
+	let id = service.prev_walks_in_flight.insert(eval, started);
 
 	Self {
 		service,
 		id,
-		upgrade,
+		eval,
 		started,
 		walk: None,
 		settled: None,
@@ -308,8 +306,8 @@ pub(super) fn start(service: &'a Service, upgrade: &'a PrevUpgrade<'a>) -> Self 
 }
 
 #[implement(InFlightWalks)]
-fn insert(&self, upgrade: &PrevUpgrade<'_>, started: Instant) -> u64 {
-	let PrevUpgrade { origin, room_id, event_id, .. } = *upgrade;
+fn insert(&self, eval: &Eval<'_>, started: Instant) -> u64 {
+	let Eval { origin, room_id, event_id, .. } = *eval;
 	let id = self.next.fetch_add(1, Ordering::Relaxed);
 	let entry = InFlightWalk {
 		room_id: room_id.to_owned(),
@@ -432,7 +430,7 @@ impl Drop for PrevWalk<'_> {
 		let Self {
 			service,
 			id,
-			upgrade,
+			eval,
 			started,
 			walk,
 			settled,
@@ -448,13 +446,13 @@ impl Drop for PrevWalk<'_> {
 		}
 
 		match walk {
-			| None => log_fetch_end(upgrade, &pass),
-			| Some(_) => log_walk_end(upgrade, &pass),
+			| None => log_fetch_end(eval, &pass),
+			| Some(_) => log_walk_end(eval, &pass),
 		}
 
 		// A panic from the write while unwinding would abort the process.
 		if !panicking() {
-			service.record_pass(upgrade, &pass);
+			service.record_pass(eval, &pass);
 		}
 	}
 }
@@ -524,8 +522,8 @@ fn reported(self) -> bool {
 	}
 }
 
-fn log_fetch_end(upgrade: &PrevUpgrade<'_>, pass: &Pass) {
-	let PrevUpgrade { origin, room_id, event_id, .. } = *upgrade;
+fn log_fetch_end(eval: &Eval<'_>, pass: &Pass) {
+	let Eval { origin, room_id, event_id, .. } = *eval;
 	let fetch_ms = pass.fetch.as_millis();
 
 	warn!(
@@ -538,8 +536,8 @@ fn log_fetch_end(upgrade: &PrevUpgrade<'_>, pass: &Pass) {
 	);
 }
 
-fn log_walk_end(upgrade: &PrevUpgrade<'_>, pass: &Pass) {
-	let PrevUpgrade { origin, room_id, event_id, .. } = *upgrade;
+fn log_walk_end(eval: &Eval<'_>, pass: &Pass) {
+	let Eval { origin, room_id, event_id, .. } = *eval;
 	let Pass { outcome, prevs, unprocessed, capped, .. } = *pass;
 	let fetch_ms = pass.fetch.as_millis();
 	let upgrade_ms = pass.upgrade.as_millis();

@@ -9,14 +9,19 @@ use ruma::{
 	ServerName,
 };
 use tuwunel_core::{
-	debug, debug_error, debug_warn, expected, implement, trace,
-	utils::stream::{BroadbandExt, IterStream},
+	async_noinline, debug, debug_error, debug_warn, expected, implement, trace,
+	utils::stream::{BroadbandExt, IterStream, ReadyExt},
 	warn,
 };
 use tuwunel_matrix::{PduEvent, pdu::MAX_AUTH_EVENTS};
 
-use super::backoff::{Context, Disposition};
+use super::{
+	backoff::{Context, Disposition},
+	eval::Eval,
+};
 use crate::fetcher::{Op, Opts};
+
+type Fetched = Vec<(PduEvent, Option<CanonicalJsonObject>)>;
 
 /// Find the event and auth it. Once the event is validated (steps 1 - 8)
 /// it is appended to the outliers Tree.
@@ -39,13 +44,15 @@ use crate::fetcher::{Op, Opts};
 )]
 pub(super) async fn fetch_auth<'a, Events>(
 	&self,
-	origin: &ServerName,
-	room_id: &RoomId,
+	eval @ Eval {
+		origin,
+		room_id,
+		room_version,
+		recursion_level,
+		..
+	}: Eval<'_>,
 	events: Events,
-	room_version: &RoomVersionId,
-	create_event_id: &EventId,
-	recursion_level: usize,
-) -> Vec<(PduEvent, Option<CanonicalJsonObject>)>
+) -> Fetched
 where
 	Events: Iterator<Item = &'a EventId> + Clone + Send,
 {
@@ -71,49 +78,7 @@ where
 				pdus.push((local_pdu, None));
 			}
 
-			events_in_reverse_order
-				.into_iter()
-				.rev()
-				.stream()
-				.fold(pdus, async |mut pdus, (next_id, value)| {
-					if self
-						.is_suppressed(
-							Context::Auth,
-							&next_id,
-							Duration::from_mins(5)..Duration::from_hours(24),
-						)
-						.await
-						.is_deny()
-					{
-						return pdus;
-					}
-
-					// recursion cycle
-					let outlier = Box::pin(self.handle_outlier_pdu(
-						origin,
-						room_id,
-						&next_id,
-						value.clone(),
-						room_version,
-						create_event_id,
-						expected!(recursion_level + 1),
-						true,
-					));
-
-					if let Ok((pdu, json)) = outlier
-						.await
-						.inspect_err(|e| warn!("Authentication of event {next_id} failed: {e:?}"))
-					{
-						if next_id == id {
-							pdus.push((pdu, Some(json)));
-						}
-						self.record_success(Context::Auth, &next_id).await;
-					} else {
-						self.record_outcome(Context::Auth, &next_id, Disposition::Transient);
-					}
-
-					pdus
-				})
+			self.admit_chain(eval, &id, events_in_reverse_order, pdus)
 				.await
 		})
 		.await
@@ -219,4 +184,88 @@ async fn fetch_auth_chain(
 	}
 
 	(event_id.to_owned(), None, events_in_reverse_order)
+}
+
+/// Admits a fetched auth chain in the reverse of its discovery order.
+///
+/// Every event of the chain is admitted, but only the one it was fetched for is
+/// added to `pdus`.
+#[implement(super::Service)]
+async fn admit_chain(
+	&self,
+	eval: Eval<'_>,
+	event_id: &EventId,
+	chain_in_reverse_order: Vec<(OwnedEventId, CanonicalJsonObject)>,
+	pdus: Fetched,
+) -> Fetched {
+	chain_in_reverse_order
+		.into_iter()
+		.rev()
+		.stream()
+		.filter_map(async |(next_id, pdu_json)| {
+			let requested = *next_id == *event_id;
+
+			self.admit_fetched(eval, &next_id, pdu_json)
+				.map(|admitted| admitted.filter(|_| requested))
+				.await
+		})
+		.ready_fold(pdus, |mut pdus, (pdu, pdu_json)| {
+			pdus.push((pdu, Some(pdu_json)));
+			pdus
+		})
+		.await
+}
+
+/// Admits an event fetched with its auth chain as an outlier, one level deeper
+/// than `eval` with its auth events known.
+///
+/// An event backing off from a failed admission is skipped; a failure records a
+/// transient backoff.
+#[implement(super::Service)]
+#[tracing::instrument(name = "admit", level = "trace", skip_all, fields(%event_id))]
+async fn admit_fetched(
+	&self,
+	eval @ Eval { recursion_level, .. }: Eval<'_>,
+	event_id: &EventId,
+	pdu_json: CanonicalJsonObject,
+) -> Option<(PduEvent, CanonicalJsonObject)> {
+	if self
+		.is_suppressed(Context::Auth, event_id, Duration::from_mins(5)..Duration::from_hours(24))
+		.await
+		.is_deny()
+	{
+		return None;
+	}
+
+	let fetched = Eval {
+		event_id,
+		recursion_level: expected!(recursion_level + 1),
+		auth_events_known: true,
+		..eval
+	};
+
+	let admitted = self.admit_outlier(fetched, pdu_json).await;
+
+	match admitted {
+		| Some(_) => self.record_success(Context::Auth, event_id).await,
+		| None => self.record_outcome(Context::Auth, event_id, Disposition::Transient),
+	}
+
+	admitted
+}
+
+#[implement(super::Service)]
+// recursion cycle, whose Send proof overflows the solver's depth unless erased
+#[async_noinline]
+async fn admit_outlier<'a>(
+	&'a self,
+	eval: Eval<'a>,
+	pdu_json: CanonicalJsonObject,
+) -> Option<(PduEvent, CanonicalJsonObject)> {
+	self.handle_outlier_pdu(eval, pdu_json)
+		.inspect_err(|error| {
+			warn!(event_id = %eval.event_id, ?error, "Authentication of fetched event failed");
+		})
+		.map(Result::ok)
+		.await
 }

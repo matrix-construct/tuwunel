@@ -2,7 +2,7 @@ use std::{borrow::Borrow, collections::HashMap, iter::once, sync::Arc, time::Ins
 
 use futures::{FutureExt, StreamExt};
 use ruma::{
-	CanonicalJsonObject, EventId, OwnedEventId, RoomId, RoomVersionId, ServerName,
+	CanonicalJsonObject, OwnedEventId, RoomId, RoomVersionId, ServerName,
 	events::room::member::MembershipState, room_version_rules::RoomVersionRules,
 };
 use tuwunel_core::{
@@ -22,7 +22,7 @@ use tuwunel_matrix::{
 
 use super::{
 	backoff::{Context, Disposition, UPGRADE_RETRY},
-	handle_prev_pdu::PrevUpgrade,
+	eval::Eval,
 	state_local_build::WalkMode,
 };
 use crate::rooms::{
@@ -67,17 +67,19 @@ enum Standing {
 )]
 pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	&self,
-	PrevUpgrade {
-		origin,
+	eval @ Eval {
 		room_id,
+		event_id,
 		room_version,
 		recursion_level,
 		create_event_id,
 		..
-	}: PrevUpgrade<'_>,
+	}: Eval<'_>,
 	incoming_pdu: PduEvent,
 	mut pdu_json: CanonicalJsonObject,
 ) -> Result<Option<(RawPduId, bool)>> {
+	debug_assert_eq!(event_id, incoming_pdu.event_id(), "the evaluation names the event");
+
 	// Skip the PDU if we already have it as a timeline event
 	if let Ok(pdu_id) = self
 		.services
@@ -106,14 +108,7 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	};
 
 	let (state_at_incoming_event, resolved_via) = self
-		.resolve_state_at_incoming_event(
-			origin,
-			room_id,
-			&incoming_pdu,
-			room_version,
-			recursion_level,
-			create_event_id,
-		)
+		.resolve_state_at_incoming_event(eval, &incoming_pdu)
 		.await?;
 
 	self.auth_check_outlier_pdu(room_id, &incoming_pdu, &room_rules, &state_at_incoming_event)
@@ -496,12 +491,10 @@ async fn soft_fail_standing(
 #[implement(super::Service)]
 async fn resolve_state_at_incoming_event(
 	&self,
-	origin: &ServerName,
-	room_id: &RoomId,
+	eval @ Eval {
+		room_id, room_version, create_event_id, ..
+	}: Eval<'_>,
 	incoming_pdu: &PduEvent,
-	room_version: &RoomVersionId,
-	recursion_level: usize,
-	create_event_id: &EventId,
 ) -> Result<(HashMap<u64, OwnedEventId>, ResolvedVia)> {
 	// 10. Fetch missing state and auth chain events by calling /state_ids at
 	//     backwards extremities doing all the checks in this list starting at 1.
@@ -560,14 +553,7 @@ async fn resolve_state_at_incoming_event(
 	}
 
 	let state = self
-		.fetch_state(
-			origin,
-			room_id,
-			incoming_pdu.event_id(),
-			room_version,
-			recursion_level,
-			create_event_id,
-		)
+		.fetch_state(eval)
 		.boxed() // cold arm: federation fallback
 		.await?
 		.expect("fetch_state always resolves state to some");

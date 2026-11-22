@@ -6,14 +6,14 @@ use std::{
 
 use futures::{FutureExt, StreamExt};
 use ruma::{
-	EventId, MilliSecondsSinceUnixEpoch, RoomId, RoomVersionId, event_id, owned_event_id,
-	owned_server_name, room_id, server_name, uint,
+	EventId, RoomId, RoomVersionId, event_id, owned_event_id, owned_server_name, room_id,
+	server_name,
 };
 use tuwunel_core::utils::{stream::IterStream, time::timepoint_from_epoch};
 use tuwunel_database::{Interfix, deserialize_from_slice, serialize_key, serialize_val};
 
 use super::{
-	InFlightWalks, Outcome, Pass, PrevUpgrade, PrevWalkPass, PrevWalkRoom, Walk,
+	Eval, InFlightWalks, Outcome, Pass, PrevWalkPass, PrevWalkRoom, Walk,
 	history::{PassKey, PassRow, PassVal, pass_row, room_passes, tally},
 };
 
@@ -32,9 +32,9 @@ const OUTCOMES: [Outcome; 8] = [
 fn poisoned_registry_keeps_listing() {
 	let registry = InFlightWalks::default();
 	let room_version = RoomVersionId::V11;
-	let upgrade = prev_upgrade(&room_version);
+	let eval = incoming(&room_version);
 	let started = Instant::now();
-	let id = registry.insert(&upgrade, started);
+	let id = registry.insert(&eval, started);
 
 	scope(|threads| {
 		let poisoner = threads.spawn(|| {
@@ -63,7 +63,7 @@ fn poisoned_registry_keeps_listing() {
 
 	assert_eq!(
 		listed,
-		[(upgrade.event_id.to_owned(), Some(2))],
+		[(eval.event_id.to_owned(), Some(2))],
 		"the poisoned registry lost the walk"
 	);
 
@@ -118,7 +118,7 @@ fn pass_splits_its_time_at_the_walk() {
 #[test]
 fn pass_row_round_trips() {
 	let room_version = RoomVersionId::V11;
-	let upgrade = prev_upgrade(&room_version);
+	let eval = incoming(&room_version);
 	let pass = Pass {
 		outcome: Outcome::Cancelled,
 		prevs: 3,
@@ -139,7 +139,7 @@ fn pass_row_round_trips() {
 		\0\0\0\0\0\0\x04\xB0\xFF\
 		origin.test.local";
 
-	let (key, val) = pass_row(&upgrade, &pass, 0x0102_0304_0506_0708);
+	let (key, val) = pass_row(&eval, &pass, 0x0102_0304_0506_0708);
 	let key_bytes = serialize_key(key).expect("the pass key serializes");
 	let val_bytes = serialize_val(val).expect("the pass value serializes");
 
@@ -270,14 +270,14 @@ fn room_read_stops_at_the_boundary() {
 	assert_eq!(passes, expected, "the room read did not stop at the next room");
 }
 
-fn prev_upgrade(room_version: &RoomVersionId) -> PrevUpgrade<'_> {
-	PrevUpgrade {
+fn incoming(room_version: &RoomVersionId) -> Eval<'_> {
+	Eval {
 		origin: server_name!("origin.test.local"),
 		room_id: room_id!("!room:origin.test.local"),
 		event_id: event_id!("$incoming"),
 		room_version,
-		recursion_level: 0,
-		first_normal_ts: MilliSecondsSinceUnixEpoch(uint!(0)),
 		create_event_id: event_id!("$create"),
+		recursion_level: 0,
+		auth_events_known: false,
 	}
 }

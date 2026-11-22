@@ -1,6 +1,7 @@
 use futures::{FutureExt, TryFutureExt, TryStreamExt, future::try_join4};
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, RoomId, ServerName, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId,
+	RoomId, ServerName, UserId,
 	events::{
 		AnyStrippedStateEvent, StateEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
@@ -29,8 +30,8 @@ use tuwunel_matrix::{
 
 use super::{
 	backoff::{Context, Disposition, Suppression, UPGRADE_RETRY},
+	eval::Eval,
 	fetch_prev::{Pdus, PrevFetch},
-	handle_prev_pdu::PrevUpgrade,
 	prev_walk::PrevWalk,
 	room_version_of,
 };
@@ -292,21 +293,17 @@ async fn handle_admitted<'a>(
 		create_event.ok_or_else(|| err!(Request(NotFound("Room is unknown to this server"))))?;
 
 	let room_version = from_create_event(&create_event)?;
-	let create_event_id = create_event.event_id();
-	let recursion_level = 0;
+	let eval = Eval {
+		origin,
+		room_id,
+		event_id,
+		room_version: &room_version,
+		create_event_id: create_event.event_id(),
+		recursion_level: 0,
+		auth_events_known: false,
+	};
 
-	let (incoming_pdu, pdu) = self
-		.handle_outlier_pdu(
-			origin,
-			room_id,
-			event_id,
-			pdu,
-			&room_version,
-			create_event_id,
-			recursion_level,
-			false,
-		)
-		.await?;
+	let (incoming_pdu, pdu) = self.handle_outlier_pdu(eval, pdu).await?;
 
 	let (incoming_pdu, pdu) = incoming_pdu.with_built_unsigned(pdu, unsigned)?;
 
@@ -350,18 +347,8 @@ async fn handle_admitted<'a>(
 
 	self.prev_walk.enter(gapped);
 
-	let upgrade = PrevUpgrade {
-		origin,
-		room_id,
-		event_id,
-		room_version: &room_version,
-		recursion_level,
-		first_normal_ts,
-		create_event_id,
-	};
-
 	// Start before the first await so a dropped future still settles the gapped count.
-	let pass = gapped.then(|| PrevWalk::start(self, &upgrade));
+	let pass = gapped.then(|| PrevWalk::start(self, &eval));
 
 	let standing = gapped
 		.then_async(|| self.is_suppressed(Context::Incoming, event_id, UPGRADE_RETRY))
@@ -380,7 +367,7 @@ async fn handle_admitted<'a>(
 	// 9. Fetch any missing prev events doing all checks listed here starting at 1.
 	//    These are timeline events
 	let fetch = self
-		.fetch_prev(upgrade, incoming_pdu.prev_events())
+		.fetch_prev(eval, first_normal_ts, incoming_pdu.prev_events())
 		.await;
 
 	let stopping = self.services.server.is_stopping();
@@ -392,10 +379,10 @@ async fn handle_admitted<'a>(
 	let PrevFetch { sorted, pdus, .. } = fetch;
 
 	let (handled, upgraded) = self
-		.handle_prev_events(upgrade, sorted, pdus)
+		.handle_prev_events(eval, first_normal_ts, sorted, pdus)
 		.boxed() // size firewall
 		.and_then(|upgraded| {
-			self.upgrade_outlier_to_timeline_pdu(upgrade, incoming_pdu, pdu)
+			self.upgrade_outlier_to_timeline_pdu(eval, incoming_pdu, pdu)
 				.boxed() // size firewall
 				.map(move |handled| Ok((handled, upgraded)))
 		})
@@ -632,7 +619,8 @@ fn authenticates_invite(pdu: &CanonicalJsonObject, invite_event: &EventId) -> bo
 #[implement(super::Service)]
 async fn handle_prev_events(
 	&self,
-	upgrade: PrevUpgrade<'_>,
+	eval: Eval<'_>,
+	first_normal_ts: MilliSecondsSinceUnixEpoch,
 	sorted_prev_events: Vec<OwnedEventId>,
 	mut pdus: Pdus, // HashMap::remove takes &mut self
 ) -> Result<usize> {
@@ -665,7 +653,7 @@ async fn handle_prev_events(
 		.try_stream()
 		.map_ok(|prev_id| (pdus.remove(&prev_id), prev_id))
 		.broadn_and_then(concurrency, async |(info, prev_id)| {
-			self.upgrade_prev_event(upgrade, info, &prev_id)
+			self.upgrade_prev_event(eval, first_normal_ts, info, &prev_id)
 				.await
 		})
 		.ready_try_fold(0, tally_upgraded)
@@ -678,7 +666,7 @@ async fn handle_prev_events(
 		.try_stream()
 		.map_ok(|prev_id| (pdus.remove(&prev_id), prev_id))
 		.and_then(async |(info, prev_id)| {
-			self.upgrade_prev_event(upgrade, info, &prev_id)
+			self.upgrade_prev_event(eval, first_normal_ts, info, &prev_id)
 				.await
 		})
 		.ready_try_fold(upgraded, tally_upgraded)
@@ -695,15 +683,19 @@ async fn handle_prev_events(
 #[implement(super::Service)]
 async fn upgrade_prev_event(
 	&self,
-	upgrade: PrevUpgrade<'_>,
+	eval: Eval<'_>,
+	first_normal_ts: MilliSecondsSinceUnixEpoch,
 	info: Option<(PduEvent, CanonicalJsonObject)>,
 	prev_id: &EventId,
 ) -> Result<Handled> {
 	self.services.server.check_running()?;
 
-	let PrevUpgrade { room_id, event_id, .. } = upgrade;
+	let Eval { room_id, event_id, .. } = eval;
+	let handled = self
+		.handle_prev_pdu(eval, first_normal_ts, info, prev_id)
+		.await;
 
-	match self.handle_prev_pdu(upgrade, info, prev_id).await {
+	match handled {
 		| Err(error) if error.is_interrupted() || self.services.server.is_stopping() => {
 			debug!(?prev_id, ?event_id, ?room_id, %error, "Prev event processing interrupted.");
 

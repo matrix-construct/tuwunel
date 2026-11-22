@@ -12,7 +12,7 @@ use tuwunel_core::{
 };
 use tuwunel_database::Interfix;
 
-use super::{Outcome, Pass, PrevUpgrade};
+use super::{Eval, Outcome, Pass};
 
 /// Key of a pass row.
 ///
@@ -180,8 +180,8 @@ pub fn empty(room_id: &RoomId) -> Self {
 #[implement(super::super::Service)]
 // keeps the key and value buffers out of the guard's drop frame
 #[inline(never)]
-pub(super) fn record_pass(&self, upgrade: &PrevUpgrade<'_>, pass: &Pass) {
-	let (key, val) = pass_row(upgrade, pass, now_millis());
+pub(super) fn record_pass(&self, eval: &Eval<'_>, pass: &Pass) {
+	let (key, val) = pass_row(eval, pass, now_millis());
 
 	self.db.roomtseventid_prevwalk.put(key, val);
 }
@@ -190,8 +190,8 @@ pub(super) fn record_pass(&self, upgrade: &PrevUpgrade<'_>, pass: &Pass) {
 ///
 /// The end is given in milliseconds since the Unix epoch: the wall clock when
 /// recording, a fixed time in a test.
-pub(super) fn pass_row<'a>(upgrade: &PrevUpgrade<'a>, pass: &Pass, ended_ms: u64) -> PassRow<'a> {
-	let PrevUpgrade { origin, room_id, event_id, .. } = *upgrade;
+pub(super) fn pass_row<'a>(eval: &Eval<'a>, pass: &Pass, ended_ms: u64) -> PassRow<'a> {
+	let Eval { origin, room_id, event_id, .. } = *eval;
 	let val = (
 		u8::from(pass.outcome),
 		u64_from_usize_saturating(pass.prevs),

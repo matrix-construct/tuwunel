@@ -7,6 +7,7 @@
 
 mod acl_check;
 mod backoff;
+mod eval;
 mod fetch_auth;
 mod fetch_prev;
 mod fetch_state;

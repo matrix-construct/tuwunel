@@ -5,7 +5,7 @@ use ruma::{
 use serde_json::{from_str, from_value, json};
 use tuwunel_core::{Error, Result, config::Figment};
 
-use super::{Assembly, StateIdsResponse, distinct, room_state_key};
+use super::{super::eval::Eval, StateIdsResponse, distinct, room_state_key};
 use crate::test_utils::{fixture, pdu_json, with_state_key};
 
 #[test]
@@ -91,18 +91,20 @@ async fn a_repeated_state_id_assembles_and_bad_state_is_refused() -> Result {
 			.map(ToOwned::to_owned)
 			.collect();
 
-		let assembly = Assembly {
-			origin: sender.server_name(),
-			responder: sender.server_name(),
+		let origin = sender.server_name();
+		let eval = Eval {
+			origin,
 			room_id,
+			event_id: event_id!("$incoming"),
 			room_version: &RoomVersionId::V11,
-			recursion_level: 0,
 			create_event_id: create,
+			recursion_level: 0,
+			auth_events_known: false,
 		};
 
 		services
 			.event_handler
-			.assemble_state(ids, assembly)
+			.assemble_state(ids, eval, origin)
 			.await
 	};
 

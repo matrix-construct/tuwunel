@@ -1,11 +1,12 @@
 use std::collections::{HashMap, hash_map};
 
 use futures::FutureExt;
-use ruma::{EventId, OwnedEventId, RoomId, RoomVersionId, ServerName, events::StateEventType};
+use ruma::{OwnedEventId, RoomId, ServerName, events::StateEventType};
 use serde::Deserialize;
 use tuwunel_core::{Err, Result, debug, debug_warn, err, implement};
 use tuwunel_matrix::{Event, PduEvent, pdu::check_room_id};
 
+use super::eval::Eval;
 use crate::{
 	fetcher::{Op, Opts},
 	rooms::short::ShortStateKey,
@@ -19,15 +20,6 @@ struct StateIdsResponse {
 	pdu_ids: Vec<OwnedEventId>,
 }
 
-struct Assembly<'a> {
-	origin: &'a ServerName,
-	responder: &'a ServerName,
-	room_id: &'a RoomId,
-	room_version: &'a RoomVersionId,
-	recursion_level: usize,
-	create_event_id: &'a EventId,
-}
-
 /// Call /state_ids to find out what the state at this pdu is. We trust the
 /// server's response to some extend (sic), but we still do a lot of checks
 /// on the events
@@ -39,12 +31,7 @@ struct Assembly<'a> {
 )]
 pub(super) async fn fetch_state(
 	&self,
-	origin: &ServerName,
-	room_id: &RoomId,
-	event_id: &EventId,
-	room_version: &RoomVersionId,
-	recursion_level: usize,
-	create_event_id: &EventId,
+	eval @ Eval { origin, room_id, event_id, .. }: Eval<'_>,
 ) -> Result<Option<HashMap<u64, OwnedEventId>>> {
 	let opts = Opts::new(Op::StateIds, room_id.to_owned())
 		.event_id(event_id.to_owned())
@@ -62,16 +49,7 @@ pub(super) async fn fetch_state(
 	let StateIdsResponse { pdu_ids } = serde_json::from_slice(&outcome.bytes)
 		.map_err(|e| err!(BadServerResponse("malformed state_ids response: {e}")))?;
 
-	let assembly = Assembly {
-		origin,
-		responder: &outcome.origin,
-		room_id,
-		room_version,
-		recursion_level,
-		create_event_id,
-	};
-
-	self.assemble_state(pdu_ids, assembly)
+	self.assemble_state(pdu_ids, eval, &outcome.origin)
 		.await
 		.map(Some)
 }
@@ -84,14 +62,8 @@ pub(super) async fn fetch_state(
 async fn assemble_state(
 	&self,
 	pdu_ids: Vec<OwnedEventId>,
-	Assembly {
-		origin,
-		responder,
-		room_id,
-		room_version,
-		recursion_level,
-		create_event_id,
-	}: Assembly<'_>,
+	eval @ Eval { room_id, create_event_id, .. }: Eval<'_>,
+	responder: &ServerName,
 ) -> Result<HashMap<ShortStateKey, OwnedEventId>> {
 	let (pdu_ids, repeated) = distinct(pdu_ids);
 
@@ -102,7 +74,7 @@ async fn assemble_state(
 	debug!("Fetching state events");
 	let state_ids = pdu_ids.iter().map(AsRef::as_ref);
 	let state_vec = self
-		.fetch_auth(origin, room_id, state_ids, room_version, create_event_id, recursion_level)
+		.fetch_auth(eval, state_ids)
 		.boxed() // cold arm: federation fallback
 		.await;
 

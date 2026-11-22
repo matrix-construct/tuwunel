@@ -1,9 +1,8 @@
 use std::{fmt::Debug, iter::once, sync::Arc, time::Duration};
 
 use ruma::{
-	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId,
-	RoomVersionId, ServerName, api::error::ErrorKind, event_id, events::StateEventType, room_id,
-	server_name, user_id,
+	CanonicalJsonObject, EventId, OwnedEventId, RoomId, RoomVersionId, ServerName,
+	api::error::ErrorKind, event_id, events::StateEventType, room_id, server_name, user_id,
 };
 use serde_json::{Value, from_value, json};
 use tokio::time::timeout;
@@ -11,7 +10,7 @@ use tuwunel_core::{Error, Result, config::Figment, err};
 use tuwunel_matrix::{PduEvent, room_version::rules as room_version_rules};
 
 use super::{
-	super::{handle_incoming_pdu::Handled, handle_prev_pdu::PrevUpgrade},
+	super::{eval::Eval, handle_incoming_pdu::Handled},
 	check_create_reference, check_local_join_sender,
 };
 use crate::{
@@ -475,12 +474,19 @@ async fn admit(
 	event_id: &EventId,
 	event: Value,
 ) -> Result<(PduEvent, CanonicalJsonObject)> {
-	let version = RoomVersionId::V11;
-	let event = from_value(event)?;
+	let eval = Eval {
+		origin,
+		room_id,
+		event_id,
+		room_version: &RoomVersionId::V11,
+		create_event_id: create_id,
+		recursion_level: 0,
+		auth_events_known: true,
+	};
 
 	services
 		.event_handler
-		.handle_outlier_pdu(origin, room_id, event_id, event, &version, create_id, 0, true)
+		.handle_outlier_pdu(eval, from_value(event)?)
 		.await
 }
 
@@ -496,19 +502,19 @@ async fn promote(
 	event: Value,
 ) -> Result<Handled> {
 	let pdu: PduEvent = from_value(with_field(event.clone(), "event_id", json!(event_id)))?;
-	let upgrade = PrevUpgrade {
+	let eval = Eval {
 		origin: server_name!("localhost"),
 		room_id,
 		event_id,
 		room_version: &RoomVersionId::V11,
-		recursion_level: 0,
-		first_normal_ts: MilliSecondsSinceUnixEpoch::now(),
 		create_event_id: create_id,
+		recursion_level: 0,
+		auth_events_known: true,
 	};
 
 	let promotion = services
 		.event_handler
-		.upgrade_outlier_to_timeline_pdu(upgrade, pdu, from_value(event)?);
+		.upgrade_outlier_to_timeline_pdu(eval, pdu, from_value(event)?);
 
 	timeout(Duration::from_secs(10), promotion)
 		.await
