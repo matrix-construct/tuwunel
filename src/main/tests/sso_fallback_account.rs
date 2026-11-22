@@ -18,7 +18,7 @@ use axum::{
 	routing::{get, post},
 };
 use axum_server::from_tcp;
-use futures::future::select;
+use futures::{TryFutureExt, future::select};
 use reqwest::{
 	Client, Response, StatusCode, Url,
 	header::{AUTHORIZATION, COOKIE, LOCATION, SET_COOKIE},
@@ -31,7 +31,14 @@ use tracing::{
 	subscriber::set_global_default,
 };
 use tracing_subscriber::fmt::{MakeWriter, fmt, format::FmtSpan};
-use tuwunel_core::{Err, Result, err, result::NotFound, ruma::OwnedUserId};
+use tuwunel_core::{
+	Err, Result, err,
+	result::NotFound,
+	ruma::{
+		OwnedUserId,
+		api::client::uiaa::{AuthType, UiaaInfo},
+	},
+};
 use tuwunel_service::{
 	Services,
 	oauth::{Deletions, Session, UserInfo, fallback_localpart, unique_id_sub},
@@ -43,6 +50,14 @@ use self::{
 };
 
 type TokenForm = HashMap<String, String>;
+
+#[derive(Clone, Copy)]
+struct SignIn<'a> {
+	callback: &'a str,
+	destination: &'a str,
+	sub: &'a str,
+	username: &'a str,
+}
 
 const IDP: &str = "test-idp";
 const CLIENT: &str = "https://client.example/callback";
@@ -63,7 +78,8 @@ static LOGS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 /// address is bound to her new account, and Carol's registration leaves the
 /// identical address with Alice. The provider sets no `callback_url` and the
 /// server no `well_known.client`, so the legacy callback stays mounted beside
-/// the new one, and Carol's last sign-in returns through the new one.
+/// the new one, and Carol's last sign-in returns through the new one. Last, a
+/// UIAA session's SSO stage is completed only by its own account's sign-in.
 #[test]
 fn sso_fallback_account() -> Result {
 	let provider = TcpListener::bind(("127.0.0.1", 0))?;
@@ -92,9 +108,16 @@ fn sso_fallback_account() -> Result {
 	set_global_default(capture).expect("the log capture is the first subscriber");
 
 	boot("sso-fallback-account", options, async move |services, base| {
-		let serve = serve_provider(provider, issuer);
+		let client = Client::builder()
+			.redirect(Policy::none())
+			.timeout(Duration::from_secs(10))
+			.build()?;
 
-		select(pin!(serve), pin!(exercise(services, base)))
+		let serve = serve_provider(provider, issuer);
+		let exercise = exercise(services, base, &client)
+			.and_then(|()| reauthenticate(services, base, &client));
+
+		select(pin!(serve), pin!(exercise))
 			.await
 			.factor_first()
 			.0
@@ -158,17 +181,12 @@ async fn userinfo(headers: HeaderMap) -> Json<Value> {
 	}))
 }
 
-async fn exercise(services: &Services, base: &str) -> Result {
-	let client = Client::builder()
-		.redirect(Policy::none())
-		.timeout(Duration::from_secs(10))
-		.build()?;
-
+async fn exercise(services: &Services, base: &str, client: &Client) -> Result {
 	let provider = services.oauth.providers.get(IDP).await?;
 	let bob = unique_id_sub((&provider, "bob"))?;
 	let fallback = fallback_localpart(&bob);
 
-	let response = sign_in(&client, base, LEGACY_CALLBACK, "alice", &fallback).await?;
+	let response = sign_in(client, base, LEGACY_CALLBACK, "alice", &fallback).await?;
 	let alice_account = signed_in(services, &response).await?;
 	let email = format!("{fallback}@example.org");
 	let holder = services
@@ -183,7 +201,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		"alice's verified address is bound to her"
 	);
 
-	let response = sign_in(&client, base, LEGACY_CALLBACK, "bob", &fallback).await?;
+	let response = sign_in(client, base, LEGACY_CALLBACK, "bob", &fallback).await?;
 
 	assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
@@ -198,7 +216,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert!(linked.is_not_found(), "bob's identity is linked to no account");
 
 	let carol = unique_id_sub((&provider, "carol"))?;
-	let response = sign_in(&client, base, LEGACY_CALLBACK, "carol", &fallback).await?;
+	let response = sign_in(client, base, LEGACY_CALLBACK, "carol", &fallback).await?;
 	let account = signed_in(services, &response).await?;
 	let holder = services
 		.threepid
@@ -268,7 +286,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert!(linked.is_not_found(), "carol's identity is linked to no account");
 	assert!(stale.is_missing(), "carol's session on a removed provider is deleted");
 
-	let response = sign_in(&client, base, CALLBACK, "carol", &fallback).await?;
+	let response = sign_in(client, base, CALLBACK, "carol", &fallback).await?;
 
 	assert_eq!(signed_in(services, &response).await?, account);
 
@@ -283,10 +301,70 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	Ok(())
 }
 
-/// Sign in at the provider as `sub` claiming `username`.
+/// Only an account's own sign-in completes its UIAA session's SSO stage.
 ///
-/// The provider returns to the server at `callback`. The callback's response
-/// returns unfollowed, so the caller reads its status and where it redirects.
+/// Dave's deactivation asks him to re-authenticate, and Erin signs in as herself
+/// for his UIAA session. The server refuses her and leaves his SSO stage open;
+/// Dave then completes it by signing in himself.
+async fn reauthenticate(services: &Services, base: &str, client: &Client) -> Result {
+	let response = sign_in(client, base, CALLBACK, "dave", "dave").await?;
+	let dave = signed_in(services, &response).await?;
+	let response = sign_in(client, base, CALLBACK, "erin", "erin").await?;
+
+	signed_in(services, &response).await?;
+
+	let token = "sso-fallback-account-reauthentication-token";
+
+	services
+		.users
+		.create_device(&dave, None, (Some(token), None), None, None, None)
+		.await?;
+
+	let response = client
+		.post(format!("{base}/_matrix/client/v3/account/deactivate"))
+		.bearer_auth(token)
+		.json(&json!({}))
+		.send()
+		.await?;
+
+	assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+	let challenge: UiaaInfo = response.json().await?;
+	let session = challenge.session.expect("UIAA session");
+	let destination = format!("uiaa:{session}");
+	let completed = async || {
+		services
+			.uiaa
+			.get_uiaa_session_by_session_id(&session)
+			.await
+			.map(|(.., uiaa)| uiaa.completed)
+	};
+
+	let erin = SignIn {
+		callback: CALLBACK,
+		destination: &destination,
+		sub: "erin",
+		username: "erin",
+	};
+
+	let response = sign_in_to(client, base, erin).await?;
+
+	assert_eq!(response.status(), StatusCode::FORBIDDEN, "erin's sign-in is refused");
+	assert_eq!(completed().await.as_deref(), Some(&[][..]), "dave's SSO stage stays open");
+
+	let owner = SignIn { sub: "dave", username: "dave", ..erin };
+	let response = sign_in_to(client, base, owner).await?;
+	let fallback = format!("/_matrix/client/v3/auth/m.login.sso/fallback/web?session={session}");
+
+	assert_eq!(response.headers()[LOCATION], fallback.as_str());
+
+	let completed = completed().await;
+
+	assert_eq!(completed.as_deref(), Some(&[AuthType::Sso][..]), "dave's sign-in completes it");
+
+	Ok(())
+}
+
 async fn sign_in(
 	client: &Client,
 	base: &str,
@@ -294,10 +372,29 @@ async fn sign_in(
 	sub: &str,
 	username: &str,
 ) -> Result<Response> {
+	let sign_in = SignIn {
+		callback,
+		destination: CLIENT,
+		sub,
+		username,
+	};
+
+	sign_in_to(client, base, sign_in).await
+}
+
+/// Sign in at the provider as `sub` claiming `username`, bound for `destination`.
+///
+/// The provider returns to the server at `callback`. The callback's response
+/// returns unfollowed, so the caller reads its status and where it redirects.
+async fn sign_in_to(
+	client: &Client,
+	base: &str,
+	SignIn { callback, destination, sub, username }: SignIn<'_>,
+) -> Result<Response> {
 	let url = format!("{base}/_matrix/client/v3/login/sso/redirect/{IDP}");
 	let redirect = client
 		.get(url)
-		.query(&[("redirectUrl", CLIENT)])
+		.query(&[("redirectUrl", destination)])
 		.send()
 		.await?;
 
