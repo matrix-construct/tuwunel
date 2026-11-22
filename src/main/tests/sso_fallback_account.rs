@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 mod admin;
+mod appservice;
 
 #[expect(
 	dead_code,
@@ -35,8 +36,11 @@ use tuwunel_core::{
 	Err, Result, err,
 	result::NotFound,
 	ruma::{
-		OwnedUserId,
-		api::client::uiaa::{AuthType, UiaaInfo},
+		OwnedUserId, UserId,
+		api::{
+			client::uiaa::{AuthType, UiaaInfo},
+			error::ErrorKind,
+		},
 	},
 };
 use tuwunel_service::{
@@ -46,6 +50,7 @@ use tuwunel_service::{
 
 use self::{
 	admin::{accepted, refused},
+	appservice::{Bridge, register_appservice},
 	fixture::boot,
 };
 
@@ -53,13 +58,16 @@ type TokenForm = HashMap<String, String>;
 
 #[derive(Clone, Copy)]
 struct SignIn<'a> {
+	idp: &'a str,
 	callback: &'a str,
 	destination: &'a str,
 	sub: &'a str,
 	username: &'a str,
+	mailbox: &'a str,
 }
 
 const IDP: &str = "test-idp";
+const TRUSTED: &str = "trusted-idp";
 const CLIENT: &str = "https://client.example/callback";
 const LEGACY_CALLBACK: &str = "_matrix/client/unstable/login/sso/callback";
 const CALLBACK: &str = "_tuwunel/sso/callback";
@@ -78,22 +86,30 @@ static LOGS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 /// address is bound to her new account, and Carol's registration leaves the
 /// identical address with Alice. The provider sets no `callback_url` and the
 /// server no `well_known.client`, so the legacy callback stays mounted beside
-/// the new one, and Carol's last sign-in returns through the new one. Last, a
-/// UIAA session's SSO stage is completed only by its own account's sign-in.
+/// the new one, and Carol's last sign-in returns through the new one. Then a
+/// UIAA session's SSO stage is completed only by its own account's sign-in, and
+/// last, sign-in skips the usernames an appservice reserves.
 #[test]
 fn sso_fallback_account() -> Result {
 	let provider = TcpListener::bind(("127.0.0.1", 0))?;
 	let issuer = format!("http://{}", provider.local_addr()?);
 
-	let option = |key: &str, value: &str| format!("identity_provider.{IDP}.{key}=\"{value}\"");
+	let option =
+		|idp: &str, key: &str, value: &str| format!("identity_provider.{idp}.{key}=\"{value}\"");
+
 	let options = [
 		// The capture below is the global subscriber, in the server's place.
 		"logging.enable=false",
 		"authentication.oidc.registration_allowed_redirect_hosts=[\"client.example\"]",
-		&option("client_id", IDP),
-		&option("client_secret", "test-secret"),
-		&option("brand", "test"),
-		&option("issuer_url", &issuer),
+		&option(IDP, "client_id", IDP),
+		&option(IDP, "client_secret", "test-secret"),
+		&option(IDP, "brand", "test"),
+		&option(IDP, "issuer_url", &issuer),
+		&option(TRUSTED, "client_id", TRUSTED),
+		&option(TRUSTED, "client_secret", "test-secret"),
+		&option(TRUSTED, "brand", "trusted"),
+		&option(TRUSTED, "issuer_url", &issuer),
+		&format!("identity_provider.{TRUSTED}.trusted=true"),
 	];
 
 	provider.set_nonblocking(true)?;
@@ -115,7 +131,8 @@ fn sso_fallback_account() -> Result {
 
 		let serve = serve_provider(provider, issuer);
 		let exercise = exercise(services, base, &client)
-			.and_then(|()| reauthenticate(services, base, &client));
+			.and_then(|()| reauthenticate(services, base, &client))
+			.and_then(|()| reserved_usernames(services, base, &client));
 
 		select(pin!(serve), pin!(exercise))
 			.await
@@ -126,11 +143,11 @@ fn sso_fallback_account() -> Result {
 
 /// Serve the identity provider endpoints until the test is done.
 ///
-/// A callback's code is `sub.username`, which the token endpoint returns as the
-/// access token and userinfo splits into `sub` and `preferred_username`, so each
-/// callback names the identity it signs in as. Userinfo also reports the
-/// username at a mixed-case domain as a verified address, the claim spelled as
-/// a string. Serving stops only on failure.
+/// A callback's code is `sub.username.mailbox`, which the token endpoint returns
+/// as the access token and userinfo splits into `sub`, `preferred_username` and
+/// the mailbox of an address at the mixed-case domain `Example.ORG`, sent with
+/// `email_verified` as the string `"true"`. So each callback names the identity
+/// it signs in as. Serving stops only on failure.
 async fn serve_provider(listener: TcpListener, issuer: String) -> Result {
 	let app = Router::new()
 		.route("/.well-known/openid-configuration", get(discover))
@@ -166,17 +183,21 @@ async fn token(Form(form): Form<TokenForm>) -> Json<Value> {
 }
 
 async fn userinfo(headers: HeaderMap) -> Json<Value> {
-	let (sub, username) = headers[AUTHORIZATION]
+	let (sub, claims) = headers[AUTHORIZATION]
 		.to_str()
 		.expect("bearer token")
 		.trim_start_matches("Bearer ")
 		.split_once('.')
-		.expect("subject and username");
+		.expect("subject and claims");
+
+	let (username, mailbox) = claims
+		.split_once('.')
+		.expect("username and mailbox");
 
 	Json(json!({
 		"sub": sub,
 		"preferred_username": username,
-		"email": format!("{username}@Example.ORG"),
+		"email": format_args!("{mailbox}@Example.ORG"),
 		"email_verified": "true",
 	}))
 }
@@ -341,10 +362,12 @@ async fn reauthenticate(services: &Services, base: &str, client: &Client) -> Res
 	};
 
 	let erin = SignIn {
+		idp: IDP,
 		callback: CALLBACK,
 		destination: &destination,
 		sub: "erin",
 		username: "erin",
+		mailbox: "erin",
 	};
 
 	let response = sign_in_to(client, base, erin).await?;
@@ -352,7 +375,13 @@ async fn reauthenticate(services: &Services, base: &str, client: &Client) -> Res
 	assert_eq!(response.status(), StatusCode::FORBIDDEN, "erin's sign-in is refused");
 	assert_eq!(completed().await.as_deref(), Some(&[][..]), "dave's SSO stage stays open");
 
-	let owner = SignIn { sub: "dave", username: "dave", ..erin };
+	let owner = SignIn {
+		sub: "dave",
+		username: "dave",
+		mailbox: "dave",
+		..erin
+	};
+
 	let response = sign_in_to(client, base, owner).await?;
 	let fallback = format!("/_matrix/client/v3/auth/m.login.sso/fallback/web?session={session}");
 
@@ -365,6 +394,115 @@ async fn reauthenticate(services: &Services, base: &str, client: &Client) -> Res
 	Ok(())
 }
 
+/// Sign-in skips usernames an appservice reserves, and keeps bound accounts.
+///
+/// Frank's account predates the appservice claiming `reserved_` names, and his
+/// bound identity still signs in to it. Henry's reserved preferred username
+/// falls through to his address's mailbox. Ivy's claims and fallback are all
+/// reserved, so her sign-in fails and creates no account. The trusted provider
+/// does not adopt Frank's account for Grace's unbound identity claiming his
+/// username.
+async fn reserved_usernames(services: &Services, base: &str, client: &Client) -> Result {
+	let sign_in_frank = async || {
+		let response = sign_in(client, base, CALLBACK, "frank", "reserved_frank").await?;
+
+		signed_in(services, &response).await
+	};
+
+	let frank = sign_in_frank().await?;
+
+	assert_eq!(frank.localpart(), "reserved_frank", "frank's account predates the namespace");
+
+	let provider = services.oauth.providers.get(IDP).await?;
+	let ivy_identity = unique_id_sub((&provider, "ivy"))?;
+	let fallback = fallback_localpart(&ivy_identity);
+	let users = format!("^@(reserved_.*|{fallback}):localhost$");
+	let bridge = Bridge {
+		id: "names",
+		token: "test-names-token",
+		sender_localpart: "names",
+		users: &users,
+		aliases: None,
+	};
+
+	register_appservice(services, &bridge).await?;
+
+	let ordinary = services
+		.oauth
+		.candidate_user_id("ordinary")
+		.await?;
+
+	let reserved = services
+		.oauth
+		.candidate_user_id("reserved_example")
+		.await;
+
+	assert_eq!(ordinary.localpart(), "ordinary");
+	assert_eq!(reserved.expect_err("reserved candidate").kind(), ErrorKind::Exclusive);
+
+	let account = sign_in_frank().await?;
+
+	assert_eq!(account, frank, "frank's identity keeps his account");
+
+	let henry = SignIn {
+		idp: IDP,
+		callback: CALLBACK,
+		destination: CLIENT,
+		sub: "henry",
+		username: "reserved_henry",
+		mailbox: "henry",
+	};
+
+	let response = sign_in_to(client, base, henry).await?;
+	let account = signed_in(services, &response).await?;
+
+	assert_eq!(account.localpart(), "henry", "henry's reserved username is skipped");
+	assert!(!exists(services, "reserved_henry").await?, "no reserved account is created");
+
+	let ivy = SignIn {
+		sub: "ivy",
+		username: "reserved_ivy",
+		mailbox: "reserved_ivy_mail",
+		..henry
+	};
+
+	let response = sign_in_to(client, base, ivy).await?;
+
+	assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+	let error: Value = response.json().await?;
+	let linked = services
+		.oauth
+		.sessions
+		.get_by_unique_id(&ivy_identity)
+		.await;
+
+	assert_eq!(error["errcode"], "M_USER_IN_USE");
+	assert!(linked.is_not_found(), "ivy's identity is linked to no account");
+
+	for localpart in ["reserved_ivy", "reserved_ivy_mail", &fallback] {
+		assert!(!exists(services, localpart).await?, "{localpart} has no account");
+	}
+
+	let grace = SignIn {
+		idp: TRUSTED,
+		sub: "grace",
+		username: "reserved_frank",
+		mailbox: "reserved_frank",
+		..henry
+	};
+
+	let response = sign_in_to(client, base, grace).await?;
+	let account = signed_in(services, &response).await?;
+	let trusted = services.oauth.providers.get(TRUSTED).await?;
+	let grace_identity = unique_id_sub((&trusted, "grace"))?;
+
+	assert_ne!(account, frank, "the trusted provider does not adopt frank's account");
+	assert_eq!(fallback_localpart(&grace_identity), account.localpart());
+
+	Ok(())
+}
+
 async fn sign_in(
 	client: &Client,
 	base: &str,
@@ -373,25 +511,35 @@ async fn sign_in(
 	username: &str,
 ) -> Result<Response> {
 	let sign_in = SignIn {
+		idp: IDP,
 		callback,
 		destination: CLIENT,
 		sub,
 		username,
+		mailbox: username,
 	};
 
 	sign_in_to(client, base, sign_in).await
 }
 
-/// Sign in at the provider as `sub` claiming `username`, bound for `destination`.
+/// Sign in at provider `idp` as `sub` claiming `username`, bound for `destination`.
 ///
-/// The provider returns to the server at `callback`. The callback's response
-/// returns unfollowed, so the caller reads its status and where it redirects.
+/// The provider also reports an address at `mailbox` and returns to the server
+/// at `callback`. The callback's response returns unfollowed, so the caller
+/// reads its status and where it redirects.
 async fn sign_in_to(
 	client: &Client,
 	base: &str,
-	SignIn { callback, destination, sub, username }: SignIn<'_>,
+	SignIn {
+		idp,
+		callback,
+		destination,
+		sub,
+		username,
+		mailbox,
+	}: SignIn<'_>,
 ) -> Result<Response> {
-	let url = format!("{base}/_matrix/client/v3/login/sso/redirect/{IDP}");
+	let url = format!("{base}/_matrix/client/v3/login/sso/redirect/{idp}");
 	let redirect = client
 		.get(url)
 		.query(&[("redirectUrl", destination)])
@@ -408,8 +556,8 @@ async fn sign_in_to(
 		.next()
 		.expect("cookie pair");
 
-	let url = format!("{base}/{callback}/{IDP}");
-	let code = format!("{sub}.{username}");
+	let url = format!("{base}/{callback}/{idp}");
+	let code = format!("{sub}.{username}.{mailbox}");
 
 	client
 		.get(url)
@@ -465,6 +613,12 @@ fn assert_unlogged(session: &Session) {
 
 		assert_eq!(leak, None, "{name} reached the log output");
 	}
+}
+
+async fn exists(services: &Services, localpart: &str) -> Result<bool> {
+	let user_id = UserId::parse_with_server_name(localpart, services.globals.server_name())?;
+
+	Ok(services.users.exists(&user_id).await)
 }
 
 fn location(response: &Response) -> Result<Url> {

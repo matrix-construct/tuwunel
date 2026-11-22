@@ -180,20 +180,27 @@ administration routes it serves.
 
 ## Match MAS-provisioned users
 
-Ensure the MAS worker finishes provisioning each account before that user's
-first SSO login. Configure the same self-hosted MAS identity provider as trusted
-so its `username` claim can match the existing account:
+Wait for the MAS worker to provision each user's account before their first
+single sign-on (SSO) login.
+
+> [!WARNING]
+> Enable trusted mode only if you self-host and fully control the MAS instance
+> at `issuer_url` and it provisions accounts on this server. A trusted provider
+> can grant access to an existing Matrix account by returning its localpart
+> (the username portion of its Matrix user ID). Tuwunel skips names that
+> `registration.forbidden_usernames` blocks or that an
+> [application service](../../appservices.md) reserves.
+
+In the MAS `[[global.identity_provider]]` entry in `tuwunel.toml`, set
+`trusted` and tell Tuwunel to match accounts by the `username` MAS returns.
 
 ```toml
 trusted = true
 userid_claims = ["username"]
 ```
 
-Only enable trusted mode when `issuer_url` names the same MAS instance that
-provisions this server and you operate and fully control it. A trusted provider
-can authenticate as any existing Matrix account whose localpart matches a
-returned username. The `brand` value selects MAS-specific defaults; it does not
-establish trust or link the provider to `mas_secret`.
+The `brand` value selects MAS-specific defaults. It does not establish trust
+or link the provider to `mas_secret`.
 
 Do not include `"sub"` in `userid_claims` for this topology. Tuwunel gives it
 precedence over `username`, while MAS provisions accounts by localpart. Leaving
@@ -209,8 +216,9 @@ registration = false
 This makes an SSO login fail instead of creating an account when provisioning
 has not completed. It only controls registration through this identity
 provider. Keep the global `allow_registration` setting disabled as well if every
-account creation path must go through MAS. If the provider cannot be trusted,
-use an
+account creation path must go through MAS.
+
+If the provider cannot be trusted, use an
 [admin-approved association](../providers.md#admin-approved-association-for-untrusted-providers)
 for each existing user instead.
 

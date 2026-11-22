@@ -1881,13 +1881,15 @@ pub struct IdentityProvider {
 	/// username, falling back to random characters to avoid conflicts; a trusted
 	/// provider instead finds the first matching user and grants access to it,
 	/// which is how an existing matrix account is associated with a provider and
-	/// also how one can be hijacked. A trusted provider's `email` claim is also
-	/// bound to a new account when it sends no `email_verified` claim, where an
-	/// untrusted one must mark it verified. Only set this option to true for
-	/// providers you self-host and control, never for public providers such as
-	/// GitHub or GitLab. An existing user can still be associated with an
-	/// untrusted provider, but only with the command '!admin query oauth
-	/// associate'.
+	/// also how one can be hijacked. It never matches a username that
+	/// `forbidden_usernames` matches or that an appservice reserves, as its
+	/// sender user or within its exclusive user namespace. A trusted provider's
+	/// `email` claim is also bound to a new account when it sends no
+	/// `email_verified` claim, where an untrusted one must mark it verified.
+	/// Only set this option to true for providers you self-host and control,
+	/// never for public providers such as GitHub or GitLab. An existing user can
+	/// still be associated with an untrusted provider, but only with the command
+	/// '!admin query oauth associate'.
 	///
 	/// default: false
 	#[serde(default)]

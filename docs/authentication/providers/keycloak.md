@@ -31,13 +31,17 @@ See the [callback setup steps](../providers.md#callback).
 > starting. You can verify them with
 > [matrixtest](../../calls/matrix_rtc.md#troubleshooting).
 
-With `trusted = true`, users whose Keycloak username matches an existing
-Matrix localpart (the username portion of a Matrix user ID) can log in to that
-account through single sign-on (SSO).
-
 > [!WARNING]
 > Only use `trusted = true` for identity providers you self-host and fully
 > control. See [Linking existing users](../providers.md#linking-existing-users-to-an-identity-provider).
+
+With `trusted = true`, a user can sign in through Keycloak to an existing
+Matrix account if their Keycloak username matches its localpart (the username
+portion of the Matrix user ID). Tuwunel skips names that
+`registration.forbidden_usernames` blocks or that an
+[application service](../../appservices.md) reserves. If the user's Keycloak
+identity is already linked to the account, they can still sign in through
+single sign-on (SSO).
 
 Add the following to your `tuwunel.toml`. Replace the placeholders with the
 values from your Keycloak client.

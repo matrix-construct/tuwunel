@@ -121,7 +121,7 @@ it uses the first matching provider in configuration order.
 | Field | Default | Description |
 |---|---|---|
 | `userid_claims` | all | Claims used to compute the Matrix localpart for new registrations. When empty, Tuwunel avoids generated IDs where possible. The special value `"unique"` forces generated IDs exclusively. The claim `"sub"` takes precedence over all others when listed. |
-| `trusted` | `false` | Inverts user matching: instead of registering a new account when claims conflict with existing users, Tuwunel finds the first matching user and grants access to it. **Only set this for providers you self-host and fully control. Never use with public providers (GitHub, GitLab, Google, etc.); it enables account takeover.** For migrated databases, prefer durable bulk adoption or individual association to temporarily enabling this option. A trusted provider's `email` claim is also bound to a new account when it sends no `email_verified` claim. |
+| `trusted` | `false` | Inverts user matching: instead of registering a new account when claims conflict with existing users, Tuwunel finds the first matching user and grants access to it. It never matches a username that `registration.forbidden_usernames` matches or that an appservice reserves as its sender user or within its exclusive user namespace. **Only set this for providers you self-host and fully control. Never use with public providers (GitHub, GitLab, Google, etc.); it enables account takeover.** For migrated databases, prefer durable bulk adoption or individual association to temporarily enabling this option. A trusted provider's `email` claim is also bound to a new account when it sends no `email_verified` claim. |
 | `unique_id_fallbacks` | `true` | When no claim maps cleanly to an available username, generate a unique random localpart as a fallback. Set to `false` on private servers where random usernames are undesirable — a misconfiguration will produce an error instead. |
 | `registration` | `true` | Whether this provider can create new Matrix accounts. Set to `false` to restrict the provider to existing users only. |
 
@@ -232,8 +232,8 @@ trusted = true
 ```
 
 With `trusted = true`, users whose Keycloak username matches an existing Matrix
-localpart are granted access to that account. Only use `trusted` when you
-control the identity provider.
+localpart are granted access to that account, unless an appservice reserves
+that localpart. Only use `trusted` when you control the identity provider.
 
 ### Matrix Authentication Service (MAS)
 
@@ -267,7 +267,9 @@ Marking the provider as trusted then inverts Tuwunel's normal logic: instead
 of registering a new account when it finds no existing match, it looks for an
 existing Matrix account whose localpart equals the `sub` value and grants
 access to it. The result is that logging in through the provider seamlessly
-picks up the user's existing account:
+picks up the user's existing account. A localpart an appservice reserves is
+never matched this way, though an identity already linked to such an account
+still signs in to it:
 
 ```toml
 [[global.identity_provider]]
@@ -340,24 +342,33 @@ it is typically an opaque identifier rather than a human-readable name. It is
 only consulted when explicitly listed in `userid_claims`, where it always
 takes precedence over every other claim regardless of list order.
 
-If none of these five claims appear in the userinfo response, or if every
-derived candidate is already taken by another account, Tuwunel falls back to
-a randomly generated localpart. This fallback is controlled by
-`unique_id_fallbacks`, which defaults to `true`. On private servers where
-silent random assignment is unacceptable, set it to `false` — Tuwunel will
-return an error instead.
+A candidate is skipped, under a trusted provider too, when it is not a valid
+localpart, when `registration.forbidden_usernames` matches it, or when an
+appservice reserves it: the appservice's own sender user, or any user in its
+exclusive user namespace. Otherwise a candidate naming no account is accepted
+for a new account, and one naming an existing account is accepted only by a
+trusted provider, which grants that account.
+
+When no claim is accepted, Tuwunel falls back to a localpart derived from the
+provider identity, the same one on every sign-in. That last candidate is
+checked like the others: when it is skipped too, or names an account this
+identity cannot claim, the sign-in fails with `M_USER_IN_USE`.
+`unique_id_fallbacks`, which defaults to `true`, controls whether a new account
+may be created at that localpart. On private servers where silent
+identity-derived usernames are unacceptable, set it to `false`, and Tuwunel
+returns an error instead of creating one.
 
 **Make sure user profiles on your identity provider contain at least one of
 the five claims above.** If a profile has none of them, Tuwunel has nothing
-to work with and will resort to the random fallback. The safest choice is to
-ensure `preferred_username` is populated on every account, as it is the
-first claim Tuwunel checks and tends to hold a recognisable, human-readable
-name that also makes a reasonable Matrix localpart.
+to work with and will resort to the identity-derived fallback. The safest
+choice is to ensure `preferred_username` is populated on every account, as it
+is the first claim Tuwunel checks and tends to hold a recognisable,
+human-readable name that also makes a reasonable Matrix localpart.
 
 The `userid_claims` field lets you restrict which claims Tuwunel considers
 and in what order. For example, to use only `preferred_username` and fall
-back to the local part of the email address, and never silently generate a
-random ID:
+back to the local part of the email address, and never silently create an
+account at an identity-derived ID:
 
 ```toml
 userid_claims = ["preferred_username", "email"]
@@ -366,7 +377,7 @@ unique_id_fallbacks = false
 
 Listing `"sub"` anywhere in `userid_claims` elevates it to the highest
 priority, overriding all other entries. The special value `"unique"` used
-alone instructs Tuwunel to always generate a unique random localpart and
+alone instructs Tuwunel to always use the identity-derived localpart and
 never attempt to derive one from claims at all.
 
 ### Registration hints for OAuth-aware clients
