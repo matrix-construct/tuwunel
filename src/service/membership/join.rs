@@ -743,8 +743,10 @@ fn merge_restricted_signature(
 /// have passed, returning the state the response's `state` list names.
 ///
 /// A stored event is not evidence that this response contains an authorized
-/// chain, and the lists need not be in dependency order. Two admitted state
-/// events for one state key fail the response.
+/// chain, and the lists need not be in dependency order. An event naming a
+/// different create event than the room's, or a local user's join sent by
+/// someone else, is dropped before admission, as are the events depending on
+/// it. Two admitted state events for one state key fail the response.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all, fields(%room_id))]
 async fn ingest_send_join_events(
@@ -760,6 +762,12 @@ async fn ingest_send_join_events(
 		.then(|| room_id.as_event_id())
 		.transpose()?;
 
+	let known_create = self
+		.services
+		.event_handler
+		.known_create_id(room_id)
+		.await?;
+
 	let auth_events = self
 		.verified_pdus(room_id, room_version_id, room_version_rules, auth_chain, "auth_chain")
 		.map(|pdu| (pdu, false));
@@ -768,8 +776,18 @@ async fn ingest_send_join_events(
 		.verified_pdus(room_id, room_version_id, room_version_rules, state, "state")
 		.map(|pdu| (pdu, true));
 
+	let incoming = auth_events
+		.chain(state_events)
+		.ready_filter(|((event_id, pdu, ..), _)| {
+			self.services
+				.event_handler
+				.check_event_provenance(pdu, room_version_rules, known_create.as_deref())
+				.inspect_err(|error| debug_warn!(?event_id, %error, "Refused send_join event."))
+				.is_ok()
+		});
+
 	let admission = Admission {
-		incoming: pin!(auth_events.chain(state_events)),
+		incoming: pin!(incoming),
 		waiting: HashMap::new(),
 		woken: Vec::new(),
 		accepted: HashSet::new(),

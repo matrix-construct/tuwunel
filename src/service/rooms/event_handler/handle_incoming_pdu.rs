@@ -41,7 +41,7 @@ mod tests;
 
 type PrevSplit = SmallVec<[OwnedEventId; MAX_PREV_EVENTS]>;
 
-type Handled = Option<(RawPduId, bool)>;
+pub(super) type Handled = Option<(RawPduId, bool)>;
 
 /// An event one of the receive entries let into its room.
 ///

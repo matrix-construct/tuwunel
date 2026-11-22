@@ -4,6 +4,7 @@ use std::{
 	path::{Path, PathBuf},
 	pin::{Pin, pin},
 	process::Command as StdCommand,
+	slice::from_ref,
 	sync::{Arc, Mutex},
 	task::{Context, Poll, Waker},
 	thread::current as current_thread,
@@ -11,15 +12,17 @@ use std::{
 
 use futures::future::ready;
 use ruma::{
-	CanonicalJsonObject, DeviceId, EventId, OwnedEventId, RoomId, RoomVersionId, UserId,
+	CanonicalJsonObject, DeviceId, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId,
+	RoomVersionId, ServerName, UserId,
 	events::{
 		AnyStrippedStateEvent, StateEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
 	},
-	serde::Raw,
+	serde::{Base64, Raw},
+	signatures::{Ed25519KeyPair, hash_and_sign_event},
 };
 use serde::Serialize;
-use serde_json::{Value as JsonValue, from_value, json, to_value};
+use serde_json::{Value as JsonValue, from_value, json, to_value, to_vec};
 use tokio::{process::Command, runtime::Handle, task::coop::unconstrained};
 use tracing::{
 	Level,
@@ -38,7 +41,9 @@ use tuwunel_core::{
 	metrics::Metrics,
 	utils::{random_string, sys::command_without_env_prefixes},
 };
-use tuwunel_matrix::{PduCount, PduId, RawPduId, event::gen_event_id};
+use tuwunel_matrix::{
+	PduCount, PduId, RawPduId, event::gen_event_id, room_version::rules as room_version_rules,
+};
 
 use crate::{
 	Services,
@@ -68,6 +73,16 @@ pub(crate) struct Warnings {
 	recorded: Recorded,
 	_capture: Guard,
 	_subscriber: DefaultGuard,
+}
+
+/// Describes one v11 state event for `state_event` to sign.
+///
+/// The event is sent by `@bob:localhost` and signed with this server's key.
+pub(crate) struct StateEvent<'a> {
+	pub(crate) kind: &'a str,
+	pub(crate) state_key: &'a str,
+	pub(crate) content: &'a JsonValue,
+	pub(crate) auth_events: &'a [&'a OwnedEventId],
 }
 
 const CHILD_TEST_ENV: &str = "SERVICE_TEST_CHILD";
@@ -214,8 +229,20 @@ pub(crate) fn signed_state(
 		"auth_events": [],
 	});
 
-	let event = sign_event(services, &version, from_value(event)?)?;
-	let event_id = gen_event_id(&event, &version)?;
+	signed(services, &version, event)
+}
+
+/// Signs an event with this server's key and derives its ID, both under the
+/// given room version.
+///
+/// The event comes back in its wire form beside the derived ID.
+pub(crate) fn signed(
+	services: &Services,
+	version: &RoomVersionId,
+	event: JsonValue,
+) -> Result<(OwnedEventId, JsonValue)> {
+	let event = sign_event(services, version, from_value(event)?)?;
+	let event_id = gen_event_id(&event, version)?;
 
 	Ok((event_id, to_value(event)?))
 }
@@ -228,6 +255,167 @@ fn sign_event(
 	services
 		.server_keys
 		.hash_and_sign_event(&mut event, version)?;
+
+	Ok(event)
+}
+
+/// Builds the create event of a v11 room and the join of its creator,
+/// `@bob:localhost`.
+///
+/// The create event comes first and the join second, each beside its event ID.
+pub(crate) fn room(
+	services: &Services,
+	room_id: &RoomId,
+) -> Result<[(OwnedEventId, JsonValue); 2]> {
+	let create = create_event(services, room_id, &json!({ "room_version": "11" }))?;
+	let join = state_event(services, room_id, StateEvent {
+		kind: "m.room.member",
+		state_key: "@bob:localhost",
+		content: &json!({ "membership": "join" }),
+		auth_events: &[&create.0],
+	})?;
+
+	Ok([create, join])
+}
+
+/// Builds a second create event for a room built by [`room`].
+///
+/// It sets `m.federate`, which the first leaves out, so the two differ.
+pub(crate) fn other_create(
+	services: &Services,
+	room_id: &RoomId,
+) -> Result<(OwnedEventId, JsonValue)> {
+	create_event(services, room_id, &json!({ "room_version": "11", "m.federate": false }))
+}
+
+fn create_event(
+	services: &Services,
+	room_id: &RoomId,
+	content: &JsonValue,
+) -> Result<(OwnedEventId, JsonValue)> {
+	state_event(services, room_id, StateEvent {
+		kind: "m.room.create",
+		state_key: "",
+		content,
+		auth_events: &[],
+	})
+}
+
+/// Builds a join for a room's creator sent by `@mallory:remote.example`,
+/// following only the room's create event.
+///
+/// The room version's rules allow that shape before they check that a join is
+/// self-sent. The event is returned unsigned.
+pub(crate) fn creator_join(
+	room_id: &RoomId,
+	creator: &str,
+	create_id: &OwnedEventId,
+) -> JsonValue {
+	json!({
+		"type": "m.room.member",
+		"state_key": creator,
+		"content": { "membership": "join" },
+		"room_id": room_id,
+		"sender": "@mallory:remote.example",
+		"origin_server_ts": 1,
+		"depth": 2,
+		"prev_events": [create_id],
+		"auth_events": [create_id],
+	})
+}
+
+/// Signs a v11 state event of `@bob:localhost` with this server's key, as
+/// another server would relay it.
+///
+/// Its previous event is the last of its auth events.
+pub(crate) fn state_event(
+	services: &Services,
+	room_id: &RoomId,
+	event: StateEvent<'_>,
+) -> Result<(OwnedEventId, JsonValue)> {
+	let prev_events = event
+		.auth_events
+		.last()
+		.map(from_ref)
+		.unwrap_or_default();
+
+	signed_event(services, room_id, event, prev_events)
+}
+
+/// Signs a v11 state event of `@bob:localhost` naming the given previous
+/// events.
+///
+/// Its depth is one more than the number of its auth events.
+pub(crate) fn signed_event(
+	services: &Services,
+	room_id: &RoomId,
+	StateEvent { kind, state_key, content, auth_events }: StateEvent<'_>,
+	prev_events: &[&OwnedEventId],
+) -> Result<(OwnedEventId, JsonValue)> {
+	let event = json!({
+		"type": kind,
+		"state_key": state_key,
+		"content": content,
+		"room_id": room_id,
+		"sender": "@bob:localhost",
+		"origin_server_ts": 1,
+		"depth": auth_events.len().saturating_add(1),
+		"prev_events": prev_events,
+		"auth_events": auth_events,
+	});
+
+	signed(services, &RoomVersionId::V11, event)
+}
+
+/// Generates a signing key for another server and stores its verify key, as
+/// fetching that server's keys would.
+///
+/// Events the server signs with the key then verify here without a fetch.
+pub(crate) fn remote_key(services: &Services, origin: &ServerName) -> Result<Ed25519KeyPair> {
+	let key = Ed25519KeyPair::from_der(&Ed25519KeyPair::generate(), "remote".into())
+		.map_err(|e| err!("{origin} key: {e}"))?;
+
+	let key_id = format!("ed25519:{}", key.version());
+	let public_key: Base64 = Base64::new(key.public_key().to_vec());
+	let keys = json!({
+		"server_name": origin,
+		"valid_until_ts": MilliSecondsSinceUnixEpoch::now(),
+		"verify_keys": { key_id: { "key": public_key } },
+		"old_verify_keys": {},
+		"signatures": {},
+	});
+
+	services.db["server_signingkeys"].insert(origin.as_bytes(), to_vec(&keys)?);
+
+	Ok(key)
+}
+
+/// Signs an event as another server and derives its ID, both under the given
+/// room version.
+///
+/// The event comes back in its wire form beside the derived ID.
+pub(crate) fn remote_signed(
+	origin: &ServerName,
+	key: &Ed25519KeyPair,
+	version: &RoomVersionId,
+	event: JsonValue,
+) -> Result<(OwnedEventId, JsonValue)> {
+	let event = remote_sign_event(origin, key, version, from_value(event)?)?;
+	let event_id = gen_event_id(&event, version)?;
+
+	Ok((event_id, to_value(event)?))
+}
+
+fn remote_sign_event(
+	origin: &ServerName,
+	key: &Ed25519KeyPair,
+	version: &RoomVersionId,
+	mut event: CanonicalJsonObject,
+) -> Result<CanonicalJsonObject> {
+	let rules = room_version_rules(version)?;
+
+	hash_and_sign_event(origin.as_str(), key, &mut event, &rules.redaction)
+		.map_err(|e| err!("sign event as {origin}: {e}"))?;
 
 	Ok(event)
 }

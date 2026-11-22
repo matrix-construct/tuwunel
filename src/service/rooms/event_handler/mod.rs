@@ -17,6 +17,7 @@ mod outlier_state;
 mod parse_incoming_pdu;
 mod policy_server;
 mod prev_walk;
+mod provenance;
 mod resolve_state;
 mod state_at_incoming;
 mod state_local_build;
