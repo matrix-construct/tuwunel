@@ -1,9 +1,14 @@
-use std::{cmp::Ordering, collections::BTreeMap};
+use std::{
+	cmp::Ordering,
+	collections::{BTreeMap, HashMap},
+	iter::once_with,
+};
 
 use futures::{
 	FutureExt, StreamExt,
 	future::{join, join3},
 };
+use itertools::Either::{Left, Right};
 use ruma::{
 	OwnedRoomId, RoomId, UInt, api::client::sync::sync_events::v5::ListId,
 	events::room::member::MembershipState, uint,
@@ -18,7 +23,10 @@ use tuwunel_core::{
 	},
 };
 use tuwunel_matrix::PduCount;
-use tuwunel_service::{sync::Connection, users::InviteFilter};
+use tuwunel_service::{
+	sync::{Connection, Lists},
+	users::InviteFilter,
+};
 
 use super::{
 	super::invite_permitted_room,
@@ -345,27 +353,9 @@ async fn window<'a, Rooms>(
 where
 	Rooms: Iterator<Item = &'a WindowRoom> + Clone + Send + Sync,
 {
-	static FULL_RANGE: (UInt, UInt) = (UInt::MIN, UInt::MAX);
-
 	let SyncInfo { services, sender_user, .. } = sync_info;
-
-	let selections = conn
-		.lists
-		.iter()
-		.flat_map(|(id, list)| {
-			let full_range = list
-				.ranges
-				.is_empty()
-				.then_some(&FULL_RANGE)
-				.into_iter();
-
-			list.ranges
-				.iter()
-				.chain(full_range)
-				.map(apply!(2, usize_from_ruma))
-				.map(move |range| (id, range))
-		})
-		.flat_map(|(id, (start, end))| select_list_range(rooms.clone(), id, start, end).cloned())
+	let selections = list_selections(&conn.lists, rooms.clone())
+		.cloned()
 		.stream();
 
 	let indexed_subscriptions = (conn.subscriptions.len() > 1).then(|| {
@@ -453,7 +443,59 @@ where
 		.await
 }
 
-fn detached_room(room: WindowRoom) -> WindowRoom { WindowRoom { lists: ListIds::new(), ..room } }
+/// Yields each room the list ranges select, borrowed until the window copies it.
+///
+/// A list with several ranges, or a room matching several lists, can select a
+/// room more than once; then each room keeps only its last selection, the record
+/// the window's own collect would keep, and is copied once. The table holding
+/// them grows with the distinct rooms, never with the selections, and is built
+/// only when the first selection is pulled, after the window's earlier legs.
+fn list_selections<'a>(
+	lists: &Lists,
+	rooms: impl Iterator<Item = &'a WindowRoom> + Clone,
+) -> impl Iterator<Item = &'a WindowRoom> {
+	let once = lists.values().all(|list| list.ranges.len() < 2)
+		&& (lists.len() < 2 || rooms.clone().all(|room| room.lists.len() < 2));
+
+	let selections = range_selections(lists, rooms);
+
+	if once {
+		return Left(selections);
+	}
+
+	let last = once_with(move || {
+		selections.fold(HashMap::new(), |mut last, room| {
+			last.insert(&room.room_id, room);
+			last
+		})
+	});
+
+	Right(last.flat_map(HashMap::into_values))
+}
+
+fn range_selections<'a>(
+	lists: &Lists,
+	rooms: impl Iterator<Item = &'a WindowRoom> + Clone,
+) -> impl Iterator<Item = &'a WindowRoom> {
+	static FULL_RANGE: (UInt, UInt) = (UInt::MIN, UInt::MAX);
+
+	lists
+		.iter()
+		.flat_map(|(id, list)| {
+			let full_range = list
+				.ranges
+				.is_empty()
+				.then_some(&FULL_RANGE)
+				.into_iter();
+
+			list.ranges
+				.iter()
+				.chain(full_range)
+				.map(apply!(2, usize_from_ruma))
+				.map(move |range| (id, range))
+		})
+		.flat_map(move |(id, (start, end))| select_list_range(rooms.clone(), id, start, end))
+}
 
 fn select_list_range<'a, Rooms>(
 	rooms: Rooms,
@@ -471,16 +513,23 @@ where
 		.take(end.saturating_add(1).saturating_sub(start))
 }
 
+fn detached_room(room: WindowRoom) -> WindowRoom { WindowRoom { lists: ListIds::new(), ..room } }
+
 #[cfg(test)]
 mod tests {
+	use std::iter::once;
+
+	use itertools::Itertools;
 	use ruma::{
-		OwnedRoomId, api::client::sync::sync_events::v5::ListId,
-		events::room::member::MembershipState, room_id, uint,
+		OwnedRoomId,
+		api::client::sync::sync_events::v5::{ListId, request::List},
+		events::room::member::MembershipState,
+		room_id, uint,
 	};
 
 	use super::{
-		ActivityCounts, ListIds, WindowRoom, activity_counts, detached_room, response_lists,
-		room_sort, select_list_range,
+		ActivityCounts, ListIds, Lists, Window, WindowRoom, activity_counts, detached_room,
+		list_selections, range_selections, response_lists, room_sort, select_list_range,
 	};
 
 	const NEXT_BATCH: u64 = 10;
@@ -572,6 +621,104 @@ mod tests {
 	}
 
 	#[test]
+	fn overlapping_ranges_select_each_room_once() {
+		let main = ListId::from("main");
+		let other = ListId::from("other");
+		let both: ListIds = [main.clone(), other.clone()]
+			.into_iter()
+			.collect();
+
+		let rooms = [
+			WindowRoom {
+				lists: both,
+				..room(room_id!("!first:example.com").to_owned(), 2, 2, None)
+			},
+			WindowRoom {
+				lists: [main.clone()].into(),
+				..room(room_id!("!second:example.com").to_owned(), 1, 1, None)
+			},
+		];
+
+		let ranges = [(uint!(0), uint!(1)), (uint!(0), uint!(0))]
+			.into_iter()
+			.collect();
+
+		let lists =
+			[(main, List { ranges, ..Default::default() }), (other, List::default())].into();
+
+		let selected: Vec<_> = list_selections(&lists, rooms.iter())
+			.map(|room| &room.room_id)
+			.sorted()
+			.collect();
+
+		assert_eq!(selected, [&rooms[0].room_id, &rooms[1].room_id]);
+	}
+
+	/// Two records naming one room leave the window as the last one any range
+	/// selected.
+	///
+	/// That holds whether the selections stream through (one range per list, no
+	/// room in two lists) or collapse first (repeated ranges, rooms in several
+	/// lists), and the record replaces the room's subscription-only copy as every
+	/// range's own copy does.
+	#[test]
+	fn a_room_keeps_its_last_selected_record() {
+		let room_id = room_id!("!same:example.com");
+		let [all, invites, recent] = ["all", "invites", "recent"].map(ListId::from);
+		let records = |joined: &[&ListId], invited: &[&ListId]| {
+			[
+				WindowRoom {
+					lists: joined.iter().copied().cloned().collect(),
+					..room(room_id.to_owned(), 5, 5, Some(MembershipState::Join))
+				},
+				WindowRoom {
+					lists: invited.iter().copied().cloned().collect(),
+					..room(room_id.to_owned(), 3, 4, Some(MembershipState::Invite))
+				},
+			]
+		};
+
+		let subscribed = detached_room(room(room_id.to_owned(), 9, 9, None));
+		let ranges = [(uint!(0), uint!(1)), (uint!(0), uint!(0))]
+			.into_iter()
+			.collect();
+
+		let overlapping = List { ranges, ..Default::default() };
+		let full = |id: &ListId| (id.clone(), List::default());
+		let cases: [([WindowRoom; 2], Lists, MembershipState); 5] = [
+			(records(&[&all], &[&all]), [full(&all)].into(), MembershipState::Invite),
+			(
+				records(&[&all], &[&invites]),
+				[full(&all), full(&invites)].into(),
+				MembershipState::Invite,
+			),
+			(
+				records(&[&all], &[&all]),
+				[(all.clone(), overlapping)].into(),
+				MembershipState::Join,
+			),
+			(
+				records(&[&all], &[&all, &invites]),
+				[full(&all), full(&invites)].into(),
+				MembershipState::Invite,
+			),
+			(
+				records(&[&all, &recent], &[&all, &invites]),
+				[full(&all), full(&invites), full(&recent)].into(),
+				MembershipState::Join,
+			),
+		];
+
+		for (rooms, lists, membership) in cases {
+			let copied = assembled(&subscribed, range_selections(&lists, rooms.iter()));
+			let selected = assembled(&subscribed, list_selections(&lists, rooms.iter()));
+
+			assert_eq!(selected, copied);
+			assert_eq!(selected[room_id].membership, Some(membership));
+		}
+	}
+
+	#[test]
 	fn equal_activity_rooms_have_deterministic_order() {
 		let mut rooms = [
 			room(room_id!("!z:example.com").to_owned(), 5, 5, None),
@@ -629,6 +776,16 @@ mod tests {
 		assert_eq!(lists.len(), 2);
 		assert_eq!(lists[&all].count, uint!(1));
 		assert_eq!(lists[&invites].count, uint!(0));
+	}
+
+	fn assembled<'a>(
+		subscribed: &WindowRoom,
+		selections: impl Iterator<Item = &'a WindowRoom>,
+	) -> Window {
+		once(subscribed.clone())
+			.chain(selections.cloned())
+			.map(|room| (room.room_id.clone(), room))
+			.collect()
 	}
 
 	fn room(

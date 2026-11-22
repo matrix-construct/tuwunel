@@ -70,7 +70,7 @@ struct SyncInfo<'a> {
 	direct_rooms: &'a BTreeSet<OwnedRoomId>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct WindowRoom {
 	room_id: OwnedRoomId,
 	membership: Option<MembershipState>,
