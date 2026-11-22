@@ -38,6 +38,7 @@ use tuwunel_core::{
 	ruma::{
 		OwnedUserId, UserId,
 		api::{
+			appservice::{Namespace, Namespaces, Registration, RegistrationInit},
 			client::uiaa::{AuthType, UiaaInfo},
 			error::ErrorKind,
 		},
@@ -68,6 +69,7 @@ struct SignIn<'a> {
 
 const IDP: &str = "test-idp";
 const TRUSTED: &str = "trusted-idp";
+const STRICT: &str = "strict-idp";
 const CLIENT: &str = "https://client.example/callback";
 const LEGACY_CALLBACK: &str = "_matrix/client/unstable/login/sso/callback";
 const CALLBACK: &str = "_tuwunel/sso/callback";
@@ -88,7 +90,8 @@ static LOGS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 /// server no `well_known.client`, so the legacy callback stays mounted beside
 /// the new one, and Carol's last sign-in returns through the new one. Then a
 /// UIAA session's SSO stage is completed only by its own account's sign-in, and
-/// last, sign-in skips the usernames an appservice reserves.
+/// last, sign-in skips the usernames an appservice reserves, local policy
+/// forbids or strict syntax rejects.
 #[test]
 fn sso_fallback_account() -> Result {
 	let provider = TcpListener::bind(("127.0.0.1", 0))?;
@@ -110,6 +113,12 @@ fn sso_fallback_account() -> Result {
 		&option(TRUSTED, "brand", "trusted"),
 		&option(TRUSTED, "issuer_url", &issuer),
 		&format!("identity_provider.{TRUSTED}.trusted=true"),
+		&option(STRICT, "client_id", STRICT),
+		&option(STRICT, "client_secret", "test-secret"),
+		&option(STRICT, "brand", "strict"),
+		&option(STRICT, "issuer_url", &issuer),
+		&format!("identity_provider.{STRICT}.unique_id_fallbacks=false"),
+		"registration.forbidden_usernames=[\"^forbidden_\"]",
 	];
 
 	provider.set_nonblocking(true)?;
@@ -132,7 +141,8 @@ fn sso_fallback_account() -> Result {
 		let serve = serve_provider(provider, issuer);
 		let exercise = exercise(services, base, &client)
 			.and_then(|()| reauthenticate(services, base, &client))
-			.and_then(|()| reserved_usernames(services, base, &client));
+			.and_then(|()| reserved_usernames(services, base, &client))
+			.and_then(|()| skipped_usernames(services, base, &client));
 
 		select(pin!(serve), pin!(exercise))
 			.await
@@ -501,6 +511,126 @@ async fn reserved_usernames(services: &Services, base: &str, client: &Client) ->
 	assert_eq!(fallback_localpart(&grace_identity), account.localpart());
 
 	Ok(())
+}
+
+/// Sign-in skips forbidden, malformed and reserved usernames alike.
+///
+/// Mia's forbidden and Noah's malformed preferred usernames each fall through to
+/// the address's mailbox. A user namespace that is not exclusive reserves
+/// nothing, while an appservice's own sender stays reserved outside its
+/// namespace, so the trusted provider does not adopt it for Kate. Olivia's
+/// username and mailbox are reserved at a provider whose fallback is disabled,
+/// so her sign-in fails creating no account.
+async fn skipped_usernames(services: &Services, base: &str, client: &Client) -> Result {
+	register_shared(services).await?;
+
+	let mia = SignIn {
+		idp: IDP,
+		callback: CALLBACK,
+		destination: CLIENT,
+		sub: "mia",
+		username: "forbidden_mia",
+		mailbox: "mia",
+	};
+
+	let response = sign_in_to(client, base, mia).await?;
+	let account = signed_in(services, &response).await?;
+
+	assert_eq!(account.localpart(), "mia", "mia's forbidden username is skipped");
+	assert!(!exists(services, "forbidden_mia").await?, "no forbidden account is created");
+
+	let noah = SignIn {
+		sub: "noah",
+		username: "bad!name",
+		mailbox: "noah",
+		..mia
+	};
+
+	let response = sign_in_to(client, base, noah).await?;
+	let account = signed_in(services, &response).await?;
+
+	assert_eq!(account.localpart(), "noah", "noah's malformed username is skipped");
+
+	let leo = SignIn {
+		sub: "leo",
+		username: "shared_leo",
+		mailbox: "leo",
+		..mia
+	};
+
+	let response = sign_in_to(client, base, leo).await?;
+	let account = signed_in(services, &response).await?;
+
+	assert_eq!(account.localpart(), "shared_leo", "a shared namespace reserves nothing");
+
+	let kate = SignIn {
+		idp: TRUSTED,
+		sub: "kate",
+		username: "names",
+		mailbox: "names",
+		..mia
+	};
+
+	let response = sign_in_to(client, base, kate).await?;
+	let account = signed_in(services, &response).await?;
+	let trusted = services.oauth.providers.get(TRUSTED).await?;
+	let kate_identity = unique_id_sub((&trusted, "kate"))?;
+
+	assert!(exists(services, "names").await?, "the appservice's sender has an account");
+	assert_eq!(fallback_localpart(&kate_identity), account.localpart(), "kate gets her own");
+
+	let olivia = SignIn {
+		idp: STRICT,
+		sub: "olivia",
+		username: "reserved_olivia",
+		mailbox: "reserved_olivia",
+		..mia
+	};
+
+	let response = sign_in_to(client, base, olivia).await?;
+
+	assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+	let error: Value = response.json().await?;
+	let strict = services.oauth.providers.get(STRICT).await?;
+	let olivia_identity = unique_id_sub((&strict, "olivia"))?;
+	let fallback = fallback_localpart(&olivia_identity);
+	let linked = services
+		.oauth
+		.sessions
+		.get_by_unique_id(&olivia_identity)
+		.await;
+
+	assert_eq!(error["errcode"], "M_USER_IN_USE");
+	assert!(linked.is_not_found(), "olivia's identity is linked to no account");
+	assert!(!exists(services, "reserved_olivia").await?, "no reserved account is created");
+	assert!(!exists(services, &fallback).await?, "the disabled fallback creates no account");
+
+	Ok(())
+}
+
+async fn register_shared(services: &Services) -> Result {
+	let namespaces = Namespaces {
+		users: vec![Namespace::new(false, "^@shared_.*:localhost$".to_owned())],
+		..Default::default()
+	};
+
+	let registration: Registration = RegistrationInit {
+		id: "shared".to_owned(),
+		url: None,
+		as_token: "test-shared-token".to_owned(),
+		hs_token: "test-shared-hs-token".to_owned(),
+		sender_localpart: "shared".to_owned(),
+		namespaces,
+		rate_limited: None,
+		protocols: None,
+	}
+	.into();
+
+	services
+		.appservice
+		.register_appservice(registration)
+		.await
 }
 
 async fn sign_in(
