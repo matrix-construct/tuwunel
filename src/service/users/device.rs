@@ -52,7 +52,7 @@ pub const TOKEN_LENGTH: usize = 32;
 ///
 /// Refresh and access tokens share one token map, and a bearer lookup refuses
 /// a token by this prefix, so no access token may start with it.
-const REFRESH_TOKEN_PREFIX: &str = "refresh_";
+pub const REFRESH_TOKEN_PREFIX: &str = "refresh_";
 
 /// Adds a new device to a user.
 ///
