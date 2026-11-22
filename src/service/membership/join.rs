@@ -756,6 +756,12 @@ async fn ingest_send_join_events(
 	room_version_rules: &RoomVersionRules,
 	SendJoinEvents { auth_chain, state }: SendJoinEvents<'_>,
 ) -> Result<HashMap<u64, OwnedEventId>> {
+	info!(
+		state = state.len(),
+		auth_chain = auth_chain.len(),
+		"Going through send_join response events..."
+	);
+
 	let implicit_create = room_version_rules
 		.authorization
 		.room_create_event_id_as_room_id
