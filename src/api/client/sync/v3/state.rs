@@ -314,14 +314,8 @@ pub(super) async fn calculate_state_changes<'a>(
 ) -> Result<StateChanges> {
 	let incremental = !full_state && !joined_since_last_sync && since_shortstatehash.is_some();
 
-	// MSC4222: `state_after` requests need state at the *end* of the
-	// timeline; legacy `state` requests need state at the *start*. Pick
-	// the right delta endpoint, falling back to the room's current
-	// shortstatehash when the preferred lookup is unavailable.
 	let horizon_shortstatehash = state_after
-		.requested()
-		.then_some(after_shortstatehash)
-		.unwrap_or(horizon_shortstatehash)
+		.snapshot(after_shortstatehash, horizon_shortstatehash)
 		.unwrap_or(current_shortstatehash);
 
 	let since_shortstatehash = since_shortstatehash.unwrap_or(horizon_shortstatehash);

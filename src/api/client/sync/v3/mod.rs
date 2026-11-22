@@ -52,6 +52,20 @@ enum StateAfter {
 impl StateAfter {
 	fn requested(self) -> bool { !matches!(self, Self::Off) }
 
+	/// Picks the snapshot the response's state is drawn from, when it was found.
+	///
+	/// MSC4222 `state_after` reads state at the end of the timeline and the
+	/// legacy field state at its start.
+	fn snapshot(
+		self,
+		after: Option<ShortStateHash>,
+		before: Option<ShortStateHash>,
+	) -> Option<ShortStateHash> {
+		self.requested()
+			.then_some(after)
+			.unwrap_or(before)
+	}
+
 	fn wrap(self, events: StateEvents) -> RoomState {
 		match self {
 			| Self::Off => RoomState::Before(events),

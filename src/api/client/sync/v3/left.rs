@@ -10,7 +10,11 @@ use ruma::{
 		filter::FilterDefinition,
 		sync::sync_events::v3::{LeftRoom, RoomAccountData, StateEvents, Timeline},
 	},
-	events::{AnyRawAccountDataEvent, TimelineEventType::*, room::member::MembershipState},
+	events::{
+		AnyRawAccountDataEvent,
+		TimelineEventType::*,
+		room::{history_visibility::HistoryVisibility, member::MembershipState},
+	},
 };
 use tuwunel_core::{
 	Error, Result, at, debug,
@@ -20,7 +24,7 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	utils::{
 		BoolExt, FutureBoolExt, IterStream, ReadyExt, TryFutureExtExt,
-		future::ReadyBoolExt,
+		future::{ReadyBoolExt, ReadyEqExt},
 		option::OptionExt,
 		result::MapExpect,
 		stream::{BroadbandExt, WidebandExt},
@@ -281,39 +285,84 @@ async fn load_left_room(
 				.ok()
 		});
 
-	// MSC4222 `state_after` describes the state at the leave.
-	let after_shortstatehash = state_after.requested().then_async(|| {
+	let after_requested = state_after.requested();
+	let positional_after = || {
 		services
 			.timeline
 			.shortstatehash_after(room_id, PduCount::Normal(horizon))
 			.inspect_err(inspect_debug_log)
-	});
+	};
+
+	// MSC4222 `state_after` describes the state at the leave; a positional lookup
+	// can select another branch's state for a user who never joined.
+	let after_shortstatehash = services
+		.state_cache
+		.once_joined(sender_user, room_id)
+		.then(async |once_joined| {
+			let positional = once_joined && after_requested;
+			let after_shortstatehash = positional.then_async(positional_after).await;
+
+			(once_joined, after_shortstatehash)
+		});
 
 	let left_shortstatehash = services
 		.timeline
 		.get_shortstatehash(room_id, PduCount::Normal(horizon))
 		.inspect_err(inspect_debug_log)
-		.or_else(|_| services.state.get_room_shortstatehash(room_id))
-		.map_err(|_| missing_room_state(room_id));
+		.ok();
 
-	let (since_shortstatehash, horizon_shortstatehash, after_shortstatehash, left_shortstatehash) =
-		join4(
-			since_shortstatehash,
-			horizon_shortstatehash,
-			after_shortstatehash,
-			left_shortstatehash,
-		)
-		.boxed() // erase region
-		.await;
+	let (
+		since_shortstatehash,
+		horizon_shortstatehash,
+		(once_joined, after_shortstatehash),
+		left_shortstatehash,
+	) = join4(
+		since_shortstatehash,
+		horizon_shortstatehash,
+		after_shortstatehash,
+		left_shortstatehash,
+	)
+	.boxed() // erase region
+	.await;
+
+	let horizon_shortstatehash = horizon_shortstatehash.flatten();
+	let after_shortstatehash = after_shortstatehash.flat_ok();
+
+	let served_shortstatehash = state_after
+		.snapshot(after_shortstatehash, horizon_shortstatehash)
+		.or(left_shortstatehash);
+
+	// Only a recorded snapshot is judged by its own visibility; current state
+	// standing in for a missing one grants nothing.
+	let sees_room_state = once_joined
+		|| served_shortstatehash
+			.map_async(|shortstatehash| {
+				services
+					.state_accessor
+					.history_visibility(shortstatehash)
+					.eq(&HistoryVisibility::WorldReadable)
+			})
+			.map(Option::unwrap_or_default)
+			.await;
+
+	let served_shortstatehash = match served_shortstatehash {
+		| Some(served_shortstatehash) => served_shortstatehash,
+		| None =>
+			services
+				.state
+				.get_room_shortstatehash(room_id)
+				.map_err(|_| missing_room_state(room_id))
+				.await?,
+	};
 
 	let StateChanges { state_events, .. } =
 		calculate_state_changes(services, sender_user, room_id, StateChangeParams {
 			full_state: full_state || initial,
 			state_after,
 			since_shortstatehash,
-			horizon_shortstatehash: horizon_shortstatehash.flatten(),
-			after_shortstatehash: after_shortstatehash.flat_ok(),
-			current_shortstatehash: left_shortstatehash?,
+			horizon_shortstatehash,
+			after_shortstatehash,
+			current_shortstatehash: served_shortstatehash,
 			joined_since_last_sync: false,
 			witness: None,
 			include_heroes: true,
@@ -324,15 +373,40 @@ async fn load_left_room(
 		*event.kind() == RoomMember && event.state_key() == Some(sender_user.as_str())
 	};
 
-	let departure = late_departure(services, sender_user, room_id, since, horizon).await;
+	// A late notice, or the rejection a never-member's own snapshot precedes.
+	let rejected_after = !once_joined && after_requested;
+	let overlaid = since >= horizon || rejected_after;
+	let departure = departure_event(services, sender_user, room_id, horizon, overlaid).await;
 
 	let has_departure = departure.is_some();
 
+	// With no departure to apply, a never-member's invite or knock from before the
+	// rejection is not served as their state.
+	let superseded = |pdu: &PduEvent| {
+		(has_departure || rejected_after)
+			&& is_sender_membership(pdu)
+			&& (has_departure || !is_departure(pdu, sender_user))
+	};
+
+	// A zero limit moves only the requester's own membership into state, and only
+	// the departure itself when there is one.
 	let timeline_sender_member = timeline_limit
 		.eq(&0)
-		.then(|| timeline_pdus.last().map(ref_at!(1)).cloned())
-		.into_iter()
-		.flat_map(Option::into_iter);
+		.then(|| timeline_pdus.last().map(ref_at!(1)))
+		.flatten()
+		.filter(|pdu| is_sender_membership(pdu))
+		.filter(|pdu| {
+			departure
+				.as_ref()
+				.map(|departure| departure.event_id() == pdu.event_id())
+				.unwrap_or_else(|| !superseded(pdu))
+		})
+		.cloned();
+
+	let transfers_member = timeline_sender_member.is_some();
+
+	// The transfer then carries the departure itself past the state filter.
+	let departure = departure.filter(|_| !transfers_member);
 
 	let encrypted = services
 		.state_accessor
@@ -345,11 +419,12 @@ async fn load_left_room(
 
 	let state_events = state_events
 		.into_iter()
-		.filter(|pdu| !has_departure || !is_sender_membership(pdu))
+		.filter(|pdu| !superseded(pdu))
 		.chain(departure)
 		.filter(|pdu| filter.room.state.matches(pdu))
-		.filter(|pdu| timeline_limit > 0 || has_departure || !is_sender_membership(pdu))
+		.filter(|pdu| !transfers_member || has_departure || !is_sender_membership(pdu))
 		.chain(timeline_sender_member)
+		.filter(visible_state(sender_user, sees_room_state))
 		.stream()
 		.wide_then(|pdu| with_membership(services, pdu, sender_user, encrypted))
 		.map(|pdu| strip_state_unsigned(pdu, sender_user, &in_timeline))
@@ -408,15 +483,14 @@ async fn load_left_room(
 	}))
 }
 
-async fn late_departure(
+async fn departure_event(
 	services: &Services,
 	sender_user: &UserId,
 	room_id: &RoomId,
-	since: u64,
 	horizon: u64,
+	overlaid: bool,
 ) -> Option<PduEvent> {
-	since
-		.ge(&horizon)
+	overlaid
 		.then_async(|| {
 			services
 				.timeline
@@ -424,15 +498,24 @@ async fn late_departure(
 				.inspect_err(inspect_debug_log)
 				.ok()
 		})
-		.map(|event| {
-			event.flatten().filter(|event| {
-				matches!(
-					event.membership_for(sender_user),
-					Some(MembershipState::Leave | MembershipState::Ban)
-				)
-			})
-		})
+		.map(Option::flatten)
+		.map(|event| event.filter(|event| is_departure(event, sender_user)))
 		.await
+}
+
+fn is_departure(event: &PduEvent, sender_user: &UserId) -> bool {
+	matches!(
+		event.membership_for(sender_user),
+		Some(MembershipState::Leave | MembershipState::Ban)
+	)
+}
+
+/// A user who never joined gets only the state describing their own membership
+/// unless the served snapshot is world-readable.
+///
+/// The same rule covers the membership a zero timeline limit moves into state.
+fn visible_state(sender_user: &UserId, sees_room_state: bool) -> impl Fn(&PduEvent) -> bool {
+	move |pdu| sees_room_state || pdu.is_type_and_state_key(&RoomMember, sender_user.as_str())
 }
 
 /// Records a failed horizon read, quietly when the row is simply absent.
@@ -463,5 +546,40 @@ pub(super) fn in_timeline(
 		timeline_ids
 			.iter()
 			.any(is_equal_to!(event.event_id()))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::user_id;
+	use serde_json::{from_value, json};
+
+	use super::*;
+
+	#[test]
+	fn left_state_without_room_access_keeps_only_own_membership() {
+		let user = user_id!("@member:example.org");
+		let event = |kind, key| {
+			from_value(json!({
+				"event_id": "$state:example.org", "room_id": "!r:example.org",
+				"sender": user, "type": kind, "state_key": key, "content": {},
+				"origin_server_ts": 1, "depth": 1, "prev_events": [], "auth_events": [],
+				"hashes": {"sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
+			}))
+			.expect("state fixture")
+		};
+
+		let events = [
+			event("m.room.member", user.as_str()),
+			event("m.room.member", "@other:example.org"),
+			event("m.room.topic", ""),
+		];
+
+		let own_only = visible_state(user, false);
+
+		assert!(own_only(&events[0]));
+		assert!(!own_only(&events[1]));
+		assert!(!own_only(&events[2]));
+		assert!(events.iter().all(visible_state(user, true)));
 	}
 }

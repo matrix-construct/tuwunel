@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 use serde_json::{Value, json};
+use serde_urlencoded::to_string as to_query;
 use tuwunel_core::{
 	Result, implement,
 	ruma::{
@@ -12,7 +13,7 @@ use tuwunel_core::{
 		},
 		serde::Raw,
 	},
-	utils::result::NotFound,
+	utils::{BoolExt, result::NotFound},
 };
 use tuwunel_matrix::pdu::{PduBuilder, into_outgoing_federation};
 use tuwunel_service::{
@@ -75,6 +76,40 @@ struct History {
 	unreadable: bool,
 }
 
+/// Each case exercises room history visibility around a rejected invite.
+///
+/// A change between the legacy snapshot and the `state_after` snapshot gives
+/// the two fields different visibility.
+enum Opened {
+	/// History opens before the synced window and closes after the rejection.
+	Before,
+
+	/// History opens inside the synced window, ahead of the rejection.
+	Within,
+
+	/// History opens before the synced window and closes inside it.
+	ClosedWithin,
+
+	/// History opens after the rejection.
+	After,
+
+	/// History opens after the rejection, whose own snapshot is then lost.
+	///
+	/// Current state stands in for the legacy field.
+	Unrecorded,
+
+	/// History opens after the rejection, and the next event records a later
+	/// snapshot.
+	///
+	/// A positional lookup after the rejection reads that snapshot, as on a
+	/// federated fork, so it disagrees with the rejection's own.
+	Forked,
+
+	/// History is open throughout, and the event after the rejection records a
+	/// snapshot holding a later rename.
+	Renamed,
+}
+
 /// A federated invite rescission reaches sync as the invitee's own leave.
 ///
 /// The server is not resident in the room, so the kick reaches no room state.
@@ -134,6 +169,22 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	accounts
 		.left_history(History { joined: true, unreadable: true })
 		.await?;
+
+	accounts.left_visibility(Opened::Before).await?;
+	accounts.left_visibility(Opened::Within).await?;
+	accounts.left_visibility(Opened::After).await?;
+	accounts
+		.left_visibility(Opened::Unrecorded)
+		.await?;
+
+	accounts.left_visibility(Opened::Forked).await?;
+	accounts
+		.left_visibility(Opened::ClosedWithin)
+		.await?;
+
+	accounts.left_visibility(Opened::Renamed).await?;
+	accounts.moved_rejection_keeps_leave().await?;
+	accounts.replayed_rejection_drops_invite().await?;
 
 	accounts.forgotten_member().await?;
 	accounts.recorded_ban_stays_a_ban().await?;
@@ -209,10 +260,9 @@ async fn left_history(&self, History { joined, unreadable }: History) -> Result 
 
 		let query = format!("{position}&org.matrix.msc4222.use_state_after=true");
 		let after = client.sync_v3(Some(&query)).await?;
-		let state = &after["rooms"]["leave"][room_id.as_str()]["org.matrix.msc4222.state_after"]
-			["events"];
+		let state = state_after_events(&after, &room_id);
 
-		assert_eq!(has_event(state, &name), !bounded, "state bound: {after}");
+		assert_eq!(has_event(state, &name), joined && unreadable, "state bound: {after}");
 
 		let resumed = client
 			.sync_v3(Some(field(&reply, "next_batch")?))
@@ -224,6 +274,257 @@ async fn left_history(&self, History { joined, unreadable }: History) -> Result 
 	}
 
 	Ok(())
+}
+
+/// A never-member's left-room state follows the visibility of the snapshot it
+/// is served from, not the room's current visibility.
+///
+/// The legacy field serves state at the start of the timeline and
+/// `state_after` the state the rejection leaves. History opened inside the
+/// synced window therefore shows the room's state only in `state_after`, and
+/// history closed there shows it only in the legacy field. Current state
+/// standing in for a lost snapshot grants nothing, and a later snapshot
+/// recorded after the rejection is never served in its place.
+#[implement(Accounts, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn left_visibility(&self, opened: Opened) -> Result {
+	let &Self { services, invitee, .. } = self;
+	let owner = &self.inviter_client;
+	let client = &self.invitee_client;
+	let room_id = self.public_room().await?;
+	let path = format!("rooms/{room_id}/state/m.room.history_visibility");
+	let set_visibility = async |history_visibility: &str| {
+		let content = json!({ "history_visibility": history_visibility });
+
+		owner.put_event(&path, &content).await.map(drop)
+	};
+
+	let name_path = format!("rooms/{room_id}/state/m.room.name");
+	let name = json!({ "name": "before rejection" });
+	let name = owner.put_event(&name_path, &name).await?;
+
+	if matches!(opened, Opened::Before | Opened::ClosedWithin | Opened::Renamed) {
+		set_visibility("world_readable").await?;
+	}
+
+	owner.act_on(&room_id, "invite", invitee).await?;
+	let before = self.position().await?;
+
+	match opened {
+		| Opened::Within => set_visibility("world_readable").await?,
+		| Opened::ClosedWithin => set_visibility("shared").await?,
+		| Opened::Before
+		| Opened::After
+		| Opened::Unrecorded
+		| Opened::Forked
+		| Opened::Renamed => (),
+	}
+
+	client.act(&room_id, "leave").await?;
+	match opened {
+		| Opened::Before => set_visibility("shared").await?,
+		| Opened::After | Opened::Unrecorded | Opened::Forked =>
+			set_visibility("world_readable").await?,
+		| Opened::Within | Opened::ClosedWithin | Opened::Renamed => (),
+	}
+
+	let unrecorded = matches!(opened, Opened::Unrecorded);
+
+	if unrecorded {
+		let leave = self.member_event_id(&room_id, invitee).await?;
+		let shorteventid = services.short.get_shorteventid(&leave).await?;
+
+		services.db["shorteventid_shortstatehash"].del(shorteventid);
+	}
+
+	if matches!(opened, Opened::Forked) {
+		let opening = services
+			.state_accessor
+			.room_state_get_id(&room_id, &StateEventType::RoomHistoryVisibility, "")
+			.await?;
+
+		self.record_later_snapshot(&room_id, &opening)
+			.await?;
+	}
+
+	let renamed = json!({ "name": "after rejection" });
+	let renamed = matches!(opened, Opened::Renamed)
+		.then_async(async || {
+			let renamed = owner.put_event(&name_path, &renamed).await?;
+
+			self.record_later_snapshot(&room_id, &renamed)
+				.await
+				.map(|()| renamed)
+		})
+		.await
+		.transpose()?;
+
+	let after_readable = matches!(opened, Opened::Before | Opened::Within | Opened::Renamed);
+	let legacy_readable =
+		matches!(opened, Opened::Before | Opened::ClosedWithin | Opened::Renamed);
+
+	let query = format!("{before}&full_state=true");
+	let reply = client.sync_v3(Some(&query)).await?;
+	let state = &reply["rooms"]["leave"][room_id.as_str()]["state"]["events"];
+	let membership = if unrecorded { "leave" } else { "invite" };
+
+	assert_eq!(has_event(state, &name), legacy_readable, "state visibility: {reply}");
+	assert_eq!(
+		own_member(state, invitee)["content"]["membership"],
+		membership,
+		"own membership: {reply}"
+	);
+
+	let query = format!("{query}&org.matrix.msc4222.use_state_after=true");
+	let after = client.sync_v3(Some(&query)).await?;
+	let state = state_after_events(&after, &room_id);
+
+	assert_eq!(has_event(state, &name), after_readable, "state_after visibility: {after}");
+	assert!(
+		renamed.is_none_or(|renamed| !has_event(state, &renamed)),
+		"state after the rejection: {after}"
+	);
+
+	assert_eq!(
+		own_member(state, invitee)["content"]["membership"],
+		"leave",
+		"own leave: {after}"
+	);
+
+	// A zero limit moves the leave into state past a filter that drops members.
+	let members_dropped = json!({
+		"room": { "timeline": { "limit": 0 }, "state": { "not_types": ["m.room.member"] } }
+	});
+
+	let query = format!("{query}&{}", filter_query(&members_dropped));
+	let moved = client.sync_v3(Some(&query)).await?;
+	let state = state_after_events(&moved, &room_id);
+
+	assert_eq!(
+		own_member(state, invitee)["content"]["membership"],
+		"leave",
+		"moved leave: {moved}"
+	);
+
+	Ok(())
+}
+
+/// Records a later snapshot for an event, as a federated fork can.
+///
+/// A message is sent after the event, and the event's recorded snapshot becomes
+/// the message's, so a positional lookup at the event reads state it never saw.
+#[implement(Accounts, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn record_later_snapshot(&self, room_id: &RoomId, event_id: &EventId) -> Result {
+	let services = self.services;
+	let later = self
+		.inviter_client
+		.send_text(room_id, "later", "after the fork")
+		.await?;
+
+	let event = services.short.get_shorteventid(event_id).await?;
+	let later = services.state.pdu_shortstatehash(&later).await?;
+
+	services.db["shorteventid_shortstatehash"].put(event, later);
+
+	Ok(())
+}
+
+/// A never-member's `state_after` keeps their recorded leave when the departure
+/// count holds no event.
+///
+/// A migrated or replayed row names such a count, so no rejection is there to
+/// apply, and a zero timeline limit has only a later room event to move.
+#[implement(Accounts, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn moved_rejection_keeps_leave(&self) -> Result {
+	let &Self { invitee, .. } = self;
+	let owner = &self.inviter_client;
+	let client = &self.invitee_client;
+	let (room_id, before) = self.invited_room().await?;
+
+	client.act(&room_id, "leave").await?;
+	owner
+		.send_text(&room_id, "later", "after rejection")
+		.await?;
+
+	self.move_left_rows(&room_id, &[invitee]).await?;
+
+	let zero_limit = json!({ "room": { "timeline": { "limit": 0 } } });
+	let zero_limit = filter_query(&zero_limit);
+	let query =
+		format!("{before}&full_state=true&org.matrix.msc4222.use_state_after=true&{zero_limit}");
+
+	let moved = client.sync_v3(Some(&query)).await?;
+	let state = state_after_events(&moved, &room_id);
+
+	assert_eq!(
+		own_member(state, invitee)["content"]["membership"],
+		"leave",
+		"moved leave: {moved}"
+	);
+
+	Ok(())
+}
+
+/// A never-member's `state_after` never carries their invite when the departure
+/// count names an earlier event.
+///
+/// That event's snapshot predates the rejection, and no rejection is there to
+/// apply.
+#[implement(Accounts, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn replayed_rejection_drops_invite(&self) -> Result {
+	let &Self { services, invitee, .. } = self;
+	let owner = &self.inviter_client;
+	let client = &self.invitee_client;
+	let (room_id, before) = self.invited_room().await?;
+	let earlier = owner
+		.send_text(&room_id, "earlier", "before rejection")
+		.await?;
+
+	client.act(&room_id, "leave").await?;
+
+	let count = services.timeline.get_pdu_count(&earlier).await?;
+	let update =
+		membership_update(&room_id, invitee, MembershipState::Leave, count.into_unsigned());
+
+	services
+		.state_cache
+		.update_membership(update)
+		.await?;
+
+	let query = format!("{before}&full_state=true&org.matrix.msc4222.use_state_after=true");
+	let replayed = client.sync_v3(Some(&query)).await?;
+	let state = state_after_events(&replayed, &room_id);
+
+	assert!(
+		replayed["rooms"]["leave"][room_id.as_str()].is_object(),
+		"left room: {replayed}"
+	);
+
+	assert_ne!(
+		own_member(state, invitee)["content"]["membership"],
+		"invite",
+		"replayed invite: {replayed}"
+	);
+
+	Ok(())
+}
+
+/// A fresh public room the invitee is invited to, with their sync position
+/// after the invite.
+#[implement(Accounts, params = "<'_>")]
+async fn invited_room(&self) -> Result<(OwnedRoomId, String)> {
+	let room_id = self.public_room().await?;
+
+	self.inviter_client
+		.act_on(&room_id, "invite", self.invitee)
+		.await?;
+
+	let position = self.position().await?;
+
+	Ok((room_id, position))
 }
 
 fn unreadable_reason(mut pdu: Value) -> Value {
@@ -238,6 +539,16 @@ fn has_event(events: &Value, event_id: &OwnedEventId) -> bool {
 		.into_iter()
 		.flatten()
 		.any(|event| event["event_id"] == event_id.as_str())
+}
+
+/// A left room's `state_after` events in a legacy sync response.
+fn state_after_events<'a>(sync: &'a Value, room_id: &RoomId) -> &'a Value {
+	&sync["rooms"]["leave"][room_id.as_str()]["org.matrix.msc4222.state_after"]["events"]
+}
+
+/// A sync query parameter carrying a filter inline.
+fn filter_query(filter: &Value) -> String {
+	to_query([("filter", filter.to_string())]).expect("filter query")
 }
 
 #[implement(Accounts, params = "<'_>")]
