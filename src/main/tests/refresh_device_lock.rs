@@ -2,6 +2,7 @@
 
 use std::{future::ready, pin::pin, time::Duration};
 
+use const_str::concat;
 use futures::{
 	channel::oneshot::{Receiver, Sender, channel},
 	future::{Either, join, select},
@@ -16,10 +17,13 @@ use tuwunel_core::{
 };
 use tuwunel_service::{
 	Services,
-	users::device::{RefreshToken, generate_refresh_token},
+	users::device::{REFRESH_TOKEN_PREFIX, RefreshToken, generate_refresh_token},
 };
 
-use self::fixture::boot;
+use self::{
+	appservice::{Bridge, register_appservice},
+	fixture::boot,
+};
 
 #[expect(
 	dead_code,
@@ -27,6 +31,7 @@ use self::fixture::boot;
 )]
 mod client;
 
+mod appservice;
 mod fixture;
 
 /// How long a request contending for a held device lock is watched for
@@ -72,7 +77,11 @@ async fn with_grace(services: &Services, base: &str) -> Result {
 	expiring_login_retires_the_refresh_it_waited_for(services).await?;
 	metadata_updates_keep_removal(services).await?;
 	issuing_forgets_older_expired_tokens(services).await?;
-	refresh_token_is_no_bearer(services, base).await
+	refresh_token_is_no_bearer(services, base).await?;
+	no_refresh_string_is_a_bearer(services, base).await?;
+	expired_access_token_keeps_soft_logout(services, base).await?;
+	refresh_token_still_revokes(services, base).await?;
+	prefixed_appservice_token_authenticates(services, base).await
 }
 
 /// A refresh or login still in flight when its device is removed must not
@@ -500,20 +509,18 @@ async fn refresh_token_is_no_bearer(services: &Services, base: &str) -> Result {
 
 	services.users.mark_oidc_device(&user, device, "");
 
-	let whoami = format!("{base}/_matrix/client/v3/account/whoami");
+	let whoami = whoami_url(base);
 	let refused = get_as(services, &whoami, &successor).await?;
-	let status = refused.status();
-	let body: Value = refused.json().await?;
 
-	if status != StatusCode::UNAUTHORIZED || body["errcode"] != "M_UNKNOWN_TOKEN" {
-		return Err!("expected 401 M_UNKNOWN_TOKEN for a refresh token, got {status}: {body}");
+	if unknown_token(refused).await? {
+		return Err!("a refresh token refused as a bearer token asked for a soft logout");
 	}
 
 	let accepted = get_as(services, &whoami, &access).await?;
 
 	identifies(accepted, "user_id", &user).await?;
 
-	let userinfo = format!("{base}/_tuwunel/oidc/userinfo");
+	let userinfo = userinfo_url(base);
 	let status = get_as(services, &userinfo, &successor)
 		.await?
 		.status();
@@ -533,6 +540,8 @@ async fn refresh_token_is_no_bearer(services: &Services, base: &str) -> Result {
 	Ok(())
 }
 
+fn whoami_url(base: &str) -> String { format!("{base}/_matrix/client/v3/account/whoami") }
+
 async fn get_as(services: &Services, url: &str, token: &str) -> Result<Response> {
 	let response = services
 		.client
@@ -546,6 +555,20 @@ async fn get_as(services: &Services, url: &str, token: &str) -> Result<Response>
 	Ok(response)
 }
 
+/// Checks that a request was refused with `401 M_UNKNOWN_TOKEN`.
+///
+/// Returns whether the refusal asked for a soft logout.
+async fn unknown_token(response: Response) -> Result<bool> {
+	let status = response.status();
+	let body: Value = response.json().await?;
+
+	if status != StatusCode::UNAUTHORIZED || body["errcode"] != "M_UNKNOWN_TOKEN" {
+		return Err!("expected 401 M_UNKNOWN_TOKEN, got {status}: {body}");
+	}
+
+	Ok(body["soft_logout"] == true)
+}
+
 /// Checks that a request was accepted for `user`, whom the reply names in
 /// `field`.
 async fn identifies(response: Response, field: &str, user: &UserId) -> Result {
@@ -557,6 +580,131 @@ async fn identifies(response: Response, field: &str, user: &UserId) -> Result {
 	}
 
 	Ok(())
+}
+
+fn userinfo_url(base: &str) -> String { format!("{base}/_tuwunel/oidc/userinfo") }
+
+/// No other refresh-shaped string authenticates as a bearer token.
+async fn no_refresh_string_is_a_bearer(services: &Services, base: &str) -> Result {
+	let device = device_id!("STRINGSDEVICE");
+	let (_, spent) = session(services, "strings", device).await?;
+
+	refreshed_token(services, &spent).await?;
+
+	let whoami = whoami_url(base);
+	let unknown = generate_refresh_token();
+
+	for token in ["", REFRESH_TOKEN_PREFIX, unknown.as_str(), spent.as_str()] {
+		let status = get_as(services, &whoami, token).await?.status();
+
+		if status != StatusCode::UNAUTHORIZED {
+			return Err!("the bearer {token:?} was not refused: {status}");
+		}
+	}
+
+	Ok(())
+}
+
+/// An expired access token still reads as a soft logout on the client API,
+/// while OIDC userinfo refuses it.
+///
+/// Userinfo accepts a lasting token issued to the same device afterwards, so
+/// expiry alone is the reason for its refusal.
+async fn expired_access_token_keeps_soft_logout(services: &Services, base: &str) -> Result {
+	let device = device_id!("EXPIREDDEVICE");
+	let (user, _) = session(services, "expired", device).await?;
+	let deadline = now_secs().saturating_sub(60);
+	let expired = issue_expiring_at(services, &user, device, Some(deadline)).await?;
+
+	services.users.mark_oidc_device(&user, device, "");
+
+	let refused = get_as(services, &whoami_url(base), &expired).await?;
+
+	if !unknown_token(refused).await? {
+		return Err!("an expired access token was refused without a soft logout");
+	}
+
+	let userinfo = userinfo_url(base);
+	let status = get_as(services, &userinfo, &expired)
+		.await?
+		.status();
+
+	if status != StatusCode::UNAUTHORIZED {
+		return Err!("expected 401 at userinfo for an expired access token, got {status}");
+	}
+
+	let lasting = issue_expiring_at(services, &user, device, None).await?;
+	let accepted = get_as(services, &userinfo, &lasting).await?;
+
+	identifies(accepted, "sub", &user).await
+}
+
+/// Revoking a refresh token also ends the access token issued alongside it.
+///
+/// The access token is checked to work first, so its refusal afterwards is the
+/// revocation's doing.
+async fn refresh_token_still_revokes(services: &Services, base: &str) -> Result {
+	let device = device_id!("REVOKEDDEVICE");
+	let (user, original) = session(services, "revoked", device).await?;
+	let (access, successor) = refresh(services, &original).await?;
+	let successor = successor?;
+	let whoami = whoami_url(base);
+	let accepted = get_as(services, &whoami, &access).await?;
+
+	identifies(accepted, "user_id", &user).await?;
+
+	let revoke = format!("{base}/_tuwunel/oidc/revoke");
+
+	let status = services
+		.client
+		.clients
+		.default
+		.post(&revoke)
+		.form(&[("token", successor.as_str())])
+		.send()
+		.await?
+		.status();
+
+	if status != StatusCode::OK {
+		return Err!("expected 200 from revocation, got {status}");
+	}
+
+	let refused = get_as(services, &whoami, &access).await?;
+
+	if unknown_token(refused).await? {
+		return Err!("a revoked access token asked for a soft logout");
+	}
+
+	if services.users.device_exists(&user, device).await || resolves(services, &successor).await {
+		return Err!("revoking a refresh token left its session");
+	}
+
+	Ok(())
+}
+
+/// An appservice token that starts like a refresh token still authenticates
+/// its appservice.
+///
+/// The prefix check belongs to the user token lookup alone; an appservice
+/// token is matched against its registration.
+async fn prefixed_appservice_token_authenticates(services: &Services, base: &str) -> Result {
+	let server_name = services.globals.server_name();
+	let token = concat!(REFRESH_TOKEN_PREFIX, "appservice");
+	let users = format!("@prefixed_.*:{server_name}");
+	let bridge = Bridge {
+		id: "prefixed",
+		token,
+		sender_localpart: "prefixedbot",
+		users: &users,
+		aliases: None,
+	};
+
+	register_appservice(services, &bridge).await?;
+
+	let sender = UserId::parse_with_server_name(bridge.sender_localpart, server_name)?;
+	let accepted = get_as(services, &whoami_url(base), token).await?;
+
+	identifies(accepted, "user_id", &sender).await
 }
 
 /// Without a grace window, a token already spent when its request arrived is

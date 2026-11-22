@@ -45,6 +45,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let original = expect_session(status, &session)?;
 
+	expect_bearer_roles(services, base, &session, &user).await?;
+
 	services.users.set_locked(&user, &user);
 	expect_locked(services, base, original).await?;
 	expect_current(services, original).await;
@@ -73,6 +75,48 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	refresh(services, base, token(&next)?).await?;
 
 	Ok(())
+}
+
+async fn expect_bearer_roles(
+	services: &Services,
+	base: &str,
+	session: &Value,
+	user: &UserId,
+) -> Result {
+	let whoami = format!("{base}/_matrix/client/v3/account/whoami");
+	let (status, body) = get_as(services, &whoami, token(session)?).await?;
+
+	if status != StatusCode::UNAUTHORIZED || body["errcode"] != "M_UNKNOWN_TOKEN" {
+		return Err!("expected 401 M_UNKNOWN_TOKEN for the refresh token, got {status}: {body}");
+	}
+
+	let access = session["access_token"]
+		.as_str()
+		.ok_or_else(|| err!("response has no access token: {session}"))?;
+
+	let (status, body) = get_as(services, &whoami, access).await?;
+
+	if status != StatusCode::OK || body["user_id"] != user.as_str() {
+		return Err!("expected 200 naming {user} for the access token, got {status}: {body}");
+	}
+
+	Ok(())
+}
+
+async fn get_as(services: &Services, url: &str, token: &str) -> Result<(StatusCode, Value)> {
+	let response = services
+		.client
+		.clients
+		.default
+		.get(url)
+		.bearer_auth(token)
+		.send()
+		.await?;
+
+	let status = response.status();
+	let body = response.json().await?;
+
+	Ok((status, body))
 }
 
 async fn expect_locked(services: &Services, base: &str, token: &str) -> Result {
