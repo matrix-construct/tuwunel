@@ -22,6 +22,7 @@ use tuwunel_core::{
 	Result, implement,
 	utils::{
 		BoolExt, IterStream,
+		result::NotFound,
 		stream::{ReadyExt, TryIgnore, TryReadyExt, WidebandExt},
 		time::now_millis,
 		u64_from_bytes,
@@ -192,6 +193,38 @@ pub async fn indexed_unexpired(&self, event_id: &EventId, now: u64) -> bool {
 		.get(&pdu_id)
 		.await
 		.is_ok_and(|until| u64_from_bytes(&until).is_ok_and(|until| until > now))
+}
+
+/// Whether an accepted event has an index row still unexpired at `now`,
+/// returning a failed read as an error.
+///
+/// A missing event or index row is `false`, as in `indexed_unexpired`.
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+pub async fn try_indexed_unexpired(&self, event_id: &EventId, now: u64) -> Result<bool> {
+	let Some(pdu_id) = self
+		.services
+		.timeline
+		.get_pdu_id(event_id)
+		.await
+		.present()?
+	else {
+		return Ok(false);
+	};
+
+	let Some(until) = self
+		.db
+		.pduid_stickyuntil
+		.get(&pdu_id)
+		.await
+		.present()?
+	else {
+		return Ok(false);
+	};
+
+	let until = u64_from_bytes(&until)?;
+
+	Ok(until > now)
 }
 
 /// Drops the sticky object from a copy of an event fetched by its id unless the

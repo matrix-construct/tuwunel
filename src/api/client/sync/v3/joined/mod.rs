@@ -49,7 +49,9 @@ use self::notifications::{
 	in_window, send_thread_counts,
 };
 use super::{
-	super::{load_timeline, strip_state_unsigned, timeline_prev_batch},
+	super::{
+		TimelineQuery, TimelineWindow, load_timeline, strip_state_unsigned, timeline_prev_batch,
+	},
 	StateAfter, StateChangeParams, StateChanges,
 	state::{
 		UserMetadata, UserMetadataParams, calculate_state_changes, gather_room_metadata,
@@ -155,12 +157,13 @@ pub(super) async fn load_room(
 	filter: &FilterDefinition,
 ) -> Result<(JoinedRoom, HashSet<OwnedUserId>, HashSet<OwnedUserId>)> {
 	let initial = since == 0;
-	let (timeline_pdus, limited, last_timeline_count) =
+	let window =
 		load_join_timeline(services, sender_user, room_id, since, next_batch, filter).await?;
 
-	let timeline_changed = last_timeline_count.into_unsigned() > since;
+	let timeline_changed = window.last_count.into_unsigned() > since;
+
 	debug_assert!(
-		timeline_pdus.is_empty() || timeline_changed,
+		window.pdus.is_empty() || timeline_changed,
 		"if timeline events, last_timeline_count must be in the since window."
 	);
 
@@ -180,8 +183,8 @@ pub(super) async fn load_room(
 		room_id,
 		since,
 		next_batch,
-		&timeline_pdus,
-		last_timeline_count,
+		&window.pdus,
+		window.last_count,
 		timeline_changed || full_state || initial,
 		state_after,
 	)
@@ -199,7 +202,7 @@ pub(super) async fn load_room(
 		sender_device,
 		room_id,
 		filter,
-		timeline_pdus: &timeline_pdus,
+		timeline_pdus: &window.pdus,
 		sticky_pdus: &sticky_pdus,
 		receipt_events: &receipt_events,
 		since,
@@ -233,18 +236,18 @@ pub(super) async fn load_room(
 	)
 	.await?;
 
-	let quiet_round = timeline_pdus.is_empty();
+	let quiet_round = window.pdus.is_empty();
 
 	let joined_sender_member = take_sender_membership_for_join(
 		&mut state_events,
 		sender_user,
 		joined_since_last_sync,
-		quiet_round,
+		quiet_round && window.resume.is_none(),
 		initial,
 	);
 
 	let prev_batch =
-		compute_join_prev_batch(&timeline_pdus, joined_sender_member.as_ref(), since, next_batch);
+		compute_join_prev_batch(&window, joined_sender_member.as_ref(), since, next_batch);
 
 	let in_window = in_window(since, next_batch);
 
@@ -269,7 +272,7 @@ pub(super) async fn load_room(
 		sender_user,
 		room_id,
 		&state_events,
-		timeline_pdus,
+		window.pdus,
 		joined_sender_member,
 		encrypted,
 		initial,
@@ -287,7 +290,7 @@ pub(super) async fn load_room(
 		encrypted,
 		full_state,
 		state_after,
-		limited,
+		limited: window.limited,
 		joined_since_last_sync,
 		initial,
 		now,
@@ -397,12 +400,12 @@ async fn compute_join_state_changes(
 }
 
 fn compute_join_prev_batch(
-	timeline_pdus: &[(PduCount, PduEvent)],
+	window: &TimelineWindow,
 	joined_sender_member: Option<&PduEvent>,
 	since: u64,
 	next_batch: u64,
 ) -> Option<PduCount> {
-	timeline_prev_batch(timeline_pdus, PduCount::Normal(next_batch)).or_else(|| {
+	timeline_prev_batch(&window.pdus, PduCount::Normal(next_batch), window.resume).or_else(|| {
 		joined_sender_member
 			.is_some()
 			.then_some(since)
@@ -455,7 +458,7 @@ async fn load_join_timeline(
 	since: u64,
 	next_batch: u64,
 	filter: &FilterDefinition,
-) -> Result<(Vec<(PduCount, PduEvent)>, bool, PduCount)> {
+) -> Result<TimelineWindow> {
 	let timeline_limit: usize = filter
 		.room
 		.timeline
@@ -465,15 +468,15 @@ async fn load_join_timeline(
 		.unwrap_or(10)
 		.min(100);
 
-	load_timeline(
-		services,
+	let query = TimelineQuery {
 		sender_user,
 		room_id,
-		PduCount::Normal(since),
-		Some(PduCount::Normal(next_batch)),
-		timeline_limit,
-	)
-	.await
+		since: PduCount::Normal(since),
+		next_batch: Some(PduCount::Normal(next_batch)),
+		limit: timeline_limit,
+	};
+
+	load_timeline(services, query).await
 }
 
 #[expect(clippy::too_many_arguments)]

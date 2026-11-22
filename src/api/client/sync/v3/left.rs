@@ -41,8 +41,8 @@ use tuwunel_service::{Services, rooms::short::ShortStateHash};
 
 use super::{
 	super::{
-		is_departure, load_timeline, own_departure, stand_in_leave, strip_state_unsigned,
-		timeline_prev_batch,
+		TimelineQuery, TimelineWindow, is_departure, load_timeline, own_departure,
+		stand_in_leave, strip_state_unsigned, timeline_prev_batch,
 	},
 	StateAfter, StateChangeParams, missing_room_state,
 	state::calculate_state_changes,
@@ -309,16 +309,18 @@ async fn load_left_room(
 		.unwrap_or(10)
 		.min(100);
 
-	let (timeline_pdus, limited, _) = load_timeline(
-		services,
+	let query = TimelineQuery {
 		sender_user,
 		room_id,
-		PduCount::Normal(since),
-		Some(PduCount::Normal(horizon)),
-		timeline_limit.max(1),
-	)
-	.await
-	.unwrap_or_default();
+		since: PduCount::Normal(since),
+		next_batch: Some(PduCount::Normal(horizon)),
+		limit: timeline_limit.max(1),
+	};
+
+	let TimelineWindow { pdus: timeline_pdus, limited, resume, .. } =
+		load_timeline(services, query)
+			.await
+			.unwrap_or_default();
 
 	let first = timeline_pdus.first().map(at!(0));
 	let snapshots = window_snapshots(services, room_id, since, horizon, first);
@@ -441,7 +443,7 @@ async fn load_left_room(
 		.then_some(horizon)
 		.map(PduCount::Normal);
 
-	let prev_batch = timeline_prev_batch(&timeline_pdus, PduCount::Normal(horizon))
+	let prev_batch = timeline_prev_batch(&timeline_pdus, PduCount::Normal(horizon), resume)
 		.filter(|_| timeline_limit > 0)
 		.or(left_prev_batch)
 		.as_ref()

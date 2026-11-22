@@ -4,7 +4,9 @@ mod tests;
 mod v3;
 mod v5;
 
-use futures::{StreamExt, pin_mut};
+use std::collections::VecDeque;
+
+use futures::{StreamExt, pin_mut, stream::iter};
 use ruma::{
 	EventId, OwnedUserId, RoomId, UserId,
 	events::{
@@ -16,11 +18,11 @@ use ruma::{
 	uint,
 };
 use tuwunel_core::{
-	Error, Result, debug_warn, is_equal_to,
+	Error, Result, async_noinline, at, debug_warn, implement, is_equal_to,
 	utils::{
 		BoolExt,
 		result::{LogErr, NotFound},
-		stream::{ReadyExt, WidebandExt},
+		stream::{IterStream, ReadyExt, TryReadyExt, WidebandExt},
 		time::now_millis,
 	},
 	warn,
@@ -35,104 +37,303 @@ pub use self::v3::calculate_heroes;
 pub(crate) use self::{v3::sync_events_route, v5::sync_events_v5_route};
 use crate::utils::is_ignored_sender;
 
+/// One raw row as the timeline scan judged it.
+///
+/// The outer error is a row that could not be read; the inner result is the
+/// visibility decision, or the visibility read that failed.
+type Judged = Result<(PduCount, PduEvent, Result<bool>)>;
+
+/// Events a timeline scan may judge per event it can return, after Synapse's
+/// filtered-recents loop (five passes over twice the limit).
+const SCAN_FACTOR: usize = 10;
+
+/// The fewest events a timeline scan may judge, after the same loop.
+const SCAN_FLOOR: usize = 50;
+
 #[derive(Clone, Copy)]
 enum TimelineErrors {
 	Ignore,
 	Propagate,
 }
 
-async fn load_timeline(
-	services: &Services,
-	sender_user: &UserId,
-	room_id: &RoomId,
-	roomsincecount: PduCount,
+#[derive(Clone, Copy)]
+struct TimelineQuery<'a> {
+	sender_user: &'a UserId,
+	room_id: &'a RoomId,
+
+	/// The client's position; the window holds only later events.
+	since: PduCount,
+
+	/// The window's last position, inclusive.
 	next_batch: Option<PduCount>,
+
+	/// The most events the window returns.
 	limit: usize,
-) -> Result<(Vec<(PduCount, PduEvent)>, bool, PduCount), Error> {
-	load_timeline_with_errors(
-		services,
-		sender_user,
-		room_id,
-		roomsincecount,
-		next_batch,
-		limit,
-		TimelineErrors::Ignore,
-	)
-	.await
+}
+
+/// A room's timeline window, oldest event first.
+///
+/// A window left empty by events the user may not see can still carry the
+/// position where backward pagination resumes past them.
+#[derive(Default)]
+struct TimelineWindow {
+	/// The events the user may see.
+	pdus: Vec<(PduCount, PduEvent)>,
+
+	/// Whether events before the first were left out.
+	limited: bool,
+
+	/// The newest event's position, whether or not the user may see it.
+	last_count: PduCount,
+
+	/// Where backward pagination resumes once the scan stopped early or kept
+	/// nothing.
+	resume: Option<PduCount>,
+}
+
+struct Scan {
+	/// Events kept so far, oldest first.
+	kept: VecDeque<(PduCount, PduEvent)>,
+
+	/// How many rows were judged, unreadable ones included.
+	judged: usize,
+
+	/// The oldest position judged.
+	oldest: Option<PduCount>,
+
+	/// Whether the scan stopped before the window's start.
+	limited: bool,
+
+	/// The most events to keep.
+	limit: usize,
+
+	/// The most rows to judge.
+	budget: usize,
+}
+
+enum Halt {
+	/// The window filled, the budget ran out, or a hidden event changed state.
+	Stopped(Scan),
+
+	/// A required read failed.
+	Failed(Error),
+}
+
+async fn load_timeline(services: &Services, query: TimelineQuery<'_>) -> Result<TimelineWindow> {
+	load_timeline_with_errors(services, query, TimelineErrors::Ignore).await
 }
 
 async fn load_timeline_fallible(
 	services: &Services,
-	sender_user: &UserId,
-	room_id: &RoomId,
-	roomsincecount: PduCount,
-	next_batch: Option<PduCount>,
-	limit: usize,
-) -> Result<(Vec<(PduCount, PduEvent)>, bool, PduCount), Error> {
-	load_timeline_with_errors(
-		services,
-		sender_user,
-		room_id,
-		roomsincecount,
-		next_batch,
-		limit,
-		TimelineErrors::Propagate,
-	)
-	.await
+	query: TimelineQuery<'_>,
+) -> Result<TimelineWindow> {
+	load_timeline_with_errors(services, query, TimelineErrors::Propagate).await
 }
 
-async fn load_timeline_with_errors(
-	services: &Services,
-	sender_user: &UserId,
-	room_id: &RoomId,
-	roomsincecount: PduCount,
-	next_batch: Option<PduCount>,
-	limit: usize,
+/// Loads the newest events in a room's window that the user may see.
+///
+/// The scan runs newest first and judges the rows of one window, with the row
+/// past it, at a time concurrently. Its budget is the greater of fifty rows and
+/// ten per event the window may keep, and a zero limit judges none. A hidden
+/// event is left out, and one that changes state ends the scan, so the window
+/// starts after it and the state section covers it. A failed read of the
+/// newest row fails the load, as does any other failed read on a row the
+/// window could keep when errors propagate; otherwise the row is skipped or
+/// the event left out.
+// Unspanned: span frames on this path overflow the debug-build worker stack.
+// size firewall
+#[async_noinline]
+async fn load_timeline_with_errors<'a>(
+	services: &'a Services,
+	TimelineQuery {
+		sender_user,
+		room_id,
+		since,
+		next_batch,
+		limit,
+	}: TimelineQuery<'a>,
 	errors: TimelineErrors,
-) -> Result<(Vec<(PduCount, PduEvent)>, bool, PduCount), Error> {
+) -> Result<TimelineWindow> {
 	let until = next_batch.map(|count| count.saturating_add(1));
-	let pdus = services
+	let rows = services
 		.timeline
 		.pdus_rev(Some(sender_user), room_id, until);
 
-	// Take the last events for the timeline.
-	pin_mut!(pdus);
-	let mut timeline_pdus = Vec::new();
-	let mut last_timeline_count = PduCount::max();
-	let mut first = true;
-	let mut limited = false;
+	pin_mut!(rows);
+	let newest = rows.next().await.transpose()?;
+	let last_count = newest
+		.as_ref()
+		.map(at!(0))
+		.filter(|count| matches!(count, PduCount::Normal(_)))
+		.unwrap_or_else(PduCount::max);
 
-	while let Some(pdu) = pdus.next().await {
-		let (pducount, pdu) = match pdu {
-			| Ok(pdu) => pdu,
-			| Err(error) if first || matches!(errors, TimelineErrors::Propagate) => {
-				return Err(error);
-			},
-			| Err(_) => continue,
-		};
+	if limit == 0 {
+		let limited = newest
+			.as_ref()
+			.is_some_and(|(count, _)| *count > since);
 
-		if first {
-			first = false;
-			last_timeline_count = matches!(pducount, PduCount::Normal(_))
-				.then_some(pducount)
-				.unwrap_or_else(PduCount::max);
-		}
-
-		if pducount <= roomsincecount {
-			break;
-		}
-
-		if timeline_pdus.len() == limit {
-			limited = true;
-			break;
-		}
-
-		timeline_pdus.push((pducount, pdu));
+		return Ok(TimelineWindow {
+			limited,
+			last_count,
+			..Default::default()
+		});
 	}
 
-	timeline_pdus.reverse();
+	let budget = limit.saturating_mul(SCAN_FACTOR).max(SCAN_FLOOR);
+	let scan = Scan {
+		kept: VecDeque::new(),
+		judged: 0,
+		oldest: None,
+		limited: false,
+		limit,
+		budget,
+	};
 
-	Ok((timeline_pdus, limited, last_timeline_count))
+	// Chunks bound how far the concurrent judging reads ahead of where the scan stops.
+	let scan = iter(newest.map(Ok))
+		.chain(rows)
+		.ready_try_take_while(|(count, _)| Ok(*count > since))
+		.take(budget.saturating_add(1))
+		.enumerate()
+		.chunks(limit.saturating_add(1))
+		.map(|chunk| {
+			chunk
+				.into_iter()
+				.stream()
+				.wide_then(|(index, row)| judge(services, sender_user, row, index < budget))
+		})
+		.flatten()
+		.map(Ok)
+		.ready_try_fold(scan, |scan, judged| scan.admit()?.record(judged, errors))
+		.await
+		.or_else(Halt::into_scan)?;
+
+	Ok(scan.into_window(last_count))
+}
+
+/// Decides whether the user may see one raw row's event.
+///
+/// The user's own leave or ban is visible whenever the scan reaches it. The
+/// row past the budget only shows that more history exists, so it is not
+/// judged and the scan stops before reading its decision.
+// Unspanned: span frames on this path overflow the debug-build worker stack.
+async fn judge(
+	services: &Services,
+	sender_user: &UserId,
+	row: Result<(PduCount, PduEvent)>,
+	within_budget: bool,
+) -> Judged {
+	let (count, pdu) = row?;
+
+	let visible = match pdu.membership_for(sender_user) {
+		| _ if !within_budget => Ok(false),
+		| Some(MembershipState::Leave | MembershipState::Ban) => Ok(true),
+		| _ =>
+			services
+				.state_accessor
+				.try_user_can_see_event(sender_user, &pdu)
+				.await,
+	};
+
+	Ok((count, pdu, visible))
+}
+
+#[implement(Scan)]
+fn admit(self) -> Result<Scan, Halt> {
+	if self.kept.len() < self.limit && self.judged < self.budget {
+		return Ok(self);
+	}
+
+	Err(self.stop())
+}
+
+/// Keeps a visible event, and ends the scan at a hidden one that changes state.
+///
+/// A failed read fails the scan when errors propagate; otherwise an unreadable
+/// row is skipped and an event whose visibility cannot be read is left out with
+/// a warning.
+#[implement(Scan)]
+fn record(self, judged: Judged, errors: TimelineErrors) -> Result<Scan, Halt> {
+	let propagate = matches!(errors, TimelineErrors::Propagate);
+	let (count, pdu, visible) = match judged {
+		| Ok(row) => row,
+		| Err(error) if propagate => return Err(Halt::Failed(error)),
+		// The newest row is read before the scan, so a resume point is already set.
+		| Err(_) => return Ok(self.counted(None, None)),
+	};
+
+	let visible = match visible {
+		| Ok(visible) => visible,
+		| Err(error) if propagate => return Err(Halt::Failed(error)),
+		| Err(error) => {
+			warn!(
+				event_id = %pdu.event_id(),
+				%error,
+				"Failed to read the event's visibility; leaving it out of the timeline."
+			);
+
+			false
+		},
+	};
+
+	let boundary = !visible && pdu.state_key().is_some();
+	let scan = self.counted(Some(count), visible.then_some((count, pdu)));
+
+	if boundary {
+		return Err(scan.stop());
+	}
+
+	Ok(scan)
+}
+
+#[implement(Scan)]
+fn counted(self, position: Option<PduCount>, kept: Option<(PduCount, PduEvent)>) -> Scan {
+	let scan = self.keep(kept);
+
+	Scan {
+		judged: scan.judged.saturating_add(1),
+		oldest: position.or(scan.oldest),
+		..scan
+	}
+}
+
+#[implement(Scan)]
+fn keep(mut self, kept: Option<(PduCount, PduEvent)>) -> Scan {
+	if let Some(kept) = kept {
+		self.kept.push_front(kept);
+	}
+
+	self
+}
+
+#[implement(Scan)]
+fn stop(self) -> Halt { Halt::Stopped(Scan { limited: true, ..self }) }
+
+/// Lets a window that kept no event still resume pagination past the events it
+/// left out.
+///
+/// The kept events come oldest first. The oldest position judged is the resume
+/// point when the scan stopped early or kept nothing.
+#[implement(Scan)]
+fn into_window(self, last_count: PduCount) -> TimelineWindow {
+	let resume = self
+		.oldest
+		.filter(|_| self.limited || self.kept.is_empty());
+
+	TimelineWindow {
+		pdus: self.kept.into(),
+		limited: self.limited,
+		last_count,
+		resume,
+	}
+}
+
+#[implement(Halt)]
+fn into_scan(self) -> Result<Scan> {
+	match self {
+		| Halt::Stopped(scan) => Ok(scan),
+		| Halt::Failed(error) => Err(error),
+	}
 }
 
 /// Returns the backward pagination token for a timeline slice.
@@ -140,9 +341,11 @@ async fn load_timeline_with_errors(
 /// A slice beginning at room creation has nothing before it, so its window's
 /// end lets a members query describe the room as received.
 /// Backward pagination from that token re-reads the slice once before ending.
+/// An empty slice resumes below the oldest row its scan judged, if any.
 fn timeline_prev_batch(
 	timeline_pdus: &[(PduCount, PduEvent)],
 	window_end: PduCount,
+	resume: Option<PduCount>,
 ) -> Option<PduCount> {
 	timeline_pdus
 		.first()
@@ -150,6 +353,7 @@ fn timeline_prev_batch(
 			| RoomCreate => window_end,
 			| _ => *count,
 		})
+		.or(resume)
 }
 
 async fn share_encrypted_room(

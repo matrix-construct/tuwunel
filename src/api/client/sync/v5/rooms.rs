@@ -63,7 +63,7 @@ use self::{
 };
 use super::{
 	super::{
-		load_sticky_events, load_timeline_fallible, own_departure, stand_in_leave,
+		TimelineQuery, load_sticky_events, load_timeline_fallible, own_departure, stand_in_leave,
 		strip_state_unsigned,
 	},
 	Connection, ListIds, SyncInfo, WindowRoom, departed, joined_since, stripped_content,
@@ -190,14 +190,13 @@ pub(super) async fn handle_room(
 	let allowed = membership_allows_required_state(membership.as_ref());
 
 	let timeline = allowed.then_async(|| {
-		load_timeline_fallible(
-			services,
+		load_timeline_fallible(services, TimelineQuery {
 			sender_user,
 			room_id,
-			PduCount::Normal(roomsince),
-			Some(PduCount::from(conn.next_batch)),
-			timeline_limit,
-		)
+			since: PduCount::Normal(roomsince),
+			next_batch: Some(PduCount::from(conn.next_batch)),
+			limit: timeline_limit,
+		})
 	});
 
 	let timeline = timeline
@@ -210,14 +209,15 @@ pub(super) async fn handle_room(
 	let (encrypted, timeline, sticky_pdus) = join3(encrypted, timeline, sticky_pdus).await;
 
 	// A failed load must fail the room, else roomsince advances past unsent events.
-	let (timeline_pdus, limited, last_timeline_count) =
-		timeline?.unwrap_or_else(|| (Vec::new(), false, PduCount::default()));
+	let window = timeline?.unwrap_or_default();
 
-	let limited = room_timeline_limited(timeline_limit, limited);
+	let limited = room_timeline_limited(timeline_limit, window.limited);
 
-	let prev_batch = timeline_pdus
+	let prev_batch = window
+		.pdus
 		.first()
 		.map(at!(0))
+		.or(window.resume)
 		.map(PduCount::into_unsigned)
 		.as_ref()
 		.map(ToString::to_string);
@@ -234,7 +234,7 @@ pub(super) async fn handle_room(
 				room_id,
 				PduCount::Normal(roomsince),
 				PduCount::from(conn.next_batch),
-				last_timeline_count,
+				window.last_count,
 			)
 			.map_err(Failure::Timeline)
 			.await?,
@@ -244,7 +244,7 @@ pub(super) async fn handle_room(
 	let state = StateSelection {
 		mode,
 		previous: config_changed.then_some(room.required_state.as_slice()),
-		changed: allowed && state_may_have_changed(mode, last_timeline_count),
+		changed: allowed && state_may_have_changed(mode, window.last_count),
 		delivered: room.shortstatehash,
 		unread: &room.unread_state,
 	};
@@ -259,7 +259,7 @@ pub(super) async fn handle_room(
 		room_id,
 		selection: state,
 		required_state: &required_state,
-		timeline_pdus: &timeline_pdus,
+		timeline_pdus: &window.pdus,
 		sticky_pdus: &sticky_pdus,
 		encrypted,
 	});
@@ -267,7 +267,8 @@ pub(super) async fn handle_room(
 	// TODO: figure out a timestamp we can use for remote invites
 	let stripped_state = stripped_state(services, sender_user, room_id, membership.as_ref());
 
-	let timeline = timeline_pdus
+	let timeline = window
+		.pdus
 		.iter()
 		.stream()
 		.filter_map(|item| ignored_filter(services, item.clone(), sender_user))

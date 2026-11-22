@@ -367,6 +367,36 @@ async fn snapshotless_event_is_judged_by_current_state() -> Result {
 		"an event whose state cannot be read is judged by later state"
 	);
 
+	let message_seen = accessor
+		.try_user_can_see_event(owner, &message)
+		.await?;
+
+	assert!(message_seen, "a member loses the event");
+
+	let history_seen = accessor
+		.try_user_can_see_event(member, &message)
+		.await?;
+
+	assert!(history_seen, "a departed member loses earlier history");
+
+	let stranger_seen = accessor
+		.try_user_can_see_event(stranger, &message)
+		.await?;
+
+	assert!(!stranger_seen, "a never-member sees the event");
+
+	let orphan_seen = accessor
+		.try_user_can_see_event(owner, &orphan)
+		.await?;
+
+	assert!(!orphan_seen, "a room without state is a failed read");
+
+	let unreadable = accessor
+		.try_user_can_see_event(owner, &unreadable)
+		.await;
+
+	assert!(unreadable.is_err(), "a failed read is a denial");
+
 	Ok(())
 }
 

@@ -1159,6 +1159,20 @@ pub async fn once_joined(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	self.db.roomuseroncejoinedids.contains(&key).await
 }
 
+/// Tests whether a user has ever been marked as joined to a room.
+///
+/// A missing row returns `false`; any other read error propagates.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub async fn try_once_joined(&self, user_id: &UserId, room_id: &RoomId) -> Result<bool> {
+	let key = (user_id, room_id);
+
+	self.db
+		.roomuseroncejoinedids
+		.try_contains(&key)
+		.await
+}
+
 /// Tests whether a user is currently joined to any of the given rooms.
 ///
 /// The rooms are probed concurrently and the first joined room decides the

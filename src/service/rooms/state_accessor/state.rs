@@ -25,7 +25,7 @@ use serde::Deserialize;
 use tuwunel_core::{
 	Error, Result, at, err, implement, pair_of,
 	utils::{
-		result::FlatOk,
+		result::{FlatOk, NotFound},
 		stream::{
 			BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, TryIgnore, TryReadyExt, TryTools,
 		},
@@ -83,6 +83,24 @@ pub async fn user_membership(
 		.map_or(MembershipState::Leave, |c: RoomMemberEventContent| c.membership)
 }
 
+/// Returns a user's membership in a selected state snapshot.
+///
+/// An absent member event or invalid membership content is
+/// [`MembershipState::Leave`]. A failure while loading the snapshot, or a
+/// member event it names that cannot be loaded, is an error.
+#[implement(super::Service)]
+pub async fn try_user_membership(
+	&self,
+	shortstatehash: ShortStateHash,
+	user_id: &UserId,
+) -> Result<MembershipState> {
+	self.try_state_get_content(shortstatehash, &StateEventType::RoomMember, user_id.as_str())
+		.map_ok(|content| {
+			content.map_or(MembershipState::Leave, |c: RoomMemberEventContent| c.membership)
+		})
+		.await
+}
+
 /// MSC4115: the user's room membership "just after" the given PDU landed.
 ///
 /// `pdu_shortstatehash` returns state-before-the-event, so a member event
@@ -120,6 +138,22 @@ pub async fn history_visibility(&self, shortstatehash: ShortStateHash) -> Histor
 		})
 }
 
+/// Returns the room's history visibility in a selected state snapshot.
+///
+/// Absent or invalid history-visibility state is [`HistoryVisibility::Shared`].
+/// Errors loading the snapshot or the event it names propagate.
+#[implement(super::Service)]
+pub async fn try_history_visibility(
+	&self,
+	shortstatehash: ShortStateHash,
+) -> Result<HistoryVisibility> {
+	let visibility = |c: RoomHistoryVisibilityEventContent| c.history_visibility;
+
+	self.try_state_get_content(shortstatehash, &StateEventType::RoomHistoryVisibility, "")
+		.map_ok(|content| content.map_or(HistoryVisibility::Shared, visibility))
+		.await
+}
+
 /// Deserializes one event's content from a selected state snapshot.
 ///
 /// The event is selected by `(event_type, state_key)`. State, short-ID,
@@ -137,6 +171,43 @@ where
 	self.state_get(shortstatehash, event_type, state_key)
 		.await
 		.and_then(|event| event.get_content())
+}
+
+/// Deserializes one event's content from a selected state snapshot, keeping
+/// an absent tuple apart from a failed read.
+///
+/// `None` when the snapshot holds no such tuple or the event's content does not
+/// deserialize. A failure while loading the snapshot, or an event it names that
+/// cannot be resolved or loaded, is an error, since a missing referenced event
+/// is not an absent tuple.
+#[implement(super::Service)]
+pub async fn try_state_get_content<T>(
+	&self,
+	shortstatehash: ShortStateHash,
+	event_type: &StateEventType,
+	state_key: &str,
+) -> Result<Option<T>>
+where
+	T: for<'de> Deserialize<'de> + Send,
+{
+	let Some(shorteventid) = self
+		.state_find_shortid(shortstatehash, event_type, state_key)
+		.await?
+	else {
+		return Ok(None);
+	};
+
+	let event_id: OwnedEventId = self
+		.services
+		.short
+		.get_eventid_from_short(shorteventid)
+		.await?;
+
+	self.services
+		.timeline
+		.get_pdu(&event_id)
+		.map_ok(|event| event.get_content().ok())
+		.await
 }
 
 /// Reports whether a state snapshot contains one state tuple.
@@ -189,14 +260,34 @@ pub async fn state_contains_shortstatekey(
 	shortstatehash: ShortStateHash,
 	shortstatekey: ShortStateKey,
 ) -> bool {
+	self.state_shortid_at(shortstatehash, shortstatekey)
+		.map(|found| found.flat_ok().is_some())
+		.await
+}
+
+/// Finds a short state key's event in a snapshot.
+///
+/// Returns `None` when the snapshot does not hold the key; a failure loading
+/// the snapshot is an error.
+#[implement(super::Service)]
+async fn state_shortid_at(
+	&self,
+	shortstatehash: ShortStateHash,
+	shortstatekey: ShortStateKey,
+) -> Result<Option<ShortEventId>> {
 	let start = compress_state_event(shortstatekey, 0);
 	let end = compress_state_event(shortstatekey, u64::MAX);
 
 	self.load_full_state(shortstatehash)
-		.map_ok(|full_state| full_state.range(start..=end).next().copied())
+		.map_ok(|full_state| {
+			full_state
+				.range(start..=end)
+				.next()
+				.copied()
+				.map(parse_compressed_state_event)
+				.map(at!(1))
+		})
 		.await
-		.flat_ok()
-		.is_some()
 }
 
 /// Returns one PDU from a selected state snapshot.
@@ -254,19 +345,35 @@ pub async fn state_get_shortid(
 		.get_shortstatekey(event_type, state_key)
 		.await?;
 
-	let start = compress_state_event(shortstatekey, 0);
-	let end = compress_state_event(shortstatekey, u64::MAX);
-	self.load_full_state(shortstatehash)
-		.map_ok(|full_state| {
-			full_state
-				.range(start..=end)
-				.next()
-				.copied()
-				.map(parse_compressed_state_event)
-				.map(at!(1))
-				.ok_or(err!(Request(NotFound("Not found in room state"))))
-		})
-		.await?
+	self.state_shortid_at(shortstatehash, shortstatekey)
+		.map(|found| found?.ok_or_else(|| err!(Request(NotFound("Not found in room state")))))
+		.await
+}
+
+/// Finds one short event ID in a selected state snapshot.
+///
+/// `None` when no state key was ever registered for the tuple, without reading
+/// the snapshot, or when the snapshot does not hold it; a failure while loading
+/// the snapshot is an error.
+#[implement(super::Service)]
+async fn state_find_shortid(
+	&self,
+	shortstatehash: ShortStateHash,
+	event_type: &StateEventType,
+	state_key: &str,
+) -> Result<Option<ShortEventId>> {
+	let Some(shortstatekey) = self
+		.services
+		.short
+		.get_shortstatekey(event_type, state_key)
+		.await
+		.present()?
+	else {
+		return Ok(None);
+	};
+
+	self.state_shortid_at(shortstatehash, shortstatekey)
+		.await
 }
 
 /// Streams resolvable events of one type from a state snapshot.

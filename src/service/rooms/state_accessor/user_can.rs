@@ -112,123 +112,257 @@ pub async fn user_can_see_event<Pdu>(&self, user_id: &UserId, pdu: &Pdu) -> bool
 where
 	Pdu: Event,
 {
-	let room_id = pdu.room_id();
-	let Ok(shortstatehash) = self
-		.services
-		.state
-		.pdu_shortstatehash(pdu.event_id())
-		.or_else(async |error| {
-			// Only a missing snapshot falls back, so a failed read cannot widen access.
-			if !error.is_not_found() {
-				return Err(error);
-			}
-
-			self.services
-				.state
-				.get_room_shortstatehash(room_id)
-				.await
-		})
-		.await
-	else {
+	let Ok(Some(shortstatehash)) = self.event_snapshot(pdu).await else {
 		return false;
 	};
 
-	let visible = match self.history_visibility(shortstatehash).await {
-		| HistoryVisibility::WorldReadable => true,
+	let history_visibility = self.history_visibility(shortstatehash).await;
+	let visible = self
+		.visible_at(user_id, pdu, shortstatehash, Ok(history_visibility))
+		.await;
+
+	self.or_sticky(user_id, pdu, visible)
+		.unwrap_or_else(|_| false)
+		.await
+}
+
+/// Decides whether a user may see an event, keeping a failed read apart from a
+/// denial.
+///
+/// Grants and denials follow [`Self::user_can_see_event`]. A failed read of the
+/// snapshot, its history-visibility event or a membership record is an error
+/// here, where that function denies it or, for history visibility, assumes
+/// `shared`. Absent history visibility is still `shared`, an absent member
+/// event still `leave`, and an event recorded without state in a room without
+/// any is still denied.
+#[implement(super::Service)]
+#[tracing::instrument(skip_all, level = "trace")]
+pub async fn try_user_can_see_event<Pdu>(&self, user_id: &UserId, pdu: &Pdu) -> Result<bool>
+where
+	Pdu: Event,
+{
+	let visible = match self.event_snapshot(pdu).await {
+		| Ok(Some(shortstatehash)) => {
+			let history_visibility = self.try_history_visibility(shortstatehash).await;
+
+			self.visible_at(user_id, pdu, shortstatehash, history_visibility)
+				.await
+		},
+		| Ok(None) => return Ok(false),
+		| Err(error) => Err(error),
+	};
+
+	self.or_sticky(user_id, pdu, visible).await
+}
+
+/// Selects the snapshot an event's visibility is judged against.
+///
+/// That is the event's own, or the room's current state for an event recorded
+/// without one, and `None` when the room has no state either. Only a missing
+/// snapshot falls back, so a failed read cannot widen access.
+#[implement(super::Service)]
+async fn event_snapshot<Pdu>(&self, pdu: &Pdu) -> Result<Option<ShortStateHash>>
+where
+	Pdu: Event,
+{
+	let state = &self.services.state;
+	let Some(shortstatehash) = state
+		.pdu_shortstatehash(pdu.event_id())
+		.await
+		.present()?
+	else {
+		return state
+			.get_room_shortstatehash(pdu.room_id())
+			.await
+			.present();
+	};
+
+	Ok(Some(shortstatehash))
+}
+
+/// Judges an event under the history visibility of its snapshot.
+#[implement(super::Service)]
+async fn visible_at<Pdu>(
+	&self,
+	user_id: &UserId,
+	pdu: &Pdu,
+	shortstatehash: ShortStateHash,
+	history_visibility: Result<HistoryVisibility>,
+) -> Result<bool>
+where
+	Pdu: Event,
+{
+	let membership = || self.try_user_membership(shortstatehash, user_id);
+	let own = || pdu.membership_for(user_id);
+
+	match history_visibility {
+		| Err(error) => Err(error),
+		| Ok(HistoryVisibility::WorldReadable) => Ok(true),
 
 		// Allow the user's own invite or join, or a user at least invited at the event
-		| HistoryVisibility::Invited =>
-			matches!(
-				pdu.membership_for(user_id),
-				Some(MembershipState::Join | MembershipState::Invite)
-			) || self
-				.user_was_invited(shortstatehash, user_id)
+		| Ok(HistoryVisibility::Invited)
+			if matches!(own(), Some(MembershipState::Join | MembershipState::Invite)) =>
+			Ok(true),
+
+		| Ok(HistoryVisibility::Invited) =>
+			membership()
+				.map_ok(|membership| {
+					matches!(membership, MembershipState::Join | MembershipState::Invite)
+				})
 				.await,
 
 		// Allow the user's own join, or a user joined at the event
-		| HistoryVisibility::Joined =>
-			matches!(pdu.membership_for(user_id), Some(MembershipState::Join))
-				|| self
-					.user_was_joined(shortstatehash, user_id)
-					.await,
+		| Ok(HistoryVisibility::Joined) if matches!(own(), Some(MembershipState::Join)) =>
+			Ok(true),
+
+		| Ok(HistoryVisibility::Joined) =>
+			membership()
+				.map_ok(|membership| matches!(membership, MembershipState::Join))
+				.await,
 
 		// An unrecognized value is treated as shared.
-		| HistoryVisibility::Shared | _ =>
-			self.user_shared_history(shortstatehash, room_id, pdu.event_id(), user_id)
+		| Ok(HistoryVisibility::Shared | _) =>
+			self.user_shared_history(shortstatehash, pdu, user_id)
 				.await,
-	};
+	}
+}
 
-	// MSC4354: a joined user may see a sticky event the history visibility hides.
-	visible || self.user_sees_sticky(user_id, pdu).await
+/// Grants a joined user's sticky event (MSC4354) whatever its history
+/// visibility.
+///
+/// A failed read on either side is the error only when neither grants the
+/// event.
+#[implement(super::Service)]
+async fn or_sticky<Pdu>(&self, user_id: &UserId, pdu: &Pdu, visible: Result<bool>) -> Result<bool>
+where
+	Pdu: Event,
+{
+	if matches!(visible, Ok(true)) {
+		return Ok(true);
+	}
+
+	let sticky = self.user_sees_sticky(user_id, pdu).await;
+
+	if matches!(sticky, Ok(true)) {
+		return Ok(true);
+	}
+
+	visible.and(sticky)
 }
 
 /// Whether a user currently joined to the room may see a sticky event its
 /// history visibility hides (MSC4354).
 ///
 /// The event must be unexpired by its own sticky object, which a redaction
-/// removes, and by its index row, which only an accepted event has.
+/// removes, and by its index row, which only an accepted event has. A failed
+/// read is an error.
 #[implement(super::Service)]
 #[tracing::instrument(level = "trace", skip_all)]
-async fn user_sees_sticky<Pdu>(&self, user_id: &UserId, pdu: &Pdu) -> bool
+async fn user_sees_sticky<Pdu>(&self, user_id: &UserId, pdu: &Pdu) -> Result<bool>
 where
 	Pdu: Event,
 {
 	let now = now_millis();
 
-	pdu.sticky_until(now).is_some()
-		&& self
+	if pdu.sticky_until(now).is_none()
+		|| self
 			.services
 			.sticky
-			.indexed_unexpired(pdu.event_id(), now)
-			.await
-		&& self
-			.services
-			.state_cache
-			.is_joined(user_id, pdu.room_id())
-			.await
+			.try_indexed_unexpired(pdu.event_id(), now)
+			.await?
+			.is_false()
+	{
+		return Ok(false);
+	}
+
+	self.services
+		.state_cache
+		.try_is_joined(user_id, pdu.room_id())
+		.await
 }
 
 /// Whether a user may see an event under `shared` history visibility.
 ///
 /// A current member sees the whole room, which the first check answers without
-/// touching room state. A former member keeps events through their latest
-/// leave, and lookup failures deny access.
+/// touching room state; a user joined at the event sees it too, and a former
+/// member keeps events through their latest leave. A failed read is the error
+/// only when no check grants the event.
 #[implement(super::Service)]
-async fn user_shared_history(
+async fn user_shared_history<Pdu>(
 	&self,
 	shortstatehash: ShortStateHash,
-	room_id: &RoomId,
-	event_id: &EventId,
+	pdu: &Pdu,
 	user_id: &UserId,
-) -> bool {
+) -> Result<bool>
+where
+	Pdu: Event,
+{
+	let joined = self
+		.services
+		.state_cache
+		.try_is_joined(user_id, pdu.room_id())
+		.await;
+
+	if matches!(joined, Ok(true)) {
+		return Ok(true);
+	}
+
+	let joined_at_event = self
+		.try_user_membership(shortstatehash, user_id)
+		.map_ok(|membership| matches!(membership, MembershipState::Join))
+		.await;
+
+	if matches!(joined_at_event, Ok(true)) {
+		return Ok(true);
+	}
+
+	let departed_after = self.departed_after(pdu, user_id).await;
+
+	if matches!(departed_after, Ok(true)) {
+		return Ok(true);
+	}
+
+	joined.and(joined_at_event).and(departed_after)
+}
+
+/// Whether a former member's latest leave falls no earlier than the event.
+///
+/// A user who never joined, or whose leave or the event's position is
+/// missing, is denied; a failed read is an error.
+#[implement(super::Service)]
+async fn departed_after<Pdu>(&self, pdu: &Pdu, user_id: &UserId) -> Result<bool>
+where
+	Pdu: Event,
+{
 	let state_cache = &self.services.state_cache;
+	let room_id = pdu.room_id();
 
-	if state_cache.is_joined(user_id, room_id).await
-		|| self
-			.user_was_joined(shortstatehash, user_id)
-			.await
+	if state_cache
+		.try_once_joined(user_id, room_id)
+		.await?
+		.is_false()
 	{
-		return true;
+		return Ok(false);
 	}
 
-	if !state_cache.once_joined(user_id, room_id).await {
-		return false;
-	}
-
-	let Ok(left_count) = state_cache.get_left_count(room_id, user_id).await else {
-		return false;
+	let Some(left_count) = state_cache
+		.get_left_count(room_id, user_id)
+		.await
+		.present()?
+	else {
+		return Ok(false);
 	};
 
-	let Ok(event_count) = self
+	let event_count = self
 		.services
 		.timeline
-		.get_pdu_count(event_id)
+		.get_pdu_count(pdu.event_id())
 		.await
-	else {
-		return false;
-	};
+		.present()?;
 
-	event_count <= PduCount::from_unsigned(left_count)
+	let visible = event_count.is_some_and(|count| count <= PduCount::from_unsigned(left_count));
+
+	Ok(visible)
 }
 
 /// Reports whether a user may read the room's state events.

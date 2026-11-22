@@ -96,6 +96,8 @@ enum Opened {
 	Before,
 
 	/// History opens inside the synced window, ahead of the rejection.
+	///
+	/// The invitee cannot see the opening, so the timeline starts after it.
 	Within,
 
 	/// History opens before the synced window and closes inside it.
@@ -263,7 +265,15 @@ async fn left_history(&self, History { joined, unreadable }: History) -> Result 
 		let timeline = &room["timeline"]["events"];
 
 		assert!(room.is_object(), "left room missing: {reply}");
-		assert_eq!(has_event(timeline, &message), !bounded, "history bound: {reply}");
+		assert_eq!(has_event(timeline, &message), joined && unreadable, "history bound: {reply}");
+		if !joined {
+			let state = &room["state"]["events"];
+			let member = own_member(state, invitee);
+
+			assert!(!has_event(state, &name), "never-member state: {reply}");
+			assert_eq!(member["content"]["membership"], "leave", "never-member leave: {reply}");
+		}
+
 		if bounded && position == &before {
 			assert_eq!(timeline.as_array().unwrap().last().unwrap()["event_id"], leave.as_str());
 		}
@@ -296,11 +306,12 @@ async fn left_history(&self, History { joined, unreadable }: History) -> Result 
 /// is served from, not the room's current visibility.
 ///
 /// The legacy field serves state at the start of the timeline and
-/// `state_after` the state the rejection leaves. History opened inside the
-/// synced window therefore shows the room's state only in `state_after`, and
-/// history closed there shows it only in the legacy field. Current state
-/// standing in for a lost snapshot grants nothing, and a later snapshot
-/// recorded after the rejection is never served in its place.
+/// `state_after` the state the rejection leaves. History closed inside the
+/// synced window therefore shows the room's state only in the legacy field,
+/// while history opened there shows it in both, since the timeline starts
+/// after an opening the invitee cannot see. Current state standing in for a
+/// lost snapshot grants nothing, and a later snapshot recorded after the
+/// rejection is never served in its place.
 #[implement(Accounts, params = "<'_>")]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn left_visibility(&self, opened: Opened) -> Result {
@@ -376,8 +387,10 @@ async fn left_visibility(&self, opened: Opened) -> Result {
 		.transpose()?;
 
 	let after_readable = matches!(opened, Opened::Before | Opened::Within | Opened::Renamed);
-	let legacy_readable =
-		matches!(opened, Opened::Before | Opened::ClosedWithin | Opened::Renamed);
+	let legacy_readable = matches!(
+		opened,
+		Opened::Before | Opened::Within | Opened::ClosedWithin | Opened::Renamed
+	);
 
 	let query = format!("{before}&full_state=true");
 	let reply = client.sync_v3(Some(&query)).await?;
