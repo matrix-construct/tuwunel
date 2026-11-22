@@ -13,7 +13,12 @@ use tuwunel_service::{
 	users::PASSWORD_SENTINEL,
 };
 
-use self::{client::wait_until_ready, fixture::boot, uiaa_signing::exercise as exercise_signing};
+use self::{
+	Link::{Missing, Pending, Resolved, Unreadable},
+	client::wait_until_ready,
+	fixture::boot,
+	uiaa_signing::exercise as exercise_signing,
+};
 
 #[expect(
 	dead_code,
@@ -22,6 +27,25 @@ use self::{client::wait_until_ready, fixture::boot, uiaa_signing::exercise as ex
 mod client;
 mod fixture;
 mod uiaa_signing;
+
+/// How a session seeded for an account reads back when the challenge is built.
+///
+/// `Unreadable` and `Missing` sessions start out resolved, so only being
+/// skipped keeps them from linking their provider.
+#[derive(Clone, Copy)]
+enum Link {
+	/// The provider resolved the account's identity.
+	Resolved,
+
+	/// The sign-in is still waiting at the provider.
+	Pending,
+
+	/// Resolved, but the stored session no longer decodes.
+	Unreadable,
+
+	/// Resolved, but only the account's index still names the session.
+	Missing,
+}
 
 /// LDAP may supply password UIAA only for LDAP-origin accounts. A real local
 /// password remains usable regardless of origin or whether LDAP is enabled.
@@ -44,20 +68,22 @@ fn uiaa_password_flows_match_account_credentials() -> Result {
 /// brand, and within each the default wins, then the first in configured order;
 /// a device's own OIDC tag wins over all. A session whose provider never
 /// resolved an identity links nothing, and an account linked to none, or only
-/// to a provider no longer configured, is offered no SSO flow.
+/// to a provider no longer configured, is offered no SSO flow. A brand two
+/// providers share links neither, and an unreadable or missing session is
+/// passed over without hiding the account's other links. No challenge's stored
+/// session starts with a stage completed.
 #[test]
 fn uiaa_sso_binds_a_linked_provider() -> Result {
-	let providers = ["alpha", "beta", "gamma"]
-		.into_iter()
-		.flat_map(|name| {
-			[
-				format!("identity_provider.{name}.client_id=\"{name}\""),
-				format!("identity_provider.{name}.client_secret=\"test-secret\""),
-				format!("identity_provider.{name}.brand=\"{name}-brand\""),
-				format!("identity_provider.{name}.issuer_url=\"https://{name}.invalid\""),
-				format!("identity_provider.{name}.discovery=false"),
-			]
-		});
+	let brands = [("alpha", "alpha"), ("beta", "beta"), ("gamma", "gamma"), ("delta", "alpha")];
+	let providers = brands.into_iter().flat_map(|(name, brand)| {
+		[
+			format!("identity_provider.{name}.client_id=\"{name}\""),
+			format!("identity_provider.{name}.client_secret=\"test-secret\""),
+			format!("identity_provider.{name}.brand=\"{brand}-brand\""),
+			format!("identity_provider.{name}.issuer_url=\"https://{name}.invalid\""),
+			format!("identity_provider.{name}.discovery=false"),
+		]
+	});
 
 	let options: Vec<_> = [
 		"logging.global_default=false".to_owned(),
@@ -311,22 +337,28 @@ async fn exercise_linked(services: &Services, base: &str) -> Result {
 	let password = json!({"stages": ["m.login.password"]});
 	let sso = json!({"stages": ["m.login.sso"]});
 
-	let alpha = ("alpha", true);
-	let beta = ("beta", true);
-	let gamma = ("gamma", true);
-	let pending_gamma = ("gamma", false);
-	let gamma_brand = ("gamma-brand", true);
+	let alpha = ("alpha", Resolved);
+	let beta = ("beta", Resolved);
+	let gamma = ("gamma", Resolved);
+	let pending_gamma = ("gamma", Pending);
+	let unreadable_gamma = ("gamma", Unreadable);
+	let missing_gamma = ("gamma", Missing);
+	let gamma_brand = ("gamma-brand", Resolved);
 
 	// Session ids sort in list order, so `ordered` stores beta's session first.
 	for (localpart, credential, tag, linked, bound) in [
-		("brand", PASSWORD_SENTINEL, None, &[("beta-brand", true)][..], Some("beta")),
+		("brand", PASSWORD_SENTINEL, None, &[("beta-brand", Resolved)][..], Some("beta")),
 		("default", PASSWORD_SENTINEL, None, &[alpha, gamma][..], Some("gamma")),
 		("ordered", PASSWORD_SENTINEL, None, &[beta, alpha][..], Some("alpha")),
 		("tagged", PASSWORD_SENTINEL, Some("alpha"), &[gamma][..], Some("alpha")),
 		("pending", PASSWORD_SENTINEL, None, &[beta, pending_gamma][..], Some("beta")),
 		("exact", PASSWORD_SENTINEL, None, &[beta, gamma_brand][..], Some("beta")),
 		("unlinked", PASSWORD_SENTINEL, None, &[][..], None),
-		("unconfigured", PASSWORD_SENTINEL, None, &[("gone", true)][..], None),
+		("unresolved", PASSWORD_SENTINEL, None, &[pending_gamma][..], None),
+		("shared", PASSWORD_SENTINEL, None, &[("alpha-brand", Resolved)][..], None),
+		("corrupt", PASSWORD_SENTINEL, None, &[unreadable_gamma, beta][..], Some("beta")),
+		("missing", PASSWORD_SENTINEL, None, &[missing_gamma, beta][..], Some("beta")),
+		("unconfigured", PASSWORD_SENTINEL, None, &[("gone", Resolved)][..], None),
 		("password", "test-password", None, &[beta][..], Some("beta")),
 	] {
 		let user_id = UserId::parse_with_server_name(localpart, services.globals.server_name())?;
@@ -336,19 +368,8 @@ async fn exercise_linked(services: &Services, base: &str) -> Result {
 			.create(&user_id, Some(credential), Some("sso"))
 			.await?;
 
-		for (index, &(idp_id, completed)) in linked.iter().enumerate() {
-			let sess_id = || format!("{localpart}-{index}");
-			let user_info = completed.then(|| UserInfo { sub: sess_id(), ..Default::default() });
-
-			let session = Session {
-				idp_id: Some(idp_id.to_owned()),
-				sess_id: Some(sess_id()),
-				user_id: Some(user_id.clone()),
-				user_info,
-				..Default::default()
-			};
-
-			services.oauth.sessions.put(&session).await;
+		for (index, &(idp_id, link)) in linked.iter().enumerate() {
+			seed(services, &user_id, format!("{localpart}-{index}"), idp_id, link).await;
 		}
 
 		let challenge = deactivate_challenge(services, base, &user_id, tag).await?;
@@ -369,7 +390,47 @@ async fn exercise_linked(services: &Services, base: &str) -> Result {
 		if *providers != expected {
 			return Err!("{localpart}: expected binding {expected}, got {providers}");
 		}
+
+		let session = challenge["session"].as_str().unwrap_or_default();
+		let stored = services
+			.uiaa
+			.get_uiaa_session_by_session_id(session)
+			.await;
+
+		if stored.is_none_or(|(.., uiaa)| !uiaa.completed.is_empty()) {
+			return Err!("{localpart}: expected a stored UIAA session with no stage completed");
+		}
 	}
 
 	Ok(())
+}
+
+async fn seed(services: &Services, user_id: &UserId, sess_id: String, idp_id: &str, link: Link) {
+	let user_info = matches!(link, Resolved | Unreadable | Missing).then(|| UserInfo {
+		sub: sess_id.clone(),
+		..Default::default()
+	});
+
+	let session = Session {
+		idp_id: Some(idp_id.to_owned()),
+		sess_id: Some(sess_id),
+		user_id: Some(user_id.to_owned()),
+		user_info,
+		..Default::default()
+	};
+
+	services.oauth.sessions.put(&session).await;
+
+	let stored = &services.db["oauthid_session"];
+	let sess_id = session
+		.sess_id
+		.as_deref()
+		.expect("the seeded session's id");
+
+	match link {
+		// A reserved CBOR head: the session no longer decodes, yet is not absent.
+		| Unreadable => stored.insert(sess_id, [0x1C]),
+		| Missing => stored.remove(sess_id),
+		| Resolved | Pending => (),
+	}
 }
