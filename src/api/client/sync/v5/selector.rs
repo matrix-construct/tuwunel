@@ -778,10 +778,10 @@ mod tests {
 		assert_eq!(lists[&invites].count, uint!(0));
 	}
 
-	fn assembled<'a>(
-		subscribed: &WindowRoom,
-		selections: impl Iterator<Item = &'a WindowRoom>,
-	) -> Window {
+	fn assembled<'a, Selections>(subscribed: &WindowRoom, selections: Selections) -> Window
+	where
+		Selections: Iterator<Item = &'a WindowRoom>,
+	{
 		once(subscribed.clone())
 			.chain(selections.cloned())
 			.map(|room| (room.room_id.clone(), room))
