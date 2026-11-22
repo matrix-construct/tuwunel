@@ -91,7 +91,7 @@ static LOGS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 /// the new one, and Carol's last sign-in returns through the new one. Then a
 /// UIAA session's SSO stage is completed only by its own account's sign-in, and
 /// last, sign-in skips the usernames an appservice reserves, local policy
-/// forbids or strict syntax rejects.
+/// forbids, strict syntax rejects or another server owns.
 #[test]
 fn sso_fallback_account() -> Result {
 	let provider = TcpListener::bind(("127.0.0.1", 0))?;
@@ -516,8 +516,9 @@ async fn reserved_usernames(services: &Services, base: &str, client: &Client) ->
 /// Sign-in skips forbidden, malformed and reserved usernames alike.
 ///
 /// Mia's forbidden and Noah's malformed preferred usernames each fall through to
-/// the address's mailbox. A user namespace that is not exclusive reserves
-/// nothing, while an appservice's own sender stays reserved outside its
+/// the address's mailbox, as do Paul's user ID on another server and Quinn's on
+/// this one with a forbidden localpart. A user namespace that is not exclusive
+/// reserves nothing, while an appservice's own sender stays reserved outside its
 /// namespace, so the trusted provider does not adopt it for Kate. Olivia's
 /// username and mailbox are reserved at a provider whose fallback is disabled,
 /// so her sign-in fails creating no account.
@@ -550,6 +551,31 @@ async fn skipped_usernames(services: &Services, base: &str, client: &Client) -> 
 	let account = signed_in(services, &response).await?;
 
 	assert_eq!(account.localpart(), "noah", "noah's malformed username is skipped");
+
+	let paul = SignIn {
+		sub: "paul",
+		username: "@paul:elsewhere",
+		mailbox: "paul",
+		..mia
+	};
+
+	let response = sign_in_to(client, base, paul).await?;
+	let account = signed_in(services, &response).await?;
+
+	assert_eq!(account.localpart(), "paul", "paul's foreign user ID is skipped");
+
+	let quinn = SignIn {
+		sub: "quinn",
+		username: "@forbidden_quinn:localhost",
+		mailbox: "quinn",
+		..mia
+	};
+
+	let response = sign_in_to(client, base, quinn).await?;
+	let account = signed_in(services, &response).await?;
+
+	assert_eq!(account.localpart(), "quinn", "quinn's forbidden localpart is skipped");
+	assert!(!exists(services, "forbidden_quinn").await?, "no forbidden account is created");
 
 	let leo = SignIn {
 		sub: "leo",

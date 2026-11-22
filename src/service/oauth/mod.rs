@@ -91,7 +91,8 @@ pub fn get_server(&self) -> Result<&Server> {
 
 /// Parse a username an identity provider claims and check it against local policy.
 ///
-/// The policy is strict syntax, `forbidden_usernames` and every appservice's
+/// The claim is a localpart or a user ID on this server. The policy is strict
+/// syntax, `forbidden_usernames` against the localpart and every appservice's
 /// exclusive user namespace. Existing identity bindings do not go through
 /// candidate selection.
 #[implement(Service)]
@@ -99,6 +100,10 @@ pub async fn candidate_user_id(&self, username: &str) -> Result<OwnedUserId> {
 	let server = self.services.globals.server_name();
 	let user_id = UserId::parse_with_server_name(username, server)
 		.map_err(|e| err!(Request(InvalidUsername("Invalid username: {e}"))))?;
+
+	if user_id.server_name() != server {
+		return Err!(Request(InvalidUsername("Username names another server.")));
+	}
 
 	user_id
 		.validate_strict()
@@ -109,7 +114,7 @@ pub async fn candidate_user_id(&self, username: &str) -> Result<OwnedUserId> {
 		.config
 		.registration
 		.forbidden_usernames
-		.is_match(username)
+		.is_match(user_id.localpart())
 	{
 		return Err!(Request(Forbidden("Username forbidden.")));
 	}

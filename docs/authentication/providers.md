@@ -342,8 +342,9 @@ it is typically an opaque identifier rather than a human-readable name. It is
 only consulted when explicitly listed in `userid_claims`, where it always
 takes precedence over every other claim regardless of list order.
 
-A candidate is skipped, under a trusted provider too, when it is not a valid
-localpart, when `registration.forbidden_usernames` matches it, or when an
+A candidate is skipped, under a trusted provider too, when it is neither a
+valid localpart nor a user ID on this server, when
+`registration.forbidden_usernames` matches its localpart, or when an
 appservice reserves it: the appservice's own sender user, or any user in its
 exclusive user namespace. Otherwise a candidate naming no account is accepted
 for a new account, and one naming an existing account is accepted only by a
