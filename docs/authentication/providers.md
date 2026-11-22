@@ -120,9 +120,9 @@ it uses the first matching provider in configuration order.
 
 | Field | Default | Description |
 |---|---|---|
-| `userid_claims` | all | Claims used to compute the Matrix localpart for new registrations. When empty, Tuwunel avoids generated IDs where possible. The special value `"unique"` forces generated IDs exclusively. The claim `"sub"` takes precedence over all others when listed. |
-| `trusted` | `false` | Inverts user matching: instead of registering a new account when claims conflict with existing users, Tuwunel finds the first matching user and grants access to it. It never matches a username that `registration.forbidden_usernames` matches or that an appservice reserves as its sender user or within its exclusive user namespace. **Only set this for providers you self-host and fully control. Never use with public providers (GitHub, GitLab, Google, etc.); it enables account takeover.** For migrated databases, prefer durable bulk adoption or individual association to temporarily enabling this option. A trusted provider's `email` claim is also bound to a new account when it sends no `email_verified` claim. |
-| `unique_id_fallbacks` | `true` | When no claim maps cleanly to an available username, generate a unique random localpart as a fallback. Set to `false` on private servers where random usernames are undesirable — a misconfiguration will produce an error instead. |
+| `userid_claims` | all | Claims Tuwunel may use to compute the Matrix localpart. It tries them in a [fixed order](#how-tuwunel-derives-matrix-user-ids-from-claims), whatever their order in this list. When empty, Tuwunel avoids generated IDs where possible. The special value `"unique"` forces generated IDs exclusively. The claim `"sub"` takes precedence over all others when listed. |
+| `trusted` | `false` | Lets a claim name an existing account: where Tuwunel otherwise skips a claim naming an existing user, a trusted provider grants access to that account. Claims are still tried in their fixed order, so an earlier claim naming an available username registers a new account instead. It never matches a username that `registration.forbidden_usernames` matches or that an appservice reserves as its sender user or within its exclusive user namespace. **Only set this for providers you self-host and fully control. Never use with public providers (GitHub, GitLab, Google, etc.); it enables account takeover.** For migrated databases, prefer durable bulk adoption or individual association to temporarily enabling this option. A trusted provider's `email` claim is also bound to a new account when it sends no `email_verified` claim. |
+| `unique_id_fallbacks` | `true` | When no claim is accepted, create the account at a localpart derived from the provider identity, the same one on every sign-in. Set to `false` on private servers where such usernames are undesirable; a misconfiguration then produces an error instead. |
 | `registration` | `true` | Whether this provider can create new Matrix accounts. Set to `false` to restrict the provider to existing users only. |
 
 A new account takes its display name from the `name` claim and its avatar from
@@ -366,8 +366,9 @@ choice is to ensure `preferred_username` is populated on every account, as it
 is the first claim Tuwunel checks and tends to hold a recognisable,
 human-readable name that also makes a reasonable Matrix localpart.
 
-The `userid_claims` field lets you restrict which claims Tuwunel considers
-and in what order. For example, to use only `preferred_username` and fall
+The `userid_claims` field lets you restrict which claims Tuwunel considers.
+It still tries them in the order above, whatever their order in the list. For
+example, to use only `preferred_username` and fall
 back to the local part of the email address, and never silently create an
 account at an identity-derived ID:
 
