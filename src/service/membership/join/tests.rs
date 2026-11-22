@@ -1,8 +1,8 @@
-use std::iter::empty;
+use std::{collections::HashMap, iter::empty, slice::from_ref};
 
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedServerName, RoomId, RoomVersionId,
-	UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedServerName, RoomId,
+	RoomVersionId, UserId,
 	api::error::ErrorKind,
 	events::room::{
 		create::RoomCreateEventContent,
@@ -13,13 +13,24 @@ use ruma::{
 };
 use serde_json::{Value, from_value, json, to_vec, value::to_raw_value};
 use tuwunel_core::{Error, Result, config::Figment};
-use tuwunel_matrix::{pdu::PduBuilder, room_version::rules as room_version_rules};
+use tuwunel_matrix::{
+	PduEvent, event::gen_event_id, pdu::PduBuilder, room::state::resolution::AuthCheckOutcome,
+	room_version::rules as room_version_rules,
+};
 
-use super::{Join, merge_member_content};
+use super::{Join, SendJoinEvents, merge_member_content};
 use crate::{
 	Services,
 	test_utils::{fixture, pdu_id, signed_state, with_field},
 };
+
+/// Describes one v11 state event of `@bob:localhost` for `state_event` to sign.
+struct StateEvent<'a> {
+	kind: &'a str,
+	state_key: &'a str,
+	content: &'a Value,
+	auth_events: &'a [&'a OwnedEventId],
+}
 
 const MAX_BYTES: usize = 4096;
 
@@ -51,17 +62,31 @@ async fn an_altered_send_join_event_is_stored_redacted() -> Result {
 
 	let services = &fixture.services;
 	let room_id = room_id!("!join:localhost");
+	let [(create_id, create), (join_id, join)] = room(services, room_id)?;
+	let auth_events = [&create_id, &join_id];
 	let topic = json!({"topic": "signed"});
 	let name = json!({"name": "signed"});
-	let (topic_id, topic_event) = signed_state(services, room_id, "m.room.topic", "", &topic)?;
-	let (name_id, name_event) = signed_state(services, room_id, "m.room.name", "", &name)?;
+	let (topic_id, topic_event) = state_event(services, room_id, StateEvent {
+		kind: "m.room.topic",
+		state_key: "",
+		content: &topic,
+		auth_events: &auth_events,
+	})?;
+
+	let (name_id, name_event) = state_event(services, room_id, StateEvent {
+		kind: "m.room.name",
+		state_key: "",
+		content: &name,
+		auth_events: &auth_events,
+	})?;
+
 	let (foreign_id, foreign) =
 		signed_state(services, room_id!("!other:localhost"), "m.room.topic", "", &topic)?;
 
 	let altered = with_field(topic_event, "content", json!({"topic": "altered"}));
 	let annotated = with_field(name_event, "unsigned", json!({"age": 1}));
 
-	ingest(services, room_id, &[altered, annotated, foreign]).await?;
+	ingest(services, room_id, &[create, join, altered, annotated, foreign]).await?;
 
 	let altered: Value = services.timeline.get_outlier(&topic_id).await?;
 	let annotated: Value = services.timeline.get_outlier(&name_id).await?;
@@ -88,7 +113,17 @@ async fn a_send_join_event_replaces_only_an_altered_outlier() -> Result {
 
 	let services = &fixture.services;
 	let room_id = room_id!("!join:localhost");
-	let signed = |kind, content| signed_state(services, room_id, kind, "", &content);
+	let [(create_id, create), (join_id, join)] = room(services, room_id)?;
+	let auth_events = [&create_id, &join_id];
+	let signed = |kind, content| {
+		state_event(services, room_id, StateEvent {
+			kind,
+			state_key: "",
+			content: &content,
+			auth_events: &auth_events,
+		})
+	};
+
 	let known_topic = json!({"topic": "known"});
 	let genuine_avatar = json!({"url": "mxc://localhost/genuine"});
 	let (accepted_id, accepted) = signed("m.room.name", json!({"name": "accepted"}))?;
@@ -106,7 +141,7 @@ async fn a_send_join_event_replaces_only_an_altered_outlier() -> Result {
 
 	let altered = with_field(known, "content", json!({"topic": "altered"}));
 
-	ingest(services, room_id, &[accepted, altered, genuine]).await?;
+	ingest(services, room_id, &[create, join, accepted, altered, genuine]).await?;
 
 	let outlier_content = async |event_id| {
 		services
@@ -447,24 +482,251 @@ fn reserved_join_keys_are_dropped_from_the_extras() -> Result {
 	Ok(())
 }
 
-async fn ingest(services: &Services, room_id: &RoomId, events: &[Value]) -> Result {
+/// A send_join response admits a room name even when its auth events come
+/// later in the response.
+///
+/// Receiving the name on its own does not admit it to outlier storage.
+#[tokio::test]
+async fn a_send_join_event_needs_its_auth_chain() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room_id = room_id!("!room:localhost");
+	let [(create_id, create), (join_id, join)] = room(services, room_id)?;
+	let auth = [&create_id, &join_id];
+	let content = json!({"name": "Example"});
+	let (name_id, name) = state_event(services, room_id, StateEvent {
+		kind: "m.room.name",
+		state_key: "",
+		content: &content,
+		auth_events: &auth,
+	})?;
+
+	ingest(services, room_id, from_ref(&name)).await?;
+
+	assert!(!services.timeline.pdu_exists(&name_id).await);
+
+	let state = ingest_response(services, room_id, &[], &[name, join, create]).await?;
+
+	assert!(state.values().any(|id| id == &name_id));
+	assert!(services.timeline.pdu_exists(&name_id).await);
+
+	Ok(())
+}
+
+/// A send_join event the auth rules deny is dropped, and the rest of the
+/// response is still admitted.
+///
+/// The name cites only the create event, so its sender's membership is absent
+/// from the state it is checked against.
+#[tokio::test]
+async fn a_denied_send_join_event_is_dropped() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room_id = room_id!("!denied:localhost");
+	let [(create_id, create), (join_id, join)] = room(services, room_id)?;
+	let unjoined = [&create_id];
+	let joined = [&create_id, &join_id];
+	let name = json!({"name": "denied"});
+	let topic = json!({"topic": "allowed"});
+	let (name_id, name) = state_event(services, room_id, StateEvent {
+		kind: "m.room.name",
+		state_key: "",
+		content: &name,
+		auth_events: &unjoined,
+	})?;
+
+	let (topic_id, topic) = state_event(services, room_id, StateEvent {
+		kind: "m.room.topic",
+		state_key: "",
+		content: &topic,
+		auth_events: &joined,
+	})?;
+
+	let state = ingest_response(services, room_id, &[], &[create, join, name, topic]).await?;
+
+	assert!(!state.values().any(|id| id == &name_id), "a denied event is not state");
+	assert!(!services.timeline.pdu_exists(&name_id).await, "a denied event is not stored");
+	assert!(state.values().any(|id| id == &topic_id));
+
+	Ok(())
+}
+
+/// A send_join response fails when an auth event it admitted cannot be read
+/// back, rather than dropping the events that cite it.
+///
+/// The creator's join is held as an unreadable accepted row, which the
+/// response's verified copy leaves in place. A readable outlier copy beside
+/// that row is read instead, and the response is then admitted.
+#[tokio::test]
+async fn an_unreadable_auth_event_fails_the_send_join() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room_id = room_id!("!unreadable:localhost");
+	let [(create_id, create), (join_id, join)] = room(services, room_id)?;
+	let name = json!({"name": "unread"});
+	let (name_id, name) = state_event(services, room_id, StateEvent {
+		kind: "m.room.name",
+		state_key: "",
+		content: &name,
+		auth_events: &[&create_id, &join_id],
+	})?;
+
+	let response = [create, join.clone(), name];
+
+	put_accepted(services, &join_id, &json!("unreadable"))?;
+
+	let result = ingest_response(services, room_id, &[], &response).await;
+
+	assert!(
+		matches!(result, Err(Error::SerdeDe(_))),
+		"an unreadable auth event fails the response with its read error"
+	);
+
+	assert!(!services.timeline.pdu_exists(&name_id).await);
+
+	let stored_join = with_field(join, "event_id", json!(join_id));
+
+	services
+		.timeline
+		.add_pdu_outlier(&join_id, &from_value(stored_join)?);
+
+	let state = ingest_response(services, room_id, &[], &response).await?;
+
+	assert!(state.values().any(|id| id == &name_id), "a readable copy is read instead");
+
+	Ok(())
+}
+
+/// A create event naming auth events is denied by its own rule, without
+/// reading them, and fails the send_join response.
+///
+/// The event names no previous events, so the auth-events rule decides.
+#[tokio::test]
+async fn a_create_event_naming_auth_events_fails_the_send_join() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room_id = room_id!("!create:localhost");
 	let version = RoomVersionId::V11;
-	let auth_chain = events
-		.iter()
-		.map(to_raw_value)
-		.collect::<Result<Vec<_>, _>>()?;
+	let absent = EventId::parse("$absent")?;
+	let naming = StateEvent {
+		kind: "m.room.create",
+		state_key: "",
+		content: &json!({ "room_version": "11" }),
+		auth_events: &[&absent],
+	};
+
+	let (create_id, create) = signed_event(services, room_id, naming, &[])?;
+
+	let pdu: PduEvent = from_value(with_field(create.clone(), "event_id", json!(create_id)))?;
+	let outcome = services
+		.event_handler
+		.auth_check_by_auth_events(&pdu, &room_version_rules(&version)?)
+		.await?;
+
+	assert!(matches!(outcome, AuthCheckOutcome::Deny(_)), "the create rule denies it");
+
+	let refused = ingest_response(services, room_id, &[], &[create]).await;
+
+	assert!(matches!(refused, Err(Error::BadServerResponse(_))), "the response fails");
+
+	Ok(())
+}
+
+/// A send_join `state` list naming two events for one state key fails the
+/// response.
+///
+/// One event listed twice, and again in the auth chain, is state once.
+#[tokio::test]
+async fn two_send_join_events_for_one_state_key_fail_the_response() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room_id = room_id!("!conflict:localhost");
+	let [(create_id, create), (join_id, join)] = room(services, room_id)?;
+	let auth = [&create_id, &join_id];
+	let signed = |content| {
+		state_event(services, room_id, StateEvent {
+			kind: "m.room.name",
+			state_key: "",
+			content: &content,
+			auth_events: &auth,
+		})
+	};
+
+	let (first_id, first) = signed(json!({"name": "first"}))?;
+	let (_, second) = signed(json!({"name": "second"}))?;
+	let room_events = [create, join];
+	let auth_chain = [room_events.as_slice(), from_ref(&first)].concat();
+	let repeated = [auth_chain.as_slice(), from_ref(&first)].concat();
+	let conflicting = [room_events.as_slice(), &[first, second]].concat();
+
+	let state = ingest_response(services, room_id, &auth_chain, &repeated).await?;
+
+	assert_eq!(
+		state
+			.values()
+			.filter(|&id| id.eq(&first_id))
+			.count(),
+		1
+	);
+
+	let refused = ingest_response(services, room_id, &[], &conflicting).await;
+
+	assert!(
+		matches!(refused, Err(Error::BadServerResponse(_))),
+		"a second event for one state key fails the response"
+	);
+
+	Ok(())
+}
+
+async fn ingest(services: &Services, room_id: &RoomId, events: &[Value]) -> Result {
+	ingest_response(services, room_id, events, &[]).await?;
+
+	Ok(())
+}
+
+/// Ingests a v11 send_join response's `auth_chain` and `state` lists, returning
+/// the state it names.
+///
+/// Only events of the `state` list enter that state; an event listed only in
+/// the auth chain is stored without becoming state.
+async fn ingest_response(
+	services: &Services,
+	room_id: &RoomId,
+	auth_chain: &[Value],
+	state: &[Value],
+) -> Result<HashMap<u64, OwnedEventId>> {
+	let version = RoomVersionId::V11;
+	let raw = |events: &[Value]| {
+		events
+			.iter()
+			.map(to_raw_value)
+			.collect::<Result<Vec<_>, _>>()
+	};
+
+	let auth_chain = raw(auth_chain)?;
+	let state = raw(state)?;
+	let events = SendJoinEvents { auth_chain: &auth_chain, state: &state };
 
 	services
 		.membership
-		.ingest_send_join_auth_chain(
-			room_id,
-			&version,
-			&room_version_rules(&version)?,
-			&auth_chain,
-		)
-		.await;
-
-	Ok(())
+		.ingest_send_join_events(room_id, &version, &room_version_rules(&version)?, events)
+		.await
 }
 
 /// Writes an accepted copy of an event straight to storage.
@@ -478,6 +740,78 @@ fn put_accepted(services: &Services, event_id: &EventId, event: &Value) -> Resul
 	services.db["pduid_pdu"].insert(pdu_id.as_bytes(), to_vec(event)?);
 
 	Ok(())
+}
+
+/// Builds the create event of a v11 room and the join of its creator,
+/// `@bob:localhost`.
+///
+/// The create event comes first and the join second, each beside its event ID.
+fn room(services: &Services, room_id: &RoomId) -> Result<[(OwnedEventId, Value); 2]> {
+	let create = state_event(services, room_id, StateEvent {
+		kind: "m.room.create",
+		state_key: "",
+		content: &json!({ "room_version": "11" }),
+		auth_events: &[],
+	})?;
+
+	let join = state_event(services, room_id, StateEvent {
+		kind: "m.room.member",
+		state_key: "@bob:localhost",
+		content: &json!({ "membership": "join" }),
+		auth_events: &[&create.0],
+	})?;
+
+	Ok([create, join])
+}
+
+/// Signs a v11 state event of `@bob:localhost` with this server's key, as
+/// another server would relay it.
+///
+/// Its previous event is the last of its auth events.
+fn state_event(
+	services: &Services,
+	room_id: &RoomId,
+	event: StateEvent<'_>,
+) -> Result<(OwnedEventId, Value)> {
+	let prev_events = event
+		.auth_events
+		.last()
+		.map(from_ref)
+		.unwrap_or_default();
+
+	signed_event(services, room_id, event, prev_events)
+}
+
+/// Signs a v11 state event of `@bob:localhost` naming the given previous
+/// events.
+///
+/// Its depth is one more than the number of its auth events.
+fn signed_event(
+	services: &Services,
+	room_id: &RoomId,
+	StateEvent { kind, state_key, content, auth_events }: StateEvent<'_>,
+	prev_events: &[&OwnedEventId],
+) -> Result<(OwnedEventId, Value)> {
+	let version = RoomVersionId::V11;
+	let mut event: CanonicalJsonObject = from_value(json!({
+		"type": kind,
+		"state_key": state_key,
+		"content": content,
+		"room_id": room_id,
+		"sender": "@bob:localhost",
+		"origin_server_ts": 1,
+		"depth": auth_events.len().saturating_add(1),
+		"prev_events": prev_events,
+		"auth_events": auth_events,
+	}))?;
+
+	services
+		.server_keys
+		.hash_and_sign_event(&mut event, &version)?;
+
+	let event_id = gen_event_id(&event, &version)?;
+
+	Ok((event_id, serde_json::to_value(event)?))
 }
 
 #[test]

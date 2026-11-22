@@ -25,10 +25,9 @@ mod upgrade_outlier_pdu;
 use std::{fmt::Write, num::NonZeroUsize, sync::Arc};
 
 use async_trait::async_trait;
-use ruma::{EventId, OwnedRoomId, RoomVersionId, events::AnyStrippedStateEvent, serde::Raw};
-use tuwunel_core::{Result, implement, utils::MutexMap};
+use ruma::{OwnedRoomId, RoomVersionId, events::AnyStrippedStateEvent, serde::Raw};
+use tuwunel_core::{Result, utils::MutexMap};
 use tuwunel_database::Map;
-use tuwunel_matrix::PduEvent;
 
 use self::{
 	backoff::BackoffCounters,
@@ -122,17 +121,6 @@ impl crate::Service for Service {
 	}
 
 	fn name(&self) -> &str { make_name(module_path!()) }
-}
-
-#[implement(Service)]
-#[tracing::instrument(
-	name = "fetch",
-	level = "trace",
-	skip_all,
-	fields(%event_id)
-)]
-async fn event_fetch(&self, event_id: &EventId) -> Result<PduEvent> {
-	self.services.timeline.get_pdu(event_id).await
 }
 
 /// Extract a room's version from the create event in a stripped-state list (as

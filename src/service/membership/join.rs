@@ -1,19 +1,22 @@
 use std::{
 	borrow::Borrow,
-	collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+	collections::{BTreeMap, BTreeSet, HashMap, HashSet, hash_map::Entry},
 	iter::once,
 	mem::take,
+	pin::pin,
 	sync::Arc,
 };
 
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join};
+use futures::{
+	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join, stream::try_unfold,
+};
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedServerName, OwnedUserId, RoomId,
-	RoomOrAliasId, RoomVersionId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedServerName, OwnedUserId,
+	RoomId, RoomOrAliasId, RoomVersionId, UserId,
 	api::{error::ErrorKind, federation},
 	canonical_json::to_canonical_value,
 	events::{
-		StateEventType,
+		StateEventType, TimelineEventType,
 		room::{
 			create::RoomCreateEventContent,
 			join_rules::RoomJoinRulesEventContent,
@@ -28,15 +31,18 @@ use tuwunel_core::{
 	Err, Error, Result, async_noinline, at, debug, debug_error, debug_info, debug_warn, err,
 	error, implement, info, trace,
 	utils::{
-		self, BoolExt, IterStream, ReadyExt, json::serialized_len, math::Expected, shuffle,
-		stream::WidebandExt,
+		self, BoolExt, IterStream, ReadyExt,
+		json::serialized_len,
+		math::Expected,
+		shuffle,
+		stream::{TryReadyExt, TryWidebandExt, WidebandExt},
 	},
 	warn,
 };
 use tuwunel_matrix::{
 	event::gen_event_id_canonical_json,
 	pdu::{Pdu, PduBuilder, check_rules},
-	room::state::resolution as state_res,
+	room::state::resolution::{self as state_res, AuthCheckOutcome, events::RoomCreateEvent},
 	room_version,
 };
 
@@ -57,6 +63,32 @@ use crate::{
 /// member event never carries one from a client.
 const RESERVED_JOIN_KEYS: [&str; 3] =
 	["reason", "third_party_signed", "join_authorised_via_users_server"];
+
+/// Pairs a verified send_join event with whether the response's `state` list
+/// carried it.
+type Candidate = (VerifiedPdu, bool);
+
+/// Pairs an admitted send_join event and its parsed form with whether the
+/// `state` list carried it.
+type Admitted = (OwnedEventId, Pdu, bool);
+
+/// Holds the two event lists of one send_join response for ingestion.
+struct SendJoinEvents<'a> {
+	auth_chain: &'a [Box<RawJsonValue>],
+	state: &'a [Box<RawJsonValue>],
+}
+
+/// Tracks the events of one send_join response not yet admitted and the IDs
+/// admitted so far.
+///
+/// A candidate waits under the first of its dependencies not yet admitted and
+/// is woken to be checked again once that one is.
+struct Admission<Incoming> {
+	incoming: Incoming,
+	waiting: HashMap<OwnedEventId, Vec<Candidate>>,
+	woken: Vec<Candidate>,
+	accepted: HashSet<OwnedEventId>,
+}
 
 #[derive(Debug)]
 pub struct Join<'a> {
@@ -419,17 +451,14 @@ async fn join_remote(
 		)
 		.await;
 
-	let state = self
-		.ingest_send_join_state(room_id, &room_version_id, &room_version_rules, &response.state)
-		.await;
+	let events = SendJoinEvents {
+		auth_chain: &response.auth_chain,
+		state: &response.state,
+	};
 
-	self.ingest_send_join_auth_chain(
-		room_id,
-		&room_version_id,
-		&room_version_rules,
-		&response.auth_chain,
-	)
-	.await;
+	let state = self
+		.ingest_send_join_events(room_id, &room_version_id, &room_version_rules, events)
+		.await?;
 
 	debug!("Running send_join auth check...");
 	state_res::auth_check(
@@ -710,41 +739,223 @@ fn merge_restricted_signature(
 	Ok(())
 }
 
+/// Admits each verified event once its auth dependencies from this response
+/// have passed, returning the state the response's `state` list names.
+///
+/// A stored event is not evidence that this response contains an authorized
+/// chain, and the lists need not be in dependency order. Two admitted state
+/// events for one state key fail the response.
 #[implement(Service)]
-async fn ingest_send_join_state(
+#[tracing::instrument(level = "debug", skip_all, fields(%room_id))]
+async fn ingest_send_join_events(
 	&self,
 	room_id: &RoomId,
 	room_version_id: &RoomVersionId,
 	room_version_rules: &RoomVersionRules,
-	state_pdus: &[Box<RawJsonValue>],
-) -> HashMap<u64, OwnedEventId> {
-	info!(events = state_pdus.len(), "Going through send_join response room_state...");
-	let cork = self.services.db.cork_and_flush();
-	let state = self
-		.verified_pdus(room_id, room_version_id, room_version_rules, state_pdus, "state")
-		.then(async |(event_id, pdu, value, verified)| {
-			self.services
-				.timeline
-				.add_verified_outlier(&event_id, &value, &verified)
-				.await;
+	SendJoinEvents { auth_chain, state }: SendJoinEvents<'_>,
+) -> Result<HashMap<u64, OwnedEventId>> {
+	let implicit_create = room_version_rules
+		.authorization
+		.room_create_event_id_as_room_id
+		.then(|| room_id.as_event_id())
+		.transpose()?;
 
-			(event_id, pdu)
-		})
-		.wide_filter_map(async |(event_id, pdu)| {
-			let state_key = pdu.state_key.as_ref()?;
-			let shortstatekey = self
-				.services
-				.short
-				.get_or_create_shortstatekey(&pdu.kind.to_cow_str().as_ref().into(), state_key)
-				.await;
+	let auth_events = self
+		.verified_pdus(room_id, room_version_id, room_version_rules, auth_chain, "auth_chain")
+		.map(|pdu| (pdu, false));
 
-			Some((shortstatekey, event_id))
-		})
-		.collect()
+	let state_events = self
+		.verified_pdus(room_id, room_version_id, room_version_rules, state, "state")
+		.map(|pdu| (pdu, true));
+
+	let admission = Admission {
+		incoming: pin!(auth_events.chain(state_events)),
+		waiting: HashMap::new(),
+		woken: Vec::new(),
+		accepted: HashSet::new(),
+	};
+
+	let _cork = self.services.db.cork_and_flush();
+
+	try_unfold(admission, async |mut admission| {
+		let Some(candidate) = admission.next().await else {
+			return Ok(None);
+		};
+
+		let admitted = match admission.admissible(candidate, implicit_create.as_ref()) {
+			| None => None,
+			| Some(candidate) =>
+				self.admit(candidate, room_version_id, room_version_rules)
+					.await?,
+		};
+
+		if let Some((event_id, ..)) = &admitted {
+			admission.accept(event_id);
+		}
+
+		Ok(Some((admitted, admission)))
+	})
+	.ready_try_filter_map(|admitted| {
+		let Some((event_id, Pdu { kind, state_key: Some(state_key), .. }, true)) = admitted
+		else {
+			return Ok(None);
+		};
+
+		Ok(Some((kind, state_key, event_id)))
+	})
+	.wide_and_then(async |(kind, state_key, event_id)| {
+		let shortstatekey = self
+			.services
+			.short
+			.get_or_create_shortstatekey(&kind.to_cow_str().as_ref().into(), &state_key)
+			.await;
+
+		Ok((shortstatekey, event_id))
+	})
+	.ready_try_fold(HashMap::new(), insert_state)
+	.await
+}
+
+/// Takes a woken candidate first, then the next event of the response.
+///
+/// Draining the woken candidates before reading on keeps the events held in
+/// memory to those already read.
+#[implement(Admission, generics = "<Incoming>", params = "<Incoming>")]
+async fn next(&mut self) -> Option<Candidate>
+where
+	Incoming: Stream<Item = Candidate> + Unpin,
+{
+	match self.woken.pop() {
+		| Some(candidate) => Some(candidate),
+		| None => self.incoming.next().await,
+	}
+}
+
+/// Returns a candidate whose dependencies were all admitted, parking any other
+/// under the first one missing.
+#[implement(Admission, generics = "<Incoming>", params = "<Incoming>")]
+fn admissible(
+	&mut self,
+	candidate: Candidate,
+	implicit_create: Option<&OwnedEventId>,
+) -> Option<Candidate> {
+	let ((_, pdu, ..), _) = &candidate;
+	let Some(missing) = self.missing(pdu, implicit_create) else {
+		return Some(candidate);
+	};
+
+	self.waiting
+		.entry(missing)
+		.or_default()
+		.push(candidate);
+
+	None
+}
+
+/// Returns the first dependency of an event not yet admitted.
+///
+/// A create event depends on nothing. In room versions that derive the room ID
+/// from the create event, every other event also depends on it.
+#[implement(Admission, generics = "<Incoming>", params = "<Incoming>")]
+fn missing(&self, pdu: &Pdu, implicit_create: Option<&OwnedEventId>) -> Option<OwnedEventId> {
+	if pdu.kind == TimelineEventType::RoomCreate {
+		return None;
+	}
+
+	pdu.auth_events
+		.iter()
+		.chain(implicit_create)
+		.find(|id| !self.accepted.contains(*id))
+		.cloned()
+}
+
+/// Checks a candidate whose dependencies were all admitted, storing it as an
+/// outlier when the rules allow it.
+///
+/// A denied event is dropped. A create event that is denied or names another
+/// room version fails the response, as does an auth event that cannot be read;
+/// every auth event was admitted and stored first, so a missing one is a
+/// storage failure.
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn admit(
+	&self,
+	((event_id, pdu, value, verified), in_state): Candidate,
+	room_version_id: &RoomVersionId,
+	room_version_rules: &RoomVersionRules,
+) -> Result<Option<Admitted>> {
+	let allowed = match self
+		.services
+		.event_handler
+		.auth_check_by_auth_events(&pdu, room_version_rules)
+		.await
+		.map_err(|error| match error {
+			| error if !error.is_missing() => error,
+			| _ => err!(Database("An admitted auth event of {event_id} is missing.")),
+		})? {
+		| AuthCheckOutcome::Allow => true,
+		| AuthCheckOutcome::Deny(error) => {
+			debug_warn!(?event_id, %error, "Rejected send_join event.");
+			false
+		},
+	};
+
+	if pdu.kind == TimelineEventType::RoomCreate
+		&& !(allowed
+			&& RoomCreateEvent::new(&pdu)
+				.room_version()
+				.is_ok_and(|version| version == *room_version_id))
+	{
+		return Err!(BadServerResponse("Invalid create event for the send_join room version."));
+	}
+
+	if !allowed {
+		return Ok(None);
+	}
+
+	self.services
+		.timeline
+		.add_verified_outlier(&event_id, &value, &verified)
 		.await;
 
-	drop(cork);
-	state
+	Ok(Some((event_id, pdu, in_state)))
+}
+
+#[implement(Admission, generics = "<Incoming>", params = "<Incoming>")]
+fn accept(&mut self, event_id: &EventId) {
+	let (event_id, children) = self
+		.waiting
+		.remove_entry(event_id)
+		.unwrap_or_else(|| (event_id.to_owned(), Vec::new()));
+
+	self.woken.extend(children);
+	self.accepted.insert(event_id);
+}
+
+/// Adds an admitted state event to the snapshot, failing when a different
+/// event already holds its state key.
+///
+/// The same event again is no conflict: an honest response can list one event
+/// in both lists.
+fn insert_state(
+	mut state: HashMap<u64, OwnedEventId>,
+	(shortstatekey, event_id): (u64, OwnedEventId),
+) -> Result<HashMap<u64, OwnedEventId>> {
+	match state.entry(shortstatekey) {
+		| Entry::Occupied(entry) if *entry.get() == event_id => {},
+		| Entry::Vacant(entry) => {
+			entry.insert(event_id);
+		},
+		| Entry::Occupied(entry) => {
+			let held = entry.get();
+
+			return Err!(BadServerResponse(
+				"send_join state names both {held} and {event_id} for one state key."
+			));
+		},
+	}
+
+	Ok(state)
 }
 
 /// Verifies the events of one send_join response list, dropping each that fails.
@@ -765,29 +976,6 @@ fn verified_pdus<'a>(
 		.wide_then(|pdu| self.verified_pdu(room_id, room_version_id, room_version_rules, pdu))
 		.inspect_err(move |error| debug_error!(?error, list, "Invalid send_join event."))
 		.ready_filter_map(Result::ok)
-}
-
-#[implement(Service)]
-async fn ingest_send_join_auth_chain(
-	&self,
-	room_id: &RoomId,
-	room_version_id: &RoomVersionId,
-	room_version_rules: &RoomVersionRules,
-	auth_chain: &[Box<RawJsonValue>],
-) {
-	info!(events = auth_chain.len(), "Going through send_join response auth_chain...");
-	let cork = self.services.db.cork_and_flush();
-
-	self.verified_pdus(room_id, room_version_id, room_version_rules, auth_chain, "auth_chain")
-		.for_each(async |(event_id, _, value, verified)| {
-			self.services
-				.timeline
-				.add_verified_outlier(&event_id, &value, &verified)
-				.await;
-		})
-		.await;
-
-	drop(cork);
 }
 
 #[implement(Service)]
