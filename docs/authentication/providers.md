@@ -103,10 +103,18 @@ provider recorded for their device. If the device has no recorded provider
 and the account is an SSO account on a server with exactly one provider,
 Tuwunel uses that provider.
 
-If neither case applies, Tuwunel chooses from the account's linked providers
-that are still configured on the server. It uses the default provider if the
-account is linked to it. If not, it uses the first linked provider in
-configuration order.
+If neither case applies, Tuwunel checks which providers are linked to the
+account. A sign-in creates a link once the provider authenticates the user
+and Tuwunel stores the identity the provider returns. A sign-in still waiting
+at the provider does not create a link.
+
+Tuwunel first looks for links that match a configured provider's `client_id`.
+Some older links identify the provider by `brand`. Tuwunel considers those
+links only if it finds no `client_id` match, and a brand matches only if
+exactly one configured provider uses it.
+
+If the default provider is among the matches, Tuwunel uses it. Otherwise,
+it uses the first matching provider in configuration order.
 
 ### User ID mapping
 

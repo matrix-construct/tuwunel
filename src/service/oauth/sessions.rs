@@ -428,9 +428,11 @@ pub async fn get_by_unique_id(&self, unique_id: &str) -> Result<Session> {
 
 /// Choose the linked, configured provider to bind a user's re-authentication.
 ///
-/// Each linked provider id resolves against the configuration, and
-/// `Providers::find_preferred_config` picks among those that remain configured.
-/// An unreadable session is skipped.
+/// A session links its provider once the provider has resolved the user's
+/// identity and `user_info` is stored; a chained sign-in indexes its next
+/// session before that. Exact provider IDs rank above legacy brand matches,
+/// and the configured preference applies within each group. An unreadable
+/// session is skipped.
 #[implement(Sessions)]
 #[tracing::instrument(level = "debug", skip(self), ret(level = "debug"))]
 pub async fn linked_provider(&self, user_id: &UserId) -> Option<&str> {
@@ -443,20 +445,29 @@ pub async fn linked_provider(&self, user_id: &UserId) -> Option<&str> {
 					|error| debug_warn!(%user_id, %error, "Skipping unreadable session."),
 				)
 				.ok()
-				.flatten()?
+				.flatten()
+				.filter(|session| session.user_info.is_some())?
 				.idp_id
-		})
-		.ready_filter_map(|idp_id| {
-			self.providers
-				.find_config(&idp_id)
-				.map(Provider::id)
-				.ok()
 		})
 		.collect()
 		.await;
 
+	if linked.is_empty() {
+		return None;
+	}
+
 	self.providers
 		.find_preferred_config(|provider| linked.contains(provider.id()))
+		.or_else(|| {
+			let branded: BTreeSet<_> = linked
+				.iter()
+				.filter_map(|idp_id| self.providers.find_config(idp_id).ok())
+				.map(Provider::id)
+				.collect();
+
+			self.providers
+				.find_preferred_config(|provider| branded.contains(provider.id()))
+		})
 		.map(Provider::id)
 }
 

@@ -165,9 +165,9 @@ where
 ///
 /// A device the OIDC token endpoint tagged binds its own provider. Otherwise an
 /// `sso` account on a single-provider server binds that provider. Failing both,
-/// it binds a configured provider that one of the account's sessions links,
-/// preferring the default. The SSO callback completes the stage only for an
-/// identity that resolves to the UIAA session's owner.
+/// it binds a configured provider the account's sessions link, as ranked by
+/// `Sessions::linked_provider`. The SSO callback completes the stage only for
+/// an identity that resolves to the UIAA session's owner.
 async fn select_idp<'a>(
 	services: &'a Services,
 	sender_user: &UserId,
