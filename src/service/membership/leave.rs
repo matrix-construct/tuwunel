@@ -28,6 +28,12 @@ use tuwunel_matrix::{
 use super::Service;
 use crate::rooms::{state_cache::MembershipUpdate, timeline::RoomMutexGuard};
 
+/// Leaves a room for a local user, or withdraws the user's invite or knock.
+///
+/// When `remote_leave_now` is set, or this server is not in the room and the
+/// user has a knock or no member event readable from its state, a resident
+/// server is asked to make the leave, best effort, and the membership is then
+/// cleared here. Otherwise the leave is handled locally.
 #[implement(Service)]
 // cross-crate codegen firewall
 #[async_noinline]
@@ -66,20 +72,21 @@ pub async fn leave<'a>(
 		)
 		.await;
 
-	let dont_have_room = self
+	let not_resident = self
 		.services
 		.state_cache
 		.server_in_room(self.services.globals.server_name(), room_id)
-		.is_false()
-		.and(ready(member_event.as_ref().is_err()));
-
-	let not_knocked = self
-		.services
-		.state_cache
-		.is_knocked(user_id, room_id)
 		.is_false();
 
-	if remote_leave_now || dont_have_room.and(not_knocked).await {
+	// A remote knock stores only its summary, so room state never shows it.
+	let knocked = self
+		.services
+		.state_cache
+		.is_knocked(user_id, room_id);
+
+	let no_local_membership = ready(member_event.is_err()).or(knocked);
+
+	if remote_leave_now || not_resident.and(no_local_membership).await {
 		self.leave_via_remote(user_id, room_id, reason, leave_content)
 			.await
 	} else {
@@ -442,3 +449,6 @@ async fn remote_leave(
 fn is_leaveable(state: &MembershipState) -> bool {
 	matches!(state, MembershipState::Invite | MembershipState::Join | MembershipState::Knock,)
 }
+
+#[cfg(test)]
+mod tests;
