@@ -97,6 +97,22 @@ pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> P
 	pdu
 }
 
+/// Readies an event for a requester on a path that folds no aggregations.
+///
+/// MSC4025: when this requester must receive an erased sender's event pruned,
+/// the pruned clone is served, as in [`Service::bundle_aggregations`], or the
+/// pruning error is returned rather than the event served intact. Any other
+/// event loses its stored aggregations, which copy replies the requester may
+/// not see, and another sender's private fields.
+#[implement(Service)]
+pub async fn unbundled(&self, sender_user: &UserId, pdu: Pdu) -> Result<Pdu> {
+	self.services
+		.state_accessor
+		.try_erased_view(sender_user, &pdu)
+		.await
+		.map(|pruned| pruned.unwrap_or_else(|| pdu.served_unfolded_to(Some(sender_user))))
+}
+
 #[implement(Service)]
 #[tracing::instrument(skip_all, level = "trace")]
 async fn bundle_thread_for(&self, sender_user: &UserId, pdu: &mut Pdu) {

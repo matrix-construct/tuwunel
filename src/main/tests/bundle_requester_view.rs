@@ -15,6 +15,7 @@ use tuwunel_service::Services;
 use self::{
 	client::{Client, accepted, field, register},
 	fixture::boot,
+	relations_parent::{membership_visibility, requester_visibility, unfolded_view},
 	sync::joined_room,
 };
 
@@ -27,7 +28,7 @@ mod event;
 #[path = "client/get.rs"]
 mod get;
 
-#[expect(dead_code)] // Only the self-membership action is used from the add-on.
+#[expect(dead_code)] // The add-on's invite-and-join helper is unused here.
 #[path = "client/membership.rs"]
 mod membership;
 
@@ -36,6 +37,9 @@ mod put;
 
 #[path = "client/redact.rs"]
 mod redact;
+
+#[path = "bundle_requester_view/relations_parent.rs"]
+mod relations_parent;
 
 #[path = "client/room_event.rs"]
 mod room_event;
@@ -51,6 +55,7 @@ const IGNORED_TOKEN: &str = "bundle-requester-view-ignored-token";
 const VISIBLE_TOKEN: &str = "bundle-requester-view-visible-token";
 const LEAVER_TOKEN: &str = "bundle-requester-view-leaver-token";
 const REJOINER_TOKEN: &str = "bundle-requester-view-rejoiner-token";
+const ERASED_TOKEN: &str = "bundle-requester-view-erased-token";
 
 /// The summary search limit the budget roots are built around.
 ///
@@ -71,12 +76,14 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let leaver_id = register(services, "viewleaver", LEAVER_TOKEN).await?;
 
 	register(services, "viewrejoiner", REJOINER_TOKEN).await?;
+	let erased_id = register(services, "viewerased", ERASED_TOKEN).await?;
 
 	let reader = Client { services, base, token: READER_TOKEN };
 	let ignored = Client { services, base, token: IGNORED_TOKEN };
 	let visible = Client { services, base, token: VISIBLE_TOKEN };
 	let leaver = Client { services, base, token: LEAVER_TOKEN };
 	let rejoiner = Client { services, base, token: REJOINER_TOKEN };
+	let erased = Client { services, base, token: ERASED_TOKEN };
 
 	reader
 		.set_ignored(&reader_id, &ignored_id)
@@ -84,6 +91,9 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	relations_view(&reader, &ignored, &visible).await?;
 	relations_recursion(&visible).await?;
+	requester_visibility(&reader, &ignored, &visible, &leaver).await?;
+	membership_visibility(&visible, &leaver, &leaver_id).await?;
+	unfolded_view(&visible, &erased, &erased_id, &leaver).await?;
 	thread_views(&reader, &reader_id, &ignored, &visible).await?;
 	former_member_view(&reader, &leaver, &leaver_id, &visible).await?;
 	thread_roots(&visible).await?;
@@ -620,8 +630,10 @@ async fn search_budget(
 
 /// History visibility: a former member is shown no reply sent after they left.
 ///
-/// The summary keeps the replies from before the leave, on `/event` and in the
-/// left room's sync, while a current member sees every reply.
+/// The former member sees only the replies from before the leave, on `/event`,
+/// in the left room's sync and on `/relations` for that root, while a current
+/// member sees every reply. Once the former member forgets the room,
+/// `/relations` refuses that root as not found.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn former_member_view(
 	reader: &Client<'_>,
@@ -660,6 +672,12 @@ async fn former_member_view(
 
 	assert_summary(&leaver.event(&room, &kept).await?, &before, 1, "former /event");
 
+	let relations = leaver.relations(&room, &kept, "").await?;
+	let relations = chunk_ids(&relations)?;
+
+	assert!(relations.contains(&before.as_str()), "former /relations lost an earlier reply");
+	assert!(!relations.contains(&after.as_str()), "former /relations served a later reply");
+
 	let filter = json!({ "room": { "include_leave": true } });
 	let sync = leaver.sync_filtered(leaver_id, &filter).await?;
 
@@ -671,6 +689,12 @@ async fn former_member_view(
 
 	assert!(thread_summary(&later).is_none(), "a former member was shown a later reply");
 	assert_summary(&reader.event(&room, &kept).await?, &after, 2, "member /event");
+
+	leaver.act(&room, "forget").await?;
+
+	let forgotten = leaver.try_relations(&room, &kept, "").await?;
+
+	refused(forgotten, StatusCode::NOT_FOUND, "M_NOT_FOUND").await?;
 
 	Ok(())
 }
@@ -764,14 +788,14 @@ async fn try_thread(&self, room_id: &RoomId, txn_id: &str, root: &EventId) -> Re
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn refused(response: Response, status: StatusCode, errcode: &str) -> Result {
+async fn refused(response: Response, status: StatusCode, errcode: &str) -> Result<Value> {
 	let actual = response.status();
 	let body: Value = response.json().await?;
 
 	assert_eq!(actual, status, "{body}");
 	assert_eq!(body["errcode"], errcode, "{body}");
 
-	Ok(())
+	Ok(body)
 }
 
 /// History visibility `joined`: a returning member misses the away replies.
@@ -780,15 +804,7 @@ async fn refused(response: Response, status: StatusCode, errcode: &str) -> Resul
 /// away, while the sender still sees the whole thread.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn rejoiner_view(rejoiner: &Client<'_>, visible: &Client<'_>) -> Result {
-	let visibility = json!({
-		"type": "m.room.history_visibility",
-		"state_key": "",
-		"content": { "history_visibility": "joined" },
-	});
-
-	let room = visible
-		.create_room(&json!({ "preset": "public_chat", "initial_state": [visibility] }))
-		.await?;
+	let room = room_with_history(visible, "joined").await?;
 
 	rejoiner.act(&room, "join").await?;
 
@@ -810,6 +826,22 @@ async fn rejoiner_view(rejoiner: &Client<'_>, visible: &Client<'_>) -> Result {
 	assert_summary(&visible.event(&room, &root).await?, &away, 2, "sender /event");
 
 	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn room_with_history(
+	creator: &Client<'_>,
+	history_visibility: &str,
+) -> Result<OwnedRoomId> {
+	let visibility = json!({
+		"type": "m.room.history_visibility",
+		"state_key": "",
+		"content": { "history_visibility": history_visibility },
+	});
+
+	creator
+		.create_room(&json!({ "preset": "public_chat", "initial_state": [visibility] }))
+		.await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -887,12 +919,27 @@ async fn sync_filtered(&self, user_id: &UserId, filter: &Value) -> Result<Value>
 #[implement(Client, params = "<'_>")]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn relations(&self, room_id: &RoomId, event_id: &EventId, rest: &str) -> Result<Value> {
-	let path = format!("rooms/{room_id}/relations/{event_id}{rest}");
 	let response = self
-		.get_url(&self.client_url("v1/", &path))
+		.try_relations(room_id, event_id, rest)
 		.await?;
 
 	accepted(response).await
+}
+
+/// Get an event's relations as this user and keep the raw reply.
+///
+/// The status is the caller's to judge, so a refused parent can be asserted.
+#[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn try_relations(
+	&self,
+	room_id: &RoomId,
+	event_id: &EventId,
+	rest: &str,
+) -> Result<Response> {
+	let path = format!("rooms/{room_id}/relations/{event_id}{rest}");
+
+	self.get_url(&self.client_url("v1/", &path)).await
 }
 
 #[implement(Client, params = "<'_>")]

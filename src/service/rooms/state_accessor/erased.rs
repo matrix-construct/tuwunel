@@ -1,8 +1,9 @@
 //! Applies sender-erasure pruning to client and federation event views.
 //!
 //! The helpers retain original events when erasure is disabled or redaction
-//! inputs cannot be resolved. Membership lookup failures are treated as not
-//! joined and can therefore trigger pruning.
+//! inputs cannot be resolved, except the fallible client view, which returns
+//! that failure. Membership lookup failures are treated as not joined and can
+//! therefore trigger pruning.
 
 use futures::FutureExt;
 use ruma::{
@@ -10,7 +11,7 @@ use ruma::{
 	canonical_json::redact_in_place, events::room::member::MembershipState,
 };
 use tuwunel_core::{
-	implement,
+	Result, implement,
 	utils::{
 		BoolExt,
 		result::{FlatOk, LogErr},
@@ -101,11 +102,23 @@ pub async fn erased_for_server(
 /// `None`, so an unprunable event is served intact rather than withheld.
 #[implement(super::Service)]
 pub async fn erased_view(&self, user_id: &UserId, pdu: &Pdu) -> Option<Pdu> {
+	self.try_erased_view(user_id, pdu)
+		.map(|pruned| pruned.log_err().flat_ok())
+		.await
+}
+
+/// MSC4025: the pruned clone of `pdu` for recipient `user_id`, or `None` when
+/// the original serves.
+///
+/// If the recipient needs a prune and it fails, the error is returned, so the
+/// caller can withhold the event rather than serve it intact.
+#[implement(super::Service)]
+pub async fn try_erased_view(&self, user_id: &UserId, pdu: &Pdu) -> Result<Option<Pdu>> {
 	self.erased_for(user_id, pdu)
 		.map(|erased| erased.then_async(|| self.pruned(pdu)))
 		.flatten()
+		.map(Option::transpose)
 		.await
-		.flatten()
 }
 
 /// MSC4025: whether `pdu` serves pruned to `user_id`: its sender is erased
@@ -126,14 +139,12 @@ pub async fn erased_for(&self, user_id: &UserId, pdu: &Pdu) -> bool {
 /// Prune per the room version's redaction rules. The pruned form carries no
 /// `redacted_because`; no redaction event exists for a serve-time erasure.
 #[implement(super::Service)]
-async fn pruned(&self, pdu: &Pdu) -> Option<Pdu> {
+async fn pruned(&self, pdu: &Pdu) -> Result<Pdu> {
 	let rules = self
 		.services
 		.state
 		.get_room_version_rules(pdu.room_id())
-		.await
-		.log_err()
-		.ok()?;
+		.await?;
 
-	pdu.redacted(&rules.redaction).log_err().ok()
+	pdu.redacted(&rules.redaction)
 }

@@ -1,10 +1,7 @@
 use axum::extract::State;
 use futures::{
-	FutureExt, StreamExt, TryFutureExt,
-	future::{
-		Either::{Left, Right},
-		try_join3,
-	},
+	StreamExt,
+	future::Either::{Left, Right},
 };
 use itertools::Itertools;
 use ruma::{
@@ -19,13 +16,14 @@ use ruma::{
 	events::{TimelineEventType, relation::RelationType},
 };
 use tuwunel_core::{
-	Err, Error, Result, at, err,
+	Err, Result, at, err,
 	utils::{
-		BoolExt, extended,
+		extended,
 		math::usize_from_ruma_bounded,
 		result::FlatOk,
 		stream::{IterStream, ReadyExt, WidebandExt},
 	},
+	warn,
 };
 use tuwunel_matrix::{
 	event::{Event, RelationTypeEqual},
@@ -37,6 +35,19 @@ use crate::{Ruma, is_ignored_pdu};
 
 /// The next level's targets and the events retained so far in a recursive walk.
 type Level = (Vec<PduCount>, Vec<(PduCount, Pdu)>);
+
+/// How much of the room's history a requester may read through its relations.
+///
+/// The parent and every relation returned are judged under the same access, and
+/// world-readable access serves relations without bundled aggregations.
+#[derive(Clone, Copy)]
+enum Access {
+	/// The room admits or invites them, so each event is judged on its own.
+	Room,
+
+	/// They never joined, so only events sent while history was world-readable.
+	WorldReadable,
+}
 
 // Matrix v1.10 recommends traversing at least 3 levels of relationships.
 const RECURSION_DEPTH: u32 = 3;
@@ -143,54 +154,27 @@ async fn paginate_relations_with_filter(
 
 	let limit = limit.map_or(30, |limit| usize_from_ruma_bounded(limit, 30, 100));
 
-	let target_event_id: &EventId = target;
+	let (target, access) = {
+		let (target, parent, access) = visible_parent(services, sender_user, room_id, target)
+			.await
+			.ok_or_else(|| err!(Request(NotFound("Event not found."))))?;
 
-	let target = services
-		.timeline
-		.get_pdu_id(target)
-		.map_ok(PduId::from)
-		.map_ok(Ok::<_, Error>);
+		if is_ignored_pdu(services, &parent, sender_user).await {
+			return Err!(HttpJson(NOT_FOUND, {
+				"errcode": "M_SENDER_IGNORED",
+				"error": "You have ignored the user that sent this event",
+				"sender": parent.sender().as_str(),
+			}));
+		}
 
-	let visible = services
-		.state_accessor
-		.user_can_see_state_events(sender_user, room_id)
-		.map(|visible| {
-			visible
-				.into_option()
-				.ok_or_else(|| err!(Request(Forbidden("You cannot view this room."))))
-		});
-
-	let shortroomid = services.short.get_shortroomid(room_id);
-
-	let (shortroomid, target, ()) = try_join3(shortroomid, target, visible).await?;
-
-	let empty = || {
-		Ok(Response {
-			recursion_depth,
-			..Response::new(Vec::new())
-		})
+		(target, access)
 	};
-
-	let Ok(target) = target else {
-		return empty();
-	};
-
-	if shortroomid != target.shortroomid {
-		return Err!(Request(NotFound("Event not found in room.")));
-	}
-
-	if let Ok(target_pdu) = services.timeline.get_pdu(target_event_id).await
-		&& is_ignored_pdu(services, &target_pdu, sender_user).await
-	{
-		return Err!(HttpJson(NOT_FOUND, {
-			"errcode": "M_SENDER_IGNORED",
-			"error": "You have ignored the user that sent this event",
-			"sender": target_pdu.sender().as_str(),
-		}));
-	}
 
 	let PduCount::Normal(_) = target.count else {
-		return empty();
+		return Ok(Response {
+			recursion_depth,
+			..Response::new(Vec::new())
+		});
 	};
 
 	let ignored = services.users.ignored_users(sender_user).await;
@@ -206,7 +190,7 @@ async fn paginate_relations_with_filter(
 	};
 
 	let query = RequesterQuery {
-		shortroomid,
+		shortroomid: target.shortroomid,
 		target: target.count,
 		from,
 		to,
@@ -232,18 +216,13 @@ async fn paginate_relations_with_filter(
 
 	let events = relations
 		.wide_filter_map(async |(count, pdu)| {
-			services
-				.state_accessor
-				.user_can_see_event(sender_user, &pdu)
+			visible_to(services, sender_user, access, &pdu)
 				.await
 				.then_some((count, pdu))
 		})
 		.take(limit)
 		.wide_then(async |(count, pdu)| {
-			let pdu = services
-				.pdu_metadata
-				.bundle_aggregations(sender_user, pdu)
-				.await;
+			let pdu = served(services, sender_user, access, pdu).await;
 
 			(count, pdu)
 		})
@@ -268,10 +247,125 @@ async fn paginate_relations_with_filter(
 
 		chunk: events
 			.into_iter()
-			.map(at!(1))
+			.filter_map(at!(1))
 			.map(Event::into_format)
 			.collect(),
 	})
+}
+
+/// Finds the parent event, its timeline position and the requester's access
+/// when it is in the room and the requester may read it.
+///
+/// An unknown parent, one only stored as an outlier, one in another room, one
+/// whose rows fail to read and a denied one all come back `None`, so the caller
+/// refuses each with the one 404 the spec gives for "not found or no
+/// permission".
+async fn visible_parent(
+	services: &Services,
+	sender_user: &UserId,
+	room_id: &RoomId,
+	target: &EventId,
+) -> Option<(PduId, Pdu, Access)> {
+	let pdu_id = services.timeline.get_pdu_id(target).await.ok()?;
+
+	let parent = services
+		.timeline
+		.get_pdu_from_id(&pdu_id)
+		.await
+		.ok()?;
+
+	if parent.room_id() != room_id {
+		return None;
+	}
+
+	let access = access(services, sender_user, room_id).await?;
+
+	visible_to(services, sender_user, access, &parent)
+		.await
+		.then_some((pdu_id.into(), parent, access))
+}
+
+/// Decides how much of the room's history the requester may read, if any.
+///
+/// The room admits members, departed members and everyone while its history is
+/// world-readable, and a pending invitee reads as well. If the room does not
+/// admit them, one who never joined reads only world-readable history, and one
+/// who once joined, as after a forget, reads none. A failed read narrows access.
+async fn access(services: &Services, sender_user: &UserId, room_id: &RoomId) -> Option<Access> {
+	let admitted = services
+		.state_accessor
+		.user_can_see_state_events(sender_user, room_id)
+		.await
+		|| services
+			.state_cache
+			.is_invited(sender_user, room_id)
+			.await;
+
+	if admitted {
+		return Some(Access::Room);
+	}
+
+	matches!(
+		services
+			.state_cache
+			.try_once_joined(sender_user, room_id)
+			.await,
+		Ok(false)
+	)
+	.then_some(Access::WorldReadable)
+}
+
+/// Decides whether the requester may see an event within their access.
+///
+/// World-readable access also needs the event sent while history was
+/// world-readable, before its own visibility is judged.
+async fn visible_to(
+	services: &Services,
+	sender_user: &UserId,
+	access: Access,
+	pdu: &Pdu,
+) -> bool {
+	let visible = services
+		.state_accessor
+		.user_can_see_event(sender_user, pdu);
+
+	match access {
+		| Access::Room => visible.await,
+		| Access::WorldReadable =>
+			services
+				.state_accessor
+				.is_world_readable_at(pdu)
+				.await
+				&& visible.await,
+	}
+}
+
+/// Readies a relation for the requester within their access, or `None` to
+/// withhold it.
+///
+/// World-readable access folds no aggregations, since each bundled child would
+/// need its own visibility check against that access. If the erasure prune a
+/// relation requires fails, the relation is withheld.
+async fn served(
+	services: &Services,
+	sender_user: &UserId,
+	access: Access,
+	pdu: Pdu,
+) -> Option<Pdu> {
+	let metadata = &services.pdu_metadata;
+
+	match access {
+		| Access::Room => metadata
+			.bundle_aggregations(sender_user, pdu)
+			.await
+			.into(),
+
+		| Access::WorldReadable => metadata
+			.unbundled(sender_user, pdu)
+			.await
+			.inspect_err(|error| warn!(%error, "Erasure prune failed; relation withheld."))
+			.ok(),
+	}
 }
 
 /// Walks matching relations by level and returns the requested window in count order.
