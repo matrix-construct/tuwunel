@@ -57,6 +57,7 @@ use tuwunel_core::{
 	utils::{
 		BoolExt, IterStream, MutexMap, MutexMapGuard, ReadyExt, TryFutureExtExt, TryReadyExt,
 		calculate_hash,
+		future::ExtExt,
 		hash::sha256::Digest,
 		mutex_map::Guard,
 		stream::{TryBroadbandExt, TryIgnore, WidebandExt},
@@ -215,7 +216,7 @@ pub(crate) async fn prepare_force_state(
 			| TimelineEventType::RoomMember => self.force_member_effects(room_id, &pdu).await,
 			| _ => Ok(()),
 		})
-		.boxed() // size firewall
+		.debug_boxed() // size firewall
 		.await?;
 
 	self.services

@@ -115,8 +115,12 @@ pub(super) async fn handle_outlier_pdu(
 		//    the auth events are also rejected "due to auth events"
 		// NOTE: Step 5 is not applied anymore because it failed too often
 		debug!("Fetching auth events");
-		// size firewall
-		Box::pin(self.fetch_auth(eval, event.auth_events())).await;
+		let fetch = self.fetch_auth(eval, event.auth_events());
+
+		cfg_select! {
+			debug_assertions => Box::pin(fetch).await, // size firewall
+			_ => fetch.await,
+		};
 	}
 
 	// 6. Reject "due to auth events" if the event doesn't pass auth based on the

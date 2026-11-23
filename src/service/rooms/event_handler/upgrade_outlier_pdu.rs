@@ -9,6 +9,7 @@ use tuwunel_core::{
 	Result, debug, debug_info, debug_warn, implement, is_equal_to, trace,
 	utils::{
 		BoolExt, IterStream,
+		future::ExtExt,
 		stream::{BroadbandExt, ReadyExt},
 	},
 	warn,
@@ -750,7 +751,7 @@ async fn resolve_and_prepare_state_after(
 	trace!("Resolving new room state.");
 	let new_room_state = self
 		.resolve_state(room_id, room_version, state_after)
-		.boxed() // size firewall
+		.debug_boxed() // size firewall
 		.await?;
 
 	trace!("Saving resolved state.");

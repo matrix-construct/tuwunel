@@ -17,7 +17,7 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Result, async_noinline, err, implement,
+	Err, Result, err, implement,
 	utils::{
 		BoolExt, FutureBoolExt, OptionExt, future::TryExtExt, result::NotFound, time::now_millis,
 	},
@@ -252,7 +252,7 @@ where
 /// its own recorded state, but clients are not shown it.
 #[implement(super::Service)]
 // cold arm, kept off the debug-build worker stack every visibility caller shares
-#[async_noinline]
+#[cfg_attr(debug_assertions, tuwunel_core::async_noinline)]
 async fn visible_after<'a, Pdu>(
 	&'a self,
 	user_id: &'a UserId,

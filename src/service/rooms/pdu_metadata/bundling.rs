@@ -3,7 +3,7 @@ use ruma::{UserId, events::ignored_user_list::IgnoredUserListEventContent};
 use tuwunel_core::{
 	Result,
 	arrayvec::ArrayVec,
-	async_noinline, implement,
+	implement,
 	result::LogErr,
 	utils::{
 		BoolExt,
@@ -375,7 +375,7 @@ async fn ignores_participant(
 #[implement(Service)]
 // Unspanned: span frames on this path overflow the debug-build worker stack.
 // size firewall
-#[async_noinline]
+#[cfg_attr(debug_assertions, tuwunel_core::async_noinline)]
 async fn walk_replies<'a>(
 	&'a self,
 	sender_user: &'a UserId,

@@ -15,7 +15,7 @@ use tuwunel_core::{
 	trace,
 	utils::{
 		BoolExt,
-		future::{ReadyEqExt, TryExtExt},
+		future::{ExtExt, ReadyEqExt, TryExtExt},
 		result::NotFound,
 		stream::{IterStream, TryBroadbandExt, TryReadyExt},
 		time::now_millis,
@@ -380,7 +380,7 @@ async fn handle_admitted<'a>(
 
 	let (handled, upgraded) = self
 		.handle_prev_events(eval, first_normal_ts, sorted, pdus)
-		.boxed() // size firewall
+		.debug_boxed() // size firewall
 		.and_then(|upgraded| {
 			self.upgrade_outlier_to_timeline_pdu(eval, incoming_pdu, pdu)
 				.boxed() // size firewall
@@ -657,7 +657,7 @@ async fn handle_prev_events(
 				.await
 		})
 		.ready_try_fold(0, tally_upgraded)
-		.boxed() // size firewall
+		.debug_boxed() // size firewall
 		.await?;
 
 	// Walk interior events forward so each parent commits before its children.
@@ -670,7 +670,7 @@ async fn handle_prev_events(
 				.await
 		})
 		.ready_try_fold(upgraded, tally_upgraded)
-		.boxed() // size firewall
+		.debug_boxed() // size firewall
 		.await
 }
 

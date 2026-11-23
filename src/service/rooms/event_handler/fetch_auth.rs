@@ -10,7 +10,10 @@ use ruma::{
 };
 use tuwunel_core::{
 	async_noinline, debug, debug_error, debug_warn, expected, implement, trace,
-	utils::stream::{BroadbandExt, IterStream, ReadyExt},
+	utils::{
+		future::ExtExt,
+		stream::{BroadbandExt, IterStream, ReadyExt},
+	},
 	warn,
 };
 use tuwunel_matrix::{PduEvent, pdu::MAX_AUTH_EVENTS};
@@ -60,7 +63,7 @@ where
 		.stream()
 		.broad_then(|event_id| self.fetch_auth_chain(origin, room_id, event_id, room_version))
 		.collect()
-		.boxed() // size firewall
+		.debug_boxed() // size firewall
 		.await;
 
 	events_with_auth_events

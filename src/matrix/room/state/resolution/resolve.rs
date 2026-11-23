@@ -23,6 +23,7 @@ use tuwunel_core::{
 	trace,
 	utils::{
 		BoolExt,
+		future::ExtExt,
 		stream::{BroadbandExt, IterStream, ReadyExt},
 	},
 };
@@ -150,7 +151,7 @@ where
 	let sorted_power_set: Vec<_> = power_sort(rules, &full_conflicted_set, fetch)
 		.inspect_ok(|list| debug!(count = list.len(), "sorted power events"))
 		.inspect_ok(|list| trace!(?list, "sorted power events"))
-		.boxed() // size firewall
+		.debug_boxed() // size firewall
 		.await?;
 
 	let power_set_event_ids: Vec<_> = sorted_power_set
@@ -209,7 +210,7 @@ where
 	//    state obtained in step 2.
 	let sorted_remaining_events = have_remaining_events
 		.then_async(move || mainline_sort(power_event.cloned(), remaining_events, fetch))
-		.boxed(); // size firewall
+		.debug_boxed(); // size firewall
 
 	let sorted_remaining_events = sorted_remaining_events
 		.await

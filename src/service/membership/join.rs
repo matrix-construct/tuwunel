@@ -32,6 +32,7 @@ use tuwunel_core::{
 	error, implement, info, trace,
 	utils::{
 		BoolExt, IterStream, ReadyExt,
+		future::ExtExt,
 		json::serialized_len,
 		math::Expected,
 		millis_since_unix_epoch, shuffle,
@@ -182,7 +183,7 @@ pub async fn join<'a>(
 		| federation_lock => {
 			drop(federation_lock);
 			self.join_local(sender_user, room_id, reason, &servers, state_lock, extra_content)
-				.boxed() // size firewall
+				.debug_boxed() // size firewall
 				.await?;
 		},
 	}
