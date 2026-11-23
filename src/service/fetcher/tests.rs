@@ -7,6 +7,7 @@ use std::{collections::HashMap, num::NonZeroUsize, sync::Mutex};
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures::FutureExt;
 use ruma::{
 	MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, OwnedServerName, RoomVersionId,
 	ServerName, UInt, api::Direction, event_id, room_id, server_name,
@@ -19,7 +20,7 @@ use tokio::{
 use tuwunel_core::err;
 
 use super::*;
-use crate::federation::Candidates;
+use crate::{Service as _, federation::Candidates};
 
 impl Service {
 	fn test(
@@ -497,6 +498,27 @@ async fn worker_stops_when_callers_drop() {
 	settle().await;
 
 	assert_eq!(mock.calls(), vec![a], "worker aborts at the attempt boundary; B untried");
+}
+
+#[tokio::test]
+async fn interrupt_cancels_queued_requests() {
+	let event = event_id!("$ev:test.local").to_owned();
+	let svc = Service::test(Arc::new(MockTransport::new([])), Arc::new(MockSelect::new([])), 4);
+
+	let (reply, reply_rx) = channel();
+	let key = Key::new(test_opts(&event));
+
+	svc.channel
+		.0
+		.send(Msg { key, reply })
+		.expect("queued before the close");
+
+	svc.interrupt().await;
+
+	assert!(
+		matches!(reply_rx.now_or_never(), Some(Err(_))),
+		"a request queued at close is dropped, not left waiting"
+	);
 }
 
 #[tokio::test]

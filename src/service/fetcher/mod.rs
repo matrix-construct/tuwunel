@@ -16,7 +16,7 @@ mod worker;
 #[cfg(test)]
 mod tests;
 
-use std::sync::Arc;
+use std::{iter::from_fn, sync::Arc};
 
 use async_trait::async_trait;
 use loole::{Receiver, Sender, unbounded};
@@ -86,10 +86,14 @@ impl crate::Service for Service {
 	}
 
 	async fn interrupt(&self) {
-		let (sender, _) = &self.channel;
+		let (sender, receiver) = &self.channel;
+
 		if !sender.is_closed() {
 			sender.close();
 		}
+
+		// Closing keeps queued requests; dropping each one cancels its caller's wait.
+		from_fn(|| receiver.try_recv().ok()).for_each(drop);
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
