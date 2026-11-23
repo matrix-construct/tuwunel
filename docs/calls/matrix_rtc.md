@@ -517,6 +517,9 @@ Tuwunel uses its records to check whether that caller still belongs to
 the Matrix room. Tuwunel discards the records after about seven days, or
 sooner if a flood of token requests fills the space for them. If the
 record for either check is gone, the participant can stay in the call.
+Tuwunel asks Livekit to remove a participant only once. If Livekit cannot
+be reached at that moment, Tuwunel logs the failure and the participant
+can stay in the call.
 
 If you also need lk-jwt-service for older clients, read
 [Running both token services](#running-both-token-services) before you start.
