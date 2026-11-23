@@ -213,9 +213,10 @@ async fn load_timeline_with_errors<'a>(
 
 /// Decides whether the user may see one raw row's event.
 ///
-/// The user's own leave or ban is visible whenever the scan reaches it. The
-/// row past the budget only shows that more history exists, so it is not
-/// judged and the scan stops before reading its decision.
+/// Within the scan budget, the user's own leave or ban is visible whenever the
+/// scan reaches it. The row past the budget only shows that more history
+/// exists, so it is decoded but not judged, and the scan stops before reading
+/// its decision.
 // Unspanned: span frames on this path overflow the debug-build worker stack.
 async fn judge(
 	services: &Services,
@@ -225,8 +226,11 @@ async fn judge(
 ) -> Judged {
 	let (count, pdu) = row?;
 
+	if !within_budget {
+		return Ok((count, pdu, Ok(false)));
+	}
+
 	let visible = match pdu.membership_for(sender_user) {
-		| _ if !within_budget => Ok(false),
 		| Some(MembershipState::Leave | MembershipState::Ban) => Ok(true),
 		| _ =>
 			services
@@ -309,11 +313,10 @@ fn keep(mut self, kept: Option<(PduCount, PduEvent)>) -> Scan {
 #[implement(Scan)]
 fn stop(self) -> Halt { Halt::Stopped(Scan { limited: true, ..self }) }
 
-/// Lets a window that kept no event still resume pagination past the events it
-/// left out.
+/// Returns the kept events oldest first.
 ///
-/// The kept events come oldest first. The oldest position judged is the resume
-/// point when the scan stopped early or kept nothing.
+/// When the scan stopped early or kept nothing, the oldest position it judged
+/// is the resume point, so pagination still moves past the events left out.
 #[implement(Scan)]
 fn into_window(self, last_count: PduCount) -> TimelineWindow {
 	let resume = self
