@@ -154,6 +154,22 @@ pub fn with_only_server_signatures(
 	pdu_json
 }
 
+/// Returns one server's signatures on a PDU object, by key ID.
+///
+/// There are none when the object has no `signatures` map or holds no object
+/// under that server's name.
+#[must_use]
+pub fn server_signatures<'a>(
+	pdu_json: &'a CanonicalJsonObject,
+	server: &ServerName,
+) -> Option<&'a CanonicalJsonObject> {
+	pdu_json
+		.get("signatures")
+		.and_then(CanonicalJsonValue::as_object)
+		.and_then(|all| all.get(server.as_str()))
+		.and_then(CanonicalJsonValue::as_object)
+}
+
 /// Adds entries to a PDU object's unsigned data.
 ///
 /// The entries extend an existing `unsigned` object, replacing keys it already

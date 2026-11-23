@@ -5,8 +5,8 @@ use futures::{
 	future::{join, join3},
 };
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedUserId, RoomId,
-	RoomVersionId, ServerName, ServerSigningKeyId, UserId,
+	CanonicalJsonObject, EventId, OwnedEventId, OwnedUserId, RoomId, RoomVersionId, ServerName,
+	ServerSigningKeyId, UserId,
 	api::{
 		error::ErrorKind,
 		federation::membership::{RawStrippedState, create_invite::v2::Request as InviteRequest},
@@ -31,8 +31,8 @@ use tuwunel_core::{
 use tuwunel_matrix::{
 	event::gen_event_id_canonical_json,
 	pdu::{
-		Content, PduBuilder, Unsigned, into_outgoing_federation, with_only_server_signatures,
-		with_server_signatures,
+		Content, PduBuilder, Unsigned, into_outgoing_federation, server_signatures,
+		with_only_server_signatures, with_server_signatures,
 	},
 	room_version::rules as room_version_rules,
 };
@@ -336,10 +336,15 @@ async fn handshake(
 /// The event this server sent, with the invitee server's signatures from its
 /// answer.
 ///
-/// Only that server's signatures under keys it publishes, the ones
-/// verification checks, are taken from the answer, so every other field stays
-/// as this server built it. They must verify over the event as sent; an answer
-/// without a valid one is the peer's fault.
+/// Only that server's signatures under keys it publishes are taken from the
+/// answer, so every other field stays as this server built it. At least one of
+/// them must verify over the event as sent; an answer without a valid one is
+/// the peer's fault.
+///
+/// A signature the event already holds under that server's name (the room's
+/// policy signature, when that server is the room's policy server) is kept as
+/// built and its key is never looked up, so every countersignature that
+/// verifies survives the merge.
 #[implement(Service)]
 async fn countersigned(
 	&self,
@@ -348,22 +353,20 @@ async fn countersigned(
 	server: &ServerName,
 	room_version_id: &RoomVersionId,
 ) -> Result<CanonicalJsonObject> {
-	let signatures = answer
-		.get("signatures")
-		.and_then(CanonicalJsonValue::as_object)
-		.and_then(|all| all.get(server.as_str()))
-		.and_then(CanonicalJsonValue::as_object)
-		.cloned()
+	let held = server_signatures(&outgoing, server);
+	let added = server_signatures(answer, server)
 		.ok_or_else(|| {
 			err!(BadServerResponse(debug_warn!(
 				%server,
 				"Invite answer lacks the invitee server's signature."
 			)))
-		})?;
+		})?
+		.iter()
+		.filter(|&(key_id, _)| held.is_none_or(|held| !held.contains_key(key_id)));
 
-	let key_ids = signatures
-		.keys()
-		.filter_map(|key_id| <&ServerSigningKeyId>::try_from(key_id.as_str()).ok());
+	let key_ids = added
+		.clone()
+		.filter_map(|(key_id, _)| <&ServerSigningKeyId>::try_from(key_id.as_str()).ok());
 
 	let public_keys = self
 		.services
@@ -371,9 +374,9 @@ async fn countersigned(
 		.get_pubkeys_for(server, key_ids)
 		.await;
 
-	let signatures: CanonicalJsonObject = signatures
-		.into_iter()
+	let signatures: CanonicalJsonObject = added
 		.filter(|(key_id, _)| public_keys.contains_key(key_id.as_str()))
+		.map(|(key_id, signature)| (key_id.clone(), signature.clone()))
 		.collect();
 
 	let rules = room_version_rules(room_version_id)?;

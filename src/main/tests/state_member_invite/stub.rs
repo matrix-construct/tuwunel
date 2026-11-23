@@ -1,13 +1,16 @@
 //! The remote invite cases federate with this stub server.
 //!
 //! The invitee's localpart selects how it answers an invite. It also serves its
-//! key document and answers notary queries.
+//! key document, answers notary queries and signs as a room's policy server.
 
 use std::{
 	io,
 	net::TcpListener,
 	path::PathBuf,
-	sync::{Arc, Mutex},
+	sync::{
+		Arc, Mutex,
+		atomic::{AtomicUsize, Ordering},
+	},
 	time::Duration,
 };
 
@@ -16,7 +19,7 @@ use axum::{
 	body::Bytes,
 	extract::State,
 	http::{StatusCode, Uri},
-	routing::get,
+	routing::{get, post},
 };
 use axum_server::{from_tcp_rustls, tls_rustls::RustlsConfig};
 use serde_json::{Value, from_slice, from_value, json};
@@ -26,17 +29,17 @@ use tokio::{
 	time::{sleep, timeout},
 };
 use tuwunel_core::{
-	Result, implement,
+	Result, err, implement,
 	ruma::{
-		CanonicalJsonObject, OwnedServerName, RoomVersionId, ServerName,
+		CanonicalJsonObject, CanonicalJsonValue, OwnedServerName, RoomVersionId, ServerName,
 		signatures::Ed25519KeyPair,
 	},
 };
-use tuwunel_matrix::room_version::rules;
+use tuwunel_matrix::{pdu::server_signatures, room_version::rules};
 use tuwunel_service::Services;
 
 use super::{
-	DECOY, FORGED, REFUSED, RETRIED, STALLED, UNSIGNED,
+	DECOY, FORGED, POLICY, POLICY_KEY_ID, REFUSED, RETRIED, STALLED, UNSIGNED,
 	server_keys::{key_document, key_pair, signed_event},
 };
 
@@ -47,8 +50,10 @@ const PRIVATE_KEY: &str = "../../nix/pkgs/complement/private_key.key";
 const INVITE_PATH: &str = "/_matrix/federation/v2/invite/";
 const KEYS_PATH: &str = "/_matrix/key/v2/server";
 const QUERY_PATH: &str = "/_matrix/key/v2/query/{server}";
+const SIGN_PATH: &str = "/_matrix/policy/v1/sign";
 const KEY_VERSION: &str = "stub";
 const UNPUBLISHED_VERSION: &str = "unpublished";
+const POLICY_VERSION: &str = "policy_server";
 
 // Outlasts the delayed send's 30-second invite bound.
 const STALL: Duration = Duration::from_secs(32);
@@ -64,19 +69,25 @@ const RETRY_WINDOW: Duration = Duration::from_secs(10);
 /// user unchanged, and signs one of its `forged` user under its published key
 /// ID with another key. It answers one of its `stalled` user only after
 /// `STALL`, and holds one of its `retried` user until a second arrives, so the
-/// two answers return together. It signs any other with the key its key
-/// document serves and adds a second signature under a key ID it does not
-/// publish. Every other federation request gets an empty success.
+/// two answers return together. It signs an invite to its `policy` user with
+/// the key its key document serves alone, and any other invite with that key
+/// plus a second signature under a key ID it does not publish. Every other
+/// federation request gets an empty success.
 ///
-/// Asked as a notary, it lists a decoy's document, publishing its key ID under
-/// its `forger` key, before its own.
+/// It also counts the fetches of its key document. Asked as a notary, it lists
+/// a decoy's document, publishing its key ID under its `forger` key, before
+/// its own. As a room's policy server it signs events with its `policy` key
+/// under the default room version's rules.
 pub(super) struct Peer {
 	pub(super) name: OwnedServerName,
 	key: Ed25519KeyPair,
 	forger: Ed25519KeyPair,
 	unpublished: Ed25519KeyPair,
+	pub(super) policy: Ed25519KeyPair,
 	document: CanonicalJsonObject,
 	decoy: CanonicalJsonObject,
+	room_version: RoomVersionId,
+	pub(super) key_fetches: AtomicUsize,
 	pub(super) invites: Mutex<Vec<Value>>,
 	retries: Barrier,
 }
@@ -92,13 +103,23 @@ pub(super) async fn serve(
 	let name = ServerName::parse(format!("127.0.0.1:{}", listener.local_addr()?.port()))?;
 	let key = key_pair(KEY_VERSION)?;
 	let forger = key_pair(KEY_VERSION)?;
+	let room_version = services
+		.server
+		.config
+		.rooms
+		.default_version
+		.clone();
+
 	let peer = Arc::new(Peer {
 		document: key_document(&name, &key)?,
 		decoy: key_document(<&ServerName>::try_from(DECOY)?, &forger)?,
 		unpublished: key_pair(UNPUBLISHED_VERSION)?,
+		policy: key_pair(POLICY_VERSION)?,
 		name,
 		key,
 		forger,
+		room_version,
+		key_fetches: AtomicUsize::default(),
 		invites: Mutex::default(),
 		retries: Barrier::new(2),
 	});
@@ -113,6 +134,7 @@ pub(super) async fn serve(
 	let app = Router::new()
 		.route(KEYS_PATH, get(key_server))
 		.route(QUERY_PATH, get(notary))
+		.route(SIGN_PATH, post(policy_sign))
 		.fallback(answer)
 		.with_state(peer.clone());
 
@@ -124,10 +146,12 @@ pub(super) async fn serve(
 	Ok((peer, stub))
 }
 
-/// Serves the stub's key document.
+/// Serves the stub's key document, counting each fetch.
 ///
 /// This server fetches it to verify the stub's countersignature on an invite.
 async fn key_server(State(peer): State<Arc<Peer>>) -> Json<CanonicalJsonObject> {
+	peer.key_fetches.fetch_add(1, Ordering::Relaxed);
+
 	Json(peer.document.clone())
 }
 
@@ -136,6 +160,37 @@ async fn key_server(State(peer): State<Arc<Peer>>) -> Json<CanonicalJsonObject> 
 /// Every query gets both, whichever server it names.
 async fn notary(State(peer): State<Arc<Peer>>) -> Json<Value> {
 	Json(json!({ "server_keys": [peer.decoy, peer.document] }))
+}
+
+/// Signs an event as the room's policy server.
+///
+/// An event the stub cannot sign gets a server error naming why.
+async fn policy_sign(
+	State(peer): State<Arc<Peer>>,
+	Json(event): Json<CanonicalJsonObject>,
+) -> (StatusCode, Json<Value>) {
+	let name = peer.name.as_str();
+
+	match peer.policy_signature(event) {
+		| Ok(signature) => (StatusCode::OK, Json(json!({ name: { POLICY_KEY_ID: signature } }))),
+		| Err(error) =>
+			(StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": error.to_string() }))),
+	}
+}
+
+/// Signs an event with the stub's policy key and returns that signature.
+///
+/// It covers the event's redacted form under the default room version's rules,
+/// the version every case's room is created with.
+#[implement(Peer)]
+fn policy_signature(&self, event: CanonicalJsonObject) -> Result<CanonicalJsonValue> {
+	let rules = rules(&self.room_version)?;
+	let signed = signed_event(event, &self.name, &self.policy, &rules.redaction)?;
+
+	server_signatures(&signed, &self.name)
+		.and_then(|signatures| signatures.get(POLICY_KEY_ID))
+		.cloned()
+		.ok_or_else(|| err!("no policy signature on the signed event"))
 }
 
 /// Records an invite and answers it as its invitee's localpart selects.
@@ -169,6 +224,7 @@ async fn answer(
 		| _ if invitee.starts_with(UNSIGNED) =>
 			(StatusCode::OK, Json(json!({ "event": invite["event"] }))),
 		| _ if invitee.starts_with(FORGED) => peer.countersign(&invite, &[&peer.forger]),
+		| _ if invitee.starts_with(POLICY) => peer.countersign(&invite, &[&peer.key]),
 		| _ if invitee.starts_with(REFUSED) => {
 			let refusal =
 				json!({ "errcode": "M_FORBIDDEN", "error": "Invites are refused here." });

@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{net::TcpListener, pin::pin, time::Duration};
+use std::{net::TcpListener, pin::pin, sync::atomic::Ordering, time::Duration};
 
 use axum::http::StatusCode;
 use futures::{
@@ -17,8 +17,12 @@ use tuwunel_core::{
 		EventId, RoomId, ServerName, ServerSigningKeyId, UserId,
 		events::{
 			StateEventType,
-			room::member::{MembershipState, RoomMemberEventContent},
+			room::{
+				member::{MembershipState, RoomMemberEventContent},
+				policy::RoomPolicyEventContent,
+			},
 		},
+		serde::Base64,
 	},
 };
 use tuwunel_matrix::{
@@ -31,6 +35,7 @@ use self::{
 	appservice::{Bridge, register_appservice},
 	client::{Client, accepted, field, register},
 	fixture::boot,
+	state_cache::membership_update,
 	stub::{Peer, serve},
 };
 
@@ -44,11 +49,15 @@ mod get;
 #[path = "fixture/server_keys.rs"]
 mod server_keys;
 
+#[path = "fixture/state_cache.rs"]
+mod state_cache;
+
 #[path = "state_member_invite/stub.rs"]
 mod stub;
 
 const KEY_ID: &str = "ed25519:stub";
 const UNPUBLISHED_KEY_ID: &str = "ed25519:unpublished";
+const POLICY_KEY_ID: &str = "ed25519:policy_server";
 const DECOY: &str = "decoy.example";
 const UNLISTED: &str = "unlisted.example";
 const REFUSED: &str = "@refused:";
@@ -56,6 +65,7 @@ const UNSIGNED: &str = "@unsigned:";
 const FORGED: &str = "@forged:";
 const STALLED: &str = "@stalled:";
 const RETRIED: &str = "@retried:";
+const POLICY: &str = "@policy:";
 const NO_ANSWER: &str = "did not answer the invite";
 const ALICE_TOKEN: &str = "state-member-invite-alice-access-token";
 const BOB_TOKEN: &str = "state-member-invite-bob-access-token";
@@ -132,6 +142,7 @@ async fn remote_invites(services: &Services, base: &str, listener: TcpListener) 
 	unverified_invite(&client, &peer, UNSIGNED, "lacks the invitee server's signature").await?;
 	unverified_invite(&client, &peer, FORGED, "countersignature failed verification").await?;
 	ordinary_invite(&client, &alice, &peer).await?;
+	policy_server_invite(&client, &alice, &peer).await?;
 	appservice_invite(services, base, &peer).await?;
 	disabled_room_invite(&client, &peer).await?;
 	parked_invite(&client, &peer).await?;
@@ -253,6 +264,65 @@ async fn ordinary_invite(client: &Client<'_>, alice: &UserId, peer: &Peer) -> Re
 	let response = put_invite(client, &room_id, &refused_user, "", &body).await?;
 
 	refused(response, services, &room_id, &refused_user).await?;
+	received(peer).map(drop)
+}
+
+/// An invite to the room's policy server keeps the policy signature it was
+/// sent with, and fetches no key for it.
+///
+/// The stub signs the invite as policy server before it gets it as invitee,
+/// then countersigns it and echoes that signature back. The stored invite
+/// carries both, and with the stub's published key already cached its key
+/// document is not fetched again.
+async fn policy_server_invite(client: &Client<'_>, alice: &UserId, peer: &Peer) -> Result {
+	let services = client.services;
+	let room_id = client.create_room(&json!({})).await?;
+	let member = UserId::parse(format!("@member:{}", peer.name))?;
+	let count = services.globals.next_count();
+	let joined = membership_update(&room_id, &member, MembershipState::Join, *count);
+
+	services
+		.state_cache
+		.update_membership(joined)
+		.await?;
+
+	drop(count);
+
+	let public_key = Base64::new(peer.policy.public_key().to_vec());
+	let content = RoomPolicyEventContent::new(peer.name.clone(), public_key);
+	let state_lock = services.state.mutex.lock(&room_id).await;
+
+	services
+		.timeline
+		.build_and_append_pdu(PduBuilder::state("", &content), alice, &room_id, &state_lock)
+		.await?;
+
+	drop(state_lock);
+
+	let key_id = <&ServerSigningKeyId>::try_from(KEY_ID)?;
+
+	services
+		.server_keys
+		.get_verify_key(&peer.name, key_id)
+		.await?;
+
+	let fetches = peer.key_fetches.load(Ordering::Relaxed);
+	let invitee = format!("{POLICY}{}", peer.name);
+	let body = json!({ "membership": "invite" });
+	let response = put_invite(client, &room_id, &invitee, "", &body).await?;
+	let stored = invited(response, services, &room_id, &invitee).await?;
+	let stored_json = services
+		.timeline
+		.get_pdu_json(stored.event_id())
+		.await?;
+
+	let stored_json = to_value(stored_json)?;
+	let signatures = &stored_json["signatures"][peer.name.as_str()];
+
+	assert!(signatures[POLICY_KEY_ID].is_string(), "{stored_json}");
+	assert!(signatures[KEY_ID].is_string(), "{stored_json}");
+	assert_eq!(peer.key_fetches.load(Ordering::Relaxed), fetches, "a key document was fetched");
+
 	received(peer).map(drop)
 }
 
