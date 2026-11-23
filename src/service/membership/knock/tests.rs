@@ -1,6 +1,7 @@
 use ruma::{
-	RoomId, RoomVersionId, UserId, api::federation::membership::RawStrippedState, event_id,
-	room_id, user_id,
+	RoomId, RoomVersionId, UserId,
+	api::federation::membership::{RawStrippedState, prepare_knock_event::v1::Response},
+	event_id, room_id, user_id,
 };
 use serde_json::{Value, from_str, from_value, json, value::to_raw_value};
 use tuwunel_core::{Result, config::Figment};
@@ -8,6 +9,7 @@ use tuwunel_matrix::PduEvent;
 
 use crate::{
 	Services,
+	membership::test_utils::templates_with_unsigned,
 	test_utils::{fixture, json_events, pdu_json, signed_state, with_field, with_state_key},
 };
 
@@ -155,6 +157,35 @@ async fn a_remote_knock_clears_unread_counts() -> Result {
 	assert_eq!(notifications, 0);
 	assert_eq!(highlights, 0);
 	assert!(threads.values().all(|counts| *counts == (0, 0)));
+
+	Ok(())
+}
+
+/// A resident's make_knock template leaves no `unsigned` on the knock built
+/// from it.
+///
+/// When a local knock fails and the federated knock succeeds, the knock is
+/// stored here: a map would be stored as this server's annotations, and a
+/// non-map would leave the stored `unsigned` unreadable.
+#[tokio::test]
+async fn a_make_knock_template_leaves_no_unsigned_on_the_knock() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let membership = &fixture.services.membership;
+	let room_id = room_id!("!template:example.test");
+	let alice = user_id!("@alice:localhost");
+	let version = RoomVersionId::V11;
+
+	for template in templates_with_unsigned(room_id, alice, "knock") {
+		let response = Response::new(version.clone(), to_raw_value(&template)?);
+		let (event, _) = membership
+			.build_knock_event(alice, room_id, None, &response, &version)
+			.await?;
+
+		assert!(!event.contains_key("unsigned"), "{template}");
+	}
 
 	Ok(())
 }

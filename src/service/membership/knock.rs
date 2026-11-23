@@ -2,8 +2,8 @@ use std::{borrow::Borrow, iter::once};
 
 use futures::{FutureExt, StreamExt, TryFutureExt};
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedServerName, RoomId,
-	RoomOrAliasId, RoomVersionId, UserId,
+	CanonicalJsonObject, OwnedEventId, OwnedServerName, RoomId, RoomOrAliasId, RoomVersionId,
+	UserId,
 	api::federation::{
 		self,
 		membership::{
@@ -25,7 +25,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, async_noinline, at, debug_info, debug_warn, err, implement, info, trace,
-	utils::{self, IterStream, result::LogErr, stream::WidebandExt},
+	utils::{IterStream, millis_since_unix_epoch, result::LogErr, stream::WidebandExt},
 	warn,
 };
 use tuwunel_matrix::{
@@ -37,7 +37,7 @@ use tuwunel_matrix::{
 
 use super::{
 	Service, StrippedCreateVerdict, dedup_stripped_state, enforce_stripped_create,
-	stripped_state::occupies_cell, v12_room_ids, without_member,
+	stripped_state::occupies_cell, template_event, v12_room_ids, without_member,
 };
 use crate::{
 	membership::join::get_servers_for_room,
@@ -303,10 +303,7 @@ async fn build_knock_event(
 	make_knock_response: &federation::membership::prepare_knock_event::v1::Response,
 	room_version_id: &RoomVersionId,
 ) -> Result<(CanonicalJsonObject, OwnedEventId)> {
-	let mut knock_event_stub: CanonicalJsonObject =
-		serde_json::from_str(make_knock_response.event.get()).map_err(|e| {
-			err!(BadServerResponse("Invalid make_knock event json received from server: {e:?}"))
-		})?;
+	let template = template_event("make_knock", &make_knock_response.event)?;
 
 	let content = self
 		.services
@@ -317,52 +314,33 @@ async fn build_knock_event(
 		})
 		.await;
 
-	knock_event_stub.insert(
-		"origin".into(),
-		CanonicalJsonValue::String(
-			self.services
-				.globals
-				.server_name()
-				.as_str()
-				.to_owned(),
-		),
-	);
-	knock_event_stub.insert(
-		"origin_server_ts".into(),
-		CanonicalJsonValue::Integer(
-			utils::millis_since_unix_epoch()
-				.try_into()
-				.expect("Timestamp is valid js_int value"),
-		),
-	);
-	knock_event_stub.insert(
-		"content".into(),
-		to_canonical_value(content).expect("event is valid, we just created it"),
-	);
+	let origin_server_ts = millis_since_unix_epoch()
+		.try_into()
+		.expect("Timestamp is valid js_int value");
 
-	knock_event_stub
-		.insert("room_id".into(), CanonicalJsonValue::String(room_id.as_str().into()));
+	let content = to_canonical_value(content).expect("event is valid, we just created it");
+	let event = self.member_event(template, content, origin_server_ts, room_id, sender_user);
 
-	knock_event_stub
-		.insert("state_key".into(), CanonicalJsonValue::String(sender_user.as_str().into()));
+	self.signed_knock(event, room_version_id)
+}
 
-	knock_event_stub
-		.insert("sender".into(), CanonicalJsonValue::String(sender_user.as_str().into()));
-
-	knock_event_stub.insert("type".into(), CanonicalJsonValue::String("m.room.member".into()));
-
+#[implement(Service)]
+fn signed_knock(
+	&self,
+	mut event: CanonicalJsonObject,
+	room_version_id: &RoomVersionId,
+) -> Result<(CanonicalJsonObject, OwnedEventId)> {
 	// In order to create a compatible ref hash (EventID) the `hashes` field needs
 	// to be present
 	self.services
 		.server_keys
-		.hash_and_sign_event(&mut knock_event_stub, room_version_id)?;
+		.hash_and_sign_event(&mut event, room_version_id)?;
 
-	let event_id = gen_event_id(&knock_event_stub, room_version_id)?;
+	let event_id = gen_event_id(&event, room_version_id)?;
 
-	knock_event_stub
-		.insert("event_id".into(), CanonicalJsonValue::String(event_id.clone().into()));
+	event.insert("event_id".into(), event_id.as_str().into());
 
-	Ok((knock_event_stub, event_id))
+	Ok((event, event_id))
 }
 
 #[implement(Service)]

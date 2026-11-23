@@ -31,10 +31,10 @@ use tuwunel_core::{
 	Err, Error, Result, async_noinline, at, debug, debug_error, debug_info, debug_warn, err,
 	error, implement, info, trace,
 	utils::{
-		self, BoolExt, IterStream, ReadyExt,
+		BoolExt, IterStream, ReadyExt,
 		json::serialized_len,
 		math::Expected,
-		shuffle,
+		millis_since_unix_epoch, shuffle,
 		stream::{TryReadyExt, TryWidebandExt, WidebandExt},
 	},
 	warn,
@@ -46,7 +46,7 @@ use tuwunel_matrix::{
 	room_version,
 };
 
-use super::{Service, VerifiedPdu};
+use super::{Service, VerifiedPdu, template_event};
 use crate::{
 	Services,
 	federation::{Candidates, WhenAllBackedOff},
@@ -1234,15 +1234,12 @@ async fn create_join_event(
 	reason: Option<String>,
 	extra_content: Option<CanonicalJsonObject>,
 ) -> Result<(CanonicalJsonObject, OwnedEventId, Option<OwnedUserId>)> {
-	let mut event: CanonicalJsonObject =
-		serde_json::from_str(join_event_stub.get()).map_err(|e| {
-			err!(BadServerResponse("Invalid make_join event json received from server: {e:?}"))
-		})?;
+	let template = template_event("make_join", join_event_stub)?;
 
 	let join_authorized_via_users_server = room_version_rules
 		.authorization
 		.restricted_join_rule
-		.then(|| event.get("content"))
+		.then(|| template.get("content"))
 		.flatten()
 		.and_then(|s| {
 			s.as_object()?
@@ -1260,36 +1257,9 @@ async fn create_join_event(
 		.merged_join_content(sender_user, content, extra_content.as_ref())
 		.await?;
 
-	event.insert("content".into(), content);
-
-	event.insert(
-		"origin".into(),
-		CanonicalJsonValue::String(
-			self.services
-				.globals
-				.server_name()
-				.as_str()
-				.to_owned(),
-		),
-	);
-
-	event.insert(
-		"origin_server_ts".into(),
-		CanonicalJsonValue::Integer(utils::millis_since_unix_epoch().try_into()?),
-	);
-
-	event.insert("room_id".into(), CanonicalJsonValue::String(room_id.as_str().into()));
-
-	event.insert("sender".into(), CanonicalJsonValue::String(sender_user.as_str().into()));
-
-	event.insert("state_key".into(), CanonicalJsonValue::String(sender_user.as_str().into()));
-
-	event.insert("type".into(), CanonicalJsonValue::String("m.room.member".into()));
-
-	let event_id = self
-		.services
-		.server_keys
-		.gen_id_hash_and_sign_event(&mut event, room_version_id)?;
+	let origin_server_ts = millis_since_unix_epoch().try_into()?;
+	let event = self.member_event(template, content, origin_server_ts, room_id, sender_user);
+	let (event, event_id) = self.signed_event(event, room_version_id)?;
 
 	check_rules(&event, &room_version_rules.event_format)?;
 

@@ -243,9 +243,10 @@ fn without_relations(unsigned: &Unsigned) -> Result<Option<Unsigned>> {
 
 /// Logs unsigned data dropped because it cannot be read.
 ///
-/// Only a corrupt or old remote row has this shape; repair it with `query raw
-/// put`. Stock release builds strip `debug_warn!`, and nothing else would show
-/// it.
+/// Only a corrupt row, or one an earlier build stored (a remote event, or this
+/// server's own join or knock built from a resident's template), has this
+/// shape; repair it with `query raw put`. Stock release builds strip
+/// `debug_warn!`, and nothing else would show it.
 #[implement(Pdu)]
 fn warn_unreadable(&self, error: &Error) {
 	warn!(event_id = %self.event_id, %error, "Omitting unreadable unsigned data.");

@@ -136,7 +136,9 @@ pub struct Pdu {
 	/// Unsigned metadata excluded from event hashing and signing.
 	///
 	/// Stored values are local annotations such as transaction IDs, age, prior
-	/// state, and bundled relations. The field is omitted when absent.
+	/// state, and bundled relations. Join and knock events this server stored
+	/// with an earlier build may also keep the `unsigned` of the resident
+	/// server's template. The field is omitted when absent.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub unsigned: Option<Unsigned>,
 

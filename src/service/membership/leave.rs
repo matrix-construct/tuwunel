@@ -5,7 +5,7 @@ use futures::{
 	future::{join, ready},
 };
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, OwnedServerName, RoomId, UserId,
+	OwnedServerName, RoomId, UserId,
 	api::federation,
 	canonical_json::to_canonical_value,
 	events::{
@@ -15,8 +15,8 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Err, Error, Result, async_noinline, debug_info, debug_warn, err, implement,
-	utils::{self, FutureBoolExt, future::ReadyBoolExt},
+	Err, Error, Result, async_noinline, debug_info, debug_warn, implement,
+	utils::{FutureBoolExt, future::ReadyBoolExt, millis_since_unix_epoch},
 	warn,
 };
 use tuwunel_matrix::{
@@ -25,7 +25,7 @@ use tuwunel_matrix::{
 	room_version,
 };
 
-use super::Service;
+use super::{Service, template_event};
 use crate::rooms::{state_cache::MembershipUpdate, timeline::RoomMutexGuard};
 
 /// Leaves a room for a local user, or withdraws the user's invite or knock.
@@ -377,13 +377,7 @@ async fn remote_leave(
 
 	let room_version_rules = room_version::rules(&room_version_id)?;
 
-	let mut event = serde_json::from_str::<CanonicalJsonObject>(make_leave_response.event.get())
-		.map_err(|e| {
-			err!(BadServerResponse(warn!(
-				"Invalid make_leave event json received from {remote_server} for {room_id}: \
-				 {e:?}"
-			)))
-		})?;
+	let template = template_event("make_leave", &make_leave_response.event)?;
 
 	let content = self
 		.services
@@ -394,49 +388,25 @@ async fn remote_leave(
 		})
 		.await;
 
-	event.insert("content".into(), to_canonical_value(content)?);
-
-	event.insert(
-		"origin".into(),
-		CanonicalJsonValue::String(
-			self.services
-				.globals
-				.server_name()
-				.as_str()
-				.to_owned(),
-		),
-	);
-
-	event.insert(
-		"origin_server_ts".into(),
-		CanonicalJsonValue::Integer(utils::millis_since_unix_epoch().try_into()?),
-	);
-
-	event.insert("room_id".into(), CanonicalJsonValue::String(room_id.as_str().into()));
-
-	event.insert("state_key".into(), CanonicalJsonValue::String(user_id.as_str().into()));
-
-	event.insert("sender".into(), CanonicalJsonValue::String(user_id.as_str().into()));
-
-	event.insert("type".into(), CanonicalJsonValue::String("m.room.member".into()));
-
-	let event_id = self
-		.services
-		.server_keys
-		.gen_id_hash_and_sign_event(&mut event, &room_version_id)?;
+	let content = to_canonical_value(content)?;
+	let origin_server_ts = millis_since_unix_epoch().try_into()?;
+	let event = self.member_event(template, content, origin_server_ts, room_id, user_id);
+	let (event, event_id) = self.signed_event(event, &room_version_id)?;
 
 	check_rules(&event, &room_version_rules.event_format)?;
+
+	let pdu = self
+		.services
+		.federation
+		.format_pdu_into(event, Some(&room_version_id))
+		.await;
 
 	self.services
 		.federation
 		.execute(&remote_server, federation::membership::create_leave_event::v2::Request {
 			room_id: room_id.to_owned(),
 			event_id,
-			pdu: self
-				.services
-				.federation
-				.format_pdu_into(event.clone(), Some(&room_version_id))
-				.await,
+			pdu,
 		})
 		.await?;
 

@@ -6,6 +6,8 @@ mod kick;
 mod knock;
 mod leave;
 mod stripped_state;
+#[cfg(test)]
+mod test_utils;
 mod unban;
 
 use std::sync::Arc;
@@ -13,9 +15,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use loole::{Receiver, Sender, unbounded};
 use ruma::{
-	CanonicalJsonObject, OwnedEventId, OwnedServerName, RoomId, RoomVersionId, UserId,
-	events::room::member::MembershipState, room_version_rules::RoomVersionRules,
-	signatures::Verified,
+	CanonicalJsonObject, CanonicalJsonValue, Int, OwnedEventId, OwnedServerName, RoomId,
+	RoomVersionId, UserId, events::room::member::MembershipState,
+	room_version_rules::RoomVersionRules, signatures::Verified,
 };
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{Result, err, implement};
@@ -122,4 +124,57 @@ async fn verified_pdu(
 		.map_err(|error| err!("Invalid PDU {event_id}: {error}"))?;
 
 	Ok((event_id, pdu, value, verified))
+}
+
+/// Completes a resident's membership template as this server's own event.
+///
+/// The template keeps its prev events, auth events and depth; this server sets
+/// the content, origin, timestamp, room, sender, state key and type.
+#[implement(Service)]
+fn member_event(
+	&self,
+	mut template: CanonicalJsonObject,
+	content: CanonicalJsonValue,
+	origin_server_ts: Int,
+	room_id: &RoomId,
+	user_id: &UserId,
+) -> CanonicalJsonObject {
+	template.extend([
+		("content".into(), content),
+		("origin".into(), self.services.server.name.as_str().into()),
+		("origin_server_ts".into(), origin_server_ts.into()),
+		("room_id".into(), room_id.as_str().into()),
+		("sender".into(), user_id.as_str().into()),
+		("state_key".into(), user_id.as_str().into()),
+		("type".into(), "m.room.member".into()),
+	]);
+
+	template
+}
+
+#[implement(Service)]
+fn signed_event(
+	&self,
+	mut event: CanonicalJsonObject,
+	room_version_id: &RoomVersionId,
+) -> Result<(CanonicalJsonObject, OwnedEventId)> {
+	self.services
+		.server_keys
+		.gen_id_hash_and_sign_event(&mut event, room_version_id)
+		.map(|event_id| (event, event_id))
+}
+
+/// Parses a resident's make_join, make_knock or make_leave template.
+///
+/// The template's `unsigned` is dropped, so nothing the resident put there
+/// reaches the event this server signs and stores.
+fn template_event(route: &str, template: &RawJsonValue) -> Result<CanonicalJsonObject> {
+	serde_json::from_str(template.get())
+		.map(|mut event: CanonicalJsonObject| {
+			event.remove("unsigned");
+			event
+		})
+		.map_err(|e| {
+			err!(BadServerResponse("Invalid {route} event json received from server: {e:?}"))
+		})
 }

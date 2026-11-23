@@ -12,12 +12,12 @@ use ruma::{
 	},
 	room_id, user_id,
 };
-use serde_json::{Value, from_value, json};
+use serde_json::{Value, from_value, json, value::to_raw_value};
 use tuwunel_core::{Error, Result, config::Figment};
-use tuwunel_matrix::pdu::PduBuilder;
+use tuwunel_matrix::{pdu::PduBuilder, room_version::rules as room_version_rules};
 
 use super::{Join, merge_member_content};
-use crate::{Services, test_utils::fixture};
+use crate::{Services, membership::test_utils::templates_with_unsigned, test_utils::fixture};
 
 const MAX_BYTES: usize = 4096;
 
@@ -229,6 +229,35 @@ async fn leave(services: &Services, room_id: &RoomId, user_id: &UserId) -> Resul
 		.build_and_append_pdu(builder, user_id, room_id, &state_lock)
 		.await
 		.map(drop)
+}
+
+/// A resident's make_join template leaves no `unsigned` on the join built from
+/// it.
+///
+/// A map would reach the stored join as this server's own annotations, and a
+/// non-map would leave the stored `unsigned` unreadable.
+#[tokio::test]
+async fn a_make_join_template_leaves_no_unsigned_on_the_join() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let membership = &fixture.services.membership;
+	let room_id = room_id!("!template:example.test");
+	let joiner = user_id!("@joiner:localhost");
+	let version = RoomVersionId::V11;
+	let rules = room_version_rules(&version)?;
+
+	for template in templates_with_unsigned(room_id, joiner, "join") {
+		let template = to_raw_value(&template)?;
+		let (event, ..) = membership
+			.create_join_event(room_id, joiner, &template, &version, &rules, None, None)
+			.await?;
+
+		assert!(!event.contains_key("unsigned"), "{}", template.get());
+	}
+
+	Ok(())
 }
 
 /// A stored profile avatar past its limit rides along a join with small extras.
