@@ -183,6 +183,7 @@ where
 /// Reads where the timeline places an event, decoding the mapping untrusted.
 ///
 /// `get_pdu_id` panics on a mapping that is not a PDU id, which this reports.
+/// Only a missing record is `Absent`; any other read error propagates.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn pdu_position(&self, event_id: &EventId) -> Result<Position> {
@@ -191,7 +192,7 @@ pub(crate) async fn pdu_position(&self, event_id: &EventId) -> Result<Position> 
 		.eventid_pduid
 		.get(event_id)
 		.await
-		.optional()?
+		.present()?
 		.map_or(Position::Absent, |pdu_id| {
 			RawPduId::try_from_bytes(&pdu_id).map_or(Position::Damaged, Position::At)
 		});

@@ -4,7 +4,7 @@
 //! membership metadata. Invite and tombstone checks use the normal event-build
 //! pipeline as non-persisting authorization probes.
 
-use futures::TryFutureExt;
+use futures::{TryFutureExt, future::OptionFuture};
 use ruma::{
 	EventId, RoomId, UserId,
 	events::{
@@ -17,14 +17,26 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Result, err, implement,
+	Err, Result, async_noinline, err, implement,
 	utils::{
 		BoolExt, FutureBoolExt, OptionExt, future::TryExtExt, result::NotFound, time::now_millis,
 	},
 };
 use tuwunel_matrix::{Event, PduCount, StateKey, pdu::PduBuilder};
 
-use crate::rooms::{short::ShortStateHash, state::RoomMutexGuard};
+use crate::rooms::{short::ShortStateHash, state::RoomMutexGuard, timeline::Position};
+
+/// The state an event's visibility is judged against.
+///
+/// Only the event's own recorded state lets a change of history visibility also
+/// be judged under the value it sets.
+#[derive(Clone, Copy)]
+struct Snapshot {
+	shortstatehash: ShortStateHash,
+
+	/// The event's own recorded state, not the room's current state standing in.
+	recorded: bool,
+}
 
 /// Reports whether a user may redact an event in a room.
 ///
@@ -103,25 +115,33 @@ pub async fn user_can_redact(
 /// hidden when the room has none, as it is when the event's state cannot be
 /// read. Missing or invalid history visibility defaults to `shared`, whose
 /// decision also accounts for the user's membership intervals around the
-/// event. Under `joined` and `invited`, the user's own membership event is
-/// visible when the membership it sets qualifies, per the spec's
-/// before-or-after rule.
+/// event. Per the spec's before-or-after rule, the user's own membership event
+/// is visible under `joined` and `invited` when the membership it sets
+/// qualifies, and a change of history visibility is visible when either the
+/// value before it or the value it sets allows the user.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "trace")]
 pub async fn user_can_see_event<Pdu>(&self, user_id: &UserId, pdu: &Pdu) -> bool
 where
 	Pdu: Event,
 {
-	let Ok(Some(shortstatehash)) = self.event_snapshot(pdu).await else {
+	let Ok(Some(snapshot)) = self.event_snapshot(pdu).await else {
 		return false;
 	};
 
-	let history_visibility = self.history_visibility(shortstatehash).await;
-	let visible = self
-		.visible_at(user_id, pdu, shortstatehash, Ok(history_visibility))
+	let history_visibility = self
+		.history_visibility(snapshot.shortstatehash)
 		.await;
 
-	self.or_sticky(user_id, pdu, visible)
+	let before = self
+		.visible_at(user_id, pdu, snapshot.shortstatehash, Ok(history_visibility))
+		.await;
+
+	let after = self
+		.after_side(user_id, pdu, snapshot, &before)
+		.await;
+
+	self.or_sticky(user_id, pdu, either_side(before, after))
 		.unwrap_or_else(|_| false)
 		.await
 }
@@ -142,14 +162,23 @@ where
 	Pdu: Event,
 {
 	let visible = match self.event_snapshot(pdu).await {
-		| Ok(Some(shortstatehash)) => {
-			let history_visibility = self.try_history_visibility(shortstatehash).await;
-
-			self.visible_at(user_id, pdu, shortstatehash, history_visibility)
-				.await
-		},
 		| Ok(None) => return Ok(false),
 		| Err(error) => Err(error),
+		| Ok(Some(snapshot)) => {
+			let history_visibility = self
+				.try_history_visibility(snapshot.shortstatehash)
+				.await;
+
+			let before = self
+				.visible_at(user_id, pdu, snapshot.shortstatehash, history_visibility)
+				.await;
+
+			let after = self
+				.after_side(user_id, pdu, snapshot, &before)
+				.await;
+
+			either_side(before, after)
+		},
 	};
 
 	self.or_sticky(user_id, pdu, visible).await
@@ -161,7 +190,7 @@ where
 /// without one, and `None` when the room has no state either. Only a missing
 /// snapshot falls back, so a failed read cannot widen access.
 #[implement(super::Service)]
-async fn event_snapshot<Pdu>(&self, pdu: &Pdu) -> Result<Option<ShortStateHash>>
+async fn event_snapshot<Pdu>(&self, pdu: &Pdu) -> Result<Option<Snapshot>>
 where
 	Pdu: Event,
 {
@@ -173,11 +202,71 @@ where
 	else {
 		return state
 			.get_room_shortstatehash(pdu.room_id())
+			.map_ok(|shortstatehash| Snapshot { shortstatehash, recorded: false })
 			.await
 			.present();
 	};
 
-	Ok(Some(shortstatehash))
+	Ok(Some(Snapshot { shortstatehash, recorded: true }))
+}
+
+/// Checks the value a change of history visibility sets, when the value before
+/// it did not grant the user and the event's own recorded state judged it.
+///
+/// An event judged by the room's current state instead, being backfilled or
+/// only an outlier, gets no grant from its own content. Returning the future
+/// directly spares the entry points an async frame of their own, which the
+/// debug-build worker stack cannot afford.
+#[implement(super::Service)]
+fn after_side<'a, Pdu>(
+	&'a self,
+	user_id: &'a UserId,
+	pdu: &'a Pdu,
+	snapshot: Snapshot,
+	before: &Result<bool>,
+) -> OptionFuture<impl Future<Output = Result<bool>> + Send + use<'a, Pdu>>
+where
+	Pdu: Event + 'a,
+{
+	matches!(before, Ok(true))
+		.is_false()
+		.and_is(snapshot.recorded)
+		.and_then(|| set_history_visibility(pdu))
+		.map_async(|after| self.visible_after(user_id, pdu, snapshot.shortstatehash, after))
+}
+
+/// Judges a change of history visibility under the value it sets.
+///
+/// Membership is the same on both sides of such an event, which changes none.
+/// Only an event the timeline accepted is judged so: a soft-failed one also has
+/// its own recorded state, but clients are not shown it.
+#[implement(super::Service)]
+// cold arm, kept off the debug-build worker stack every visibility caller shares
+#[async_noinline]
+async fn visible_after<'a, Pdu>(
+	&'a self,
+	user_id: &'a UserId,
+	pdu: &'a Pdu,
+	shortstatehash: ShortStateHash,
+	after: HistoryVisibility,
+) -> Result<bool>
+where
+	Pdu: Event + 'a,
+{
+	let event_id = pdu.event_id();
+
+	match self
+		.services
+		.timeline
+		.pdu_position(event_id)
+		.await?
+	{
+		| Position::Absent => Ok(false),
+		| Position::Damaged => Err!(Database("The timeline position of {event_id} is damaged.")),
+		| Position::At(_) =>
+			self.visible_at(user_id, pdu, shortstatehash, Ok(after))
+				.await,
+	}
 }
 
 /// Judges an event under the history visibility of its snapshot.
@@ -717,6 +806,33 @@ pub async fn user_can_tombstone(
 		)
 		.await
 		.is_ok()
+}
+
+/// The value a change of history visibility sets.
+///
+/// Content that does not parse sets `shared`, as the snapshot readers read it.
+fn set_history_visibility<Pdu>(pdu: &Pdu) -> Option<HistoryVisibility>
+where
+	Pdu: Event,
+{
+	pdu.is_type_and_state_key(&TimelineEventType::RoomHistoryVisibility, "")
+		.then(|| {
+			pdu.get_content().map_or(
+				HistoryVisibility::Shared,
+				|content: RoomHistoryVisibilityEventContent| content.history_visibility,
+			)
+		})
+}
+
+/// Combines the judgments before and after a change of history visibility.
+///
+/// A grant on either side outweighs a failed read on the other.
+fn either_side(before: Result<bool>, after: Option<Result<bool>>) -> Result<bool> {
+	match after {
+		| None | Some(Ok(false)) => before,
+		| Some(Ok(true)) => Ok(true),
+		| Some(Err(error)) => before.and(Err(error)),
+	}
 }
 
 #[cfg(test)]

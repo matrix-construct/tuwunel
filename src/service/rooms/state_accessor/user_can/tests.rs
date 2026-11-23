@@ -400,6 +400,106 @@ async fn snapshotless_event_is_judged_by_current_state() -> Result {
 	Ok(())
 }
 
+/// A change of history visibility is judged under the value it sets as well,
+/// once the timeline accepted it.
+///
+/// An opening from `joined` to `world_readable` with its own recorded state is
+/// visible to a never-member. The same event without a timeline position, as a
+/// soft-failed one has, stays hidden. If its position cannot be decoded,
+/// `try_user_can_see_event` returns an error and `user_can_see_event` false.
+#[tokio::test]
+async fn history_visibility_change_is_judged_by_the_value_it_sets() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room = room_id!("!opening:localhost");
+	let owner = user_id!("@owner:localhost");
+	let stranger = user_id!("@stranger:localhost");
+	let create = event_id!("$create:localhost");
+	let join = event_id!("$join:localhost");
+	let closed = event_id!("$closed:localhost");
+	let opened = event_id!("$opened:localhost");
+	let unaccepted = event_id!("$unaccepted:localhost");
+	let damaged = event_id!("$damaged:localhost");
+	let shortroomid = services
+		.short
+		.get_or_create_shortroomid(room)
+		.await;
+
+	let create_content = json!({ "creator": owner, "room_version": "10" });
+	let joined = json!({ "history_visibility": "joined" });
+	let state_events = [
+		(1, create, "m.room.create", "", create_content),
+		(2, join, "m.room.member", owner.as_str(), json!({ "membership": "join" })),
+		(3, closed, "m.room.history_visibility", "", joined),
+	];
+
+	store_state(services, shortroomid, room, owner, &state_events);
+
+	let before = Arc::new(compress_states(services, &state_events).await);
+	let world_readable = json!({ "history_visibility": "world_readable" });
+	let opening = |id| {
+		with_state_key(
+			pdu_json(id, room, owner, "m.room.history_visibility", &world_readable),
+			"",
+		)
+	};
+
+	store(services, shortroomid, 4, opened, &opening(opened));
+	outlier(services, unaccepted, &opening(unaccepted));
+	outlier(services, damaged, &opening(damaged));
+	services.db["eventid_pduid"].insert(damaged.as_bytes(), [0xFF_u8]);
+
+	for id in [opened, unaccepted, damaged] {
+		services
+			.state
+			.set_event_state(id, room, Arc::clone(&before))
+			.await?;
+	}
+
+	let accessor = &services.state_accessor;
+	let opened = services.timeline.get_pdu(opened).await?;
+	let unaccepted = services
+		.timeline
+		.get_outlier_pdu(unaccepted)
+		.await?;
+
+	let damaged = services.timeline.get_outlier_pdu(damaged).await?;
+
+	assert!(
+		accessor
+			.try_user_can_see_event(stranger, &opened)
+			.await?,
+		"the opening is hidden from a never-member"
+	);
+
+	assert!(
+		!accessor
+			.try_user_can_see_event(stranger, &unaccepted)
+			.await?,
+		"an opening the timeline never accepted vouched for itself"
+	);
+
+	assert!(
+		accessor
+			.try_user_can_see_event(stranger, &damaged)
+			.await
+			.is_err(),
+		"a damaged position read as a denial"
+	);
+
+	assert!(
+		!accessor
+			.user_can_see_event(stranger, &damaged)
+			.await,
+		"a damaged position granted the opening"
+	);
+
+	Ok(())
+}
+
 async fn seed(services: &Services) -> Result<Ids> {
 	let ids = Ids {
 		room: room_id!("!redaction:localhost"),

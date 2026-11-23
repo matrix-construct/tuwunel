@@ -203,12 +203,12 @@ async fn hidden_state_ends_the_window(&self) -> Result {
 	Ok(())
 }
 
-/// A peek whose newest events are hidden carries a token from which
-/// pagination reaches the public history before them.
+/// A peek carries a token from which pagination reaches the public history
+/// past a hidden event.
 ///
-/// The reopening is judged by the `joined` visibility before it, so the peeker
-/// sees neither it nor the private message before it, and the window keeps no
-/// event.
+/// The window keeps the reopening, since the `world_readable` value it sets
+/// satisfies the spec's before-or-after rule. The private message before it
+/// stays hidden, both in the window and in pagination from its token.
 #[implement(Accounts, params = "<'_>")]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn peek_resumes_past_hidden_events(&self) -> Result {
@@ -242,7 +242,10 @@ async fn peek_resumes_past_hidden_events(&self) -> Result {
 	let room = &sliding["rooms"][room_id.as_str()];
 
 	assert!(!has_event(&room["timeline"], &private), "hidden message peeked: {sliding}");
-	assert!(!has_event(&room["timeline"], &reopened), "hidden reopening peeked: {sliding}");
+	assert!(
+		has_event(&room["timeline"], &reopened),
+		"reopening hidden from a peek: {sliding}"
+	);
 
 	let history = self
 		.stranger

@@ -308,10 +308,10 @@ async fn left_history(&self, History { joined, unreadable }: History) -> Result 
 /// The legacy field serves state at the start of the timeline and
 /// `state_after` the state the rejection leaves. History closed inside the
 /// synced window therefore shows the room's state only in the legacy field,
-/// while history opened there shows it in both, since the timeline starts
-/// after an opening the invitee cannot see. Current state standing in for a
-/// lost snapshot grants nothing, and a later snapshot recorded after the
-/// rejection is never served in its place.
+/// and history opened there only in `state_after`, since the opening is visible
+/// by the spec's before-or-after rule and the timeline starts at it. Current
+/// state standing in for a lost snapshot grants nothing, and a later snapshot
+/// recorded after the rejection is never served in its place.
 #[implement(Accounts, params = "<'_>")]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn left_visibility(&self, opened: Opened) -> Result {
@@ -387,10 +387,8 @@ async fn left_visibility(&self, opened: Opened) -> Result {
 		.transpose()?;
 
 	let after_readable = matches!(opened, Opened::Before | Opened::Within | Opened::Renamed);
-	let legacy_readable = matches!(
-		opened,
-		Opened::Before | Opened::Within | Opened::ClosedWithin | Opened::Renamed
-	);
+	let legacy_readable =
+		matches!(opened, Opened::Before | Opened::ClosedWithin | Opened::Renamed);
 
 	let query = format!("{before}&full_state=true");
 	let reply = client.sync_v3(Some(&query)).await?;
