@@ -3,11 +3,11 @@ use std::sync::Arc;
 use futures::{Stream, StreamExt};
 use ruma::{RoomId, UserId, api::client::search::search_events::v3::Criteria};
 use tuwunel_core::{
-	Result,
-	arrayvec::ArrayVec,
-	implement, trace,
+	Result, implement,
+	smallvec::SmallVec,
+	trace,
 	utils::{
-		ArrayVecExt, IterStream, ReadyExt, set,
+		IterStream, ReadyExt, set,
 		stream::{TryIgnore, WidebandExt},
 	},
 };
@@ -21,6 +21,9 @@ use crate::rooms::{
 	short::ShortRoomId,
 	timeline::{PduId, RawPduId},
 };
+
+#[cfg(test)]
+mod tests;
 
 pub struct Service {
 	db: Data,
@@ -41,10 +44,11 @@ pub struct RoomQuery<'a> {
 	pub before: Option<PduCount>,
 }
 
-type TokenId = ArrayVec<u8, TOKEN_ID_MAX_LEN>;
+type TokenId = SmallVec<[u8; TOKEN_ID_CAPACITY]>;
 
-const TOKEN_ID_MAX_LEN: usize =
+const TOKEN_ID_CAPACITY: usize =
 	size_of::<ShortRoomId>() + WORD_MAX_LEN + 1 + size_of::<RawPduId>();
+
 const WORD_MAX_LEN: usize = 50;
 
 impl crate::Service for Service {
