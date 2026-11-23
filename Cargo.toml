@@ -453,7 +453,8 @@ features = [
 version = "0.6"
 
 [workspace.dependencies.sd-notify]
-version = "0.5"
+git = "https://github.com/matrix-construct/sd-notify"
+rev = "3820467786abfb565d06879d07067338dcacb18d"
 default-features = false
 
 [workspace.dependencies.semver]
