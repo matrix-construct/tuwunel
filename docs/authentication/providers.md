@@ -232,8 +232,10 @@ trusted = true
 ```
 
 With `trusted = true`, users whose Keycloak username matches an existing Matrix
-localpart are granted access to that account, unless an appservice reserves
-that localpart. Only use `trusted` when you control the identity provider.
+localpart are granted access to that account. This does not apply when the
+`registration.forbidden_usernames` setting matches that localpart or an
+appservice reserves it. Only use `trusted` when you control the identity
+provider.
 
 ### Matrix Authentication Service (MAS)
 
