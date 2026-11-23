@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use tuwunel_core::{
 	Result, implement,
 	ruma::{EventId, OwnedEventId, OwnedRoomId, RoomId, UserId, events::StateEventType},
+	utils::IterStream,
 };
 use tuwunel_service::Services;
 
@@ -86,6 +87,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	accounts.hidden_increment_keeps_a_token().await?;
 
 	accounts.scan_budget().await?;
+	accounts.unreadable_rows_spend_budget().await?;
 	accounts.rejected_invite_keeps_its_leave().await?;
 	accounts.failed_join_read_stays_in_state().await?;
 	accounts
@@ -353,6 +355,64 @@ async fn scan_budget(&self) -> Result {
 	Ok(())
 }
 
+/// Rows that cannot be read spend the scan budget.
+///
+/// Legacy sync skips a row it cannot read and charges it like a judged one, so
+/// a long unreadable run behind the newest message still ends the scan at its
+/// budget and marks the window limited. The sync is incremental, since an
+/// initial sync marks every joined room's window limited anyway.
+#[implement(Accounts, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn unreadable_rows_spend_budget(&self) -> Result {
+	let room_id = self.room("shared").await?;
+	let since = self.owner.sync(None, 2).await?;
+	let indices = 0..HIDDEN_RUN;
+	let unreadable: Vec<OwnedEventId> = indices
+		.stream()
+		.then(async |index| {
+			let txn_id = format!("unreadable-{index}");
+
+			self.owner
+				.send_text(&room_id, &txn_id, "unreadable")
+				.await
+		})
+		.try_collect()
+		.await?;
+
+	let newest = self
+		.owner
+		.send_text(&room_id, "unreadable-newest", "newest")
+		.await?;
+
+	let stored: Vec<Vec<u8>> = unreadable
+		.iter()
+		.stream()
+		.then(|event_id| self.corrupt(event_id))
+		.try_collect()
+		.await?;
+
+	let legacy = self
+		.owner
+		.sync(Some(field(&since, "next_batch")?), 2)
+		.await;
+
+	unreadable
+		.iter()
+		.zip(&stored)
+		.stream()
+		.map(Ok)
+		.try_for_each(async |(event_id, stored)| self.restore(event_id, stored).await)
+		.await?;
+
+	let legacy = legacy?;
+	let timeline = &joined_room(&legacy, &room_id)?["timeline"];
+
+	assert_eq!(event_ids(&timeline["events"]), [newest.as_str()], "unreadable sent: {legacy}");
+	assert_eq!(timeline["limited"], true, "unreadable rows spent no budget: {legacy}");
+
+	Ok(())
+}
+
 /// A rejected invite reaches the invitee's sync as their own leave, though
 /// history visibility hides it, and nothing else the room hid comes with it.
 ///
@@ -404,11 +464,58 @@ async fn rejected_invite_keeps_its_leave(&self) -> Result {
 	Ok(())
 }
 
+/// A join whose visibility cannot be read stays out of the joiner's legacy
+/// timeline and in its state, in both state fields.
+///
+/// Legacy sync leaves the unreadable join out of the window, so the fallback
+/// that moves a fresh join from state into an empty timeline must not bring it
+/// back.
+#[implement(Accounts, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn failed_join_read_stays_in_state(&self) -> Result {
+	let services = self.services;
+	let room_id = self.room("shared").await?;
+	let since = self.member.sync(None, 10).await?;
+	let since = field(&since, "next_batch")?;
+
+	self.member.act(&room_id, "join").await?;
+
+	let join = self.member_event(&room_id).await?;
+	let shorteventid = services.short.get_shorteventid(&join).await?;
+	let shortstatehash = services.state.pdu_shortstatehash(&join).await?;
+	let snapshots = &services.db["shorteventid_shortstatehash"];
+
+	snapshots.insert(&shorteventid.to_be_bytes(), [0xFF_u8]);
+
+	let legacy = self.member.sync(Some(since), 10).await;
+	let after = ("org.matrix.msc4222.use_state_after", "true");
+	let after = self
+		.member
+		.sync_with(Some(since), 10, Some(after))
+		.await;
+
+	snapshots.put(shorteventid, shortstatehash);
+
+	let (legacy, after) = (legacy?, after?);
+	let room = joined_room(&legacy, &room_id)?;
+
+	assert!(!has_event(&room["timeline"]["events"], &join), "unreadable join sent: {legacy}");
+	assert!(has_event(&room["state"]["events"], &join), "join left out of state: {legacy}");
+
+	let room = joined_room(&after, &room_id)?;
+	let state_after = &room["org.matrix.msc4222.state_after"]["events"];
+
+	assert!(!has_event(&room["timeline"]["events"], &join), "unreadable join sent: {after}");
+	assert!(has_event(state_after, &join), "join left out of state_after: {after}");
+
+	Ok(())
+}
+
 /// A failed visibility read on the row past a full window does not withhold
 /// the room.
 ///
-/// The row past the window is judged only to learn that more events exist, so
-/// a snapshot of its that cannot be read neither fails sliding sync nor shows.
+/// The extra row marks the window as limited even when its visibility cannot be
+/// read.
 #[implement(Accounts, params = "<'_>")]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn lookahead_failure_keeps_the_window(&self) -> Result {
@@ -457,53 +564,6 @@ async fn lookahead_failure_keeps_the_window(&self) -> Result {
 		"full window withheld: {sliding}"
 	);
 	assert_eq!(room["limited"], true, "window not limited: {sliding}");
-
-	Ok(())
-}
-
-/// A join whose visibility cannot be read stays out of the joiner's legacy
-/// timeline and in its state, in both state fields.
-///
-/// Legacy sync leaves the unreadable join out of the window, so the fallback
-/// that moves a fresh join from state into an empty timeline must not bring it
-/// back.
-#[implement(Accounts, params = "<'_>")]
-#[tracing::instrument(level = "debug", skip_all)]
-async fn failed_join_read_stays_in_state(&self) -> Result {
-	let services = self.services;
-	let room_id = self.room("shared").await?;
-	let since = self.member.sync(None, 10).await?;
-	let since = field(&since, "next_batch")?;
-
-	self.member.act(&room_id, "join").await?;
-
-	let join = self.member_event(&room_id).await?;
-	let shorteventid = services.short.get_shorteventid(&join).await?;
-	let shortstatehash = services.state.pdu_shortstatehash(&join).await?;
-	let snapshots = &services.db["shorteventid_shortstatehash"];
-
-	snapshots.insert(&shorteventid.to_be_bytes(), [0xFF_u8]);
-
-	let legacy = self.member.sync(Some(since), 10).await;
-	let after = ("org.matrix.msc4222.use_state_after", "true");
-	let after = self
-		.member
-		.sync_with(Some(since), 10, Some(after))
-		.await;
-
-	snapshots.put(shorteventid, shortstatehash);
-
-	let (legacy, after) = (legacy?, after?);
-	let room = joined_room(&legacy, &room_id)?;
-
-	assert!(!has_event(&room["timeline"]["events"], &join), "unreadable join sent: {legacy}");
-	assert!(has_event(&room["state"]["events"], &join), "join left out of state: {legacy}");
-
-	let room = joined_room(&after, &room_id)?;
-	let state_after = &room["org.matrix.msc4222.state_after"]["events"];
-
-	assert!(!has_event(&room["timeline"]["events"], &join), "unreadable join sent: {after}");
-	assert!(has_event(state_after, &join), "join left out of state_after: {after}");
 
 	Ok(())
 }
@@ -657,8 +717,6 @@ async fn sync(&self, since: Option<&str>, limit: u64) -> Result<Value> {
 	self.sync_with(since, limit, None).await
 }
 
-/// One legacy sync with an extra query parameter, such as MSC4222's
-/// `use_state_after`.
 #[implement(Client, params = "<'_>")]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn sync_with(

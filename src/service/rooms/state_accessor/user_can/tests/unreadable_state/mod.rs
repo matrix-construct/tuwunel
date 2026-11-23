@@ -222,6 +222,78 @@ async fn sticky_grant_outlasts_an_unreadable_snapshot() -> Result {
 	Ok(())
 }
 
+/// A former member keeps an event from before their leave though their member
+/// event in its snapshot cannot be loaded.
+///
+/// Under `shared`, a leave falling after the event grants it, so the failed
+/// read of the membership at the event decides nothing.
+#[tokio::test]
+async fn departure_grants_history_past_an_unreadable_membership() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room = room_id!("!departed:localhost");
+	let owner = user_id!("@owner:localhost");
+	let member = user_id!("@member:localhost");
+	let create = event_id!("$create:localhost");
+	let join = event_id!("$join:localhost");
+	let entered = event_id!("$entered:localhost");
+	let early = event_id!("$early:localhost");
+	let shortroomid = services
+		.short
+		.get_or_create_shortroomid(room)
+		.await;
+
+	let create_content = json!({ "creator": owner, "room_version": "10" });
+	let state_events = [
+		(1, create, "m.room.create", "", create_content),
+		(2, join, "m.room.member", owner.as_str(), json!({ "membership": "join" })),
+		(3, entered, "m.room.member", member.as_str(), json!({ "membership": "join" })),
+	];
+
+	store_state(services, shortroomid, room, owner, &state_events);
+
+	let content = json!({ "msgtype": "m.text", "body": "before leaving" });
+
+	store_messages(services, owner, &content, &[(shortroomid, room, 4, early)]);
+
+	let state = Arc::new(compress_states(services, &state_events).await);
+
+	services
+		.state
+		.set_event_state(early, room, state)
+		.await?;
+
+	let memberships = [
+		(room, owner, MembershipState::Join, 2),
+		(room, member, MembershipState::Join, 3),
+		(room, member, MembershipState::Leave, 5),
+	];
+
+	set_memberships(services, owner, memberships).await?;
+
+	let pdu_id = services.timeline.get_pdu_id(entered).await?;
+
+	services.db["pduid_pdu"].remove(&pdu_id);
+
+	let accessor = &services.state_accessor;
+	let early = services.timeline.get_pdu(early).await?;
+	let seen = accessor
+		.try_user_can_see_event(member, &early)
+		.await?;
+
+	assert!(seen, "an unreadable membership at the event outweighed the departure");
+
+	assert!(
+		accessor.user_can_see_event(member, &early).await,
+		"an unreadable membership at the event outweighed the departure"
+	);
+
+	Ok(())
+}
+
 fn sticky_message(id: &EventId, room_id: &RoomId, sender: &UserId) -> Value {
 	let content = json!({ "msgtype": "m.text", "body": "sticky" });
 	let pdu = pdu_json(id, room_id, sender, "m.room.message", &content);
