@@ -263,11 +263,11 @@ fn merge_old_keys(mut keys: ServerSigningKeys) -> ServerSigningKeys {
 	keys
 }
 
-fn extract_key(mut keys: ServerSigningKeys, key_id: &ServerSigningKeyId) -> Option<VerifyKey> {
-	keys.verify_keys.remove(key_id).or_else(|| {
+fn extract_key(keys: &ServerSigningKeys, key_id: &ServerSigningKeyId) -> Option<VerifyKey> {
+	keys.verify_keys.get(key_id).cloned().or_else(|| {
 		keys.old_verify_keys
-			.remove(key_id)
-			.map(|old| VerifyKey::new(old.key))
+			.get(key_id)
+			.map(|old| VerifyKey::new(old.key.clone()))
 	})
 }
 

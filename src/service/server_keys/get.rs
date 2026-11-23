@@ -6,11 +6,12 @@
 
 use std::borrow::Borrow;
 
+use futures::StreamExt;
 use ruma::{
 	CanonicalJsonObject, ServerName, ServerSigningKeyId, api::federation::discovery::VerifyKey,
 	room_version_rules::RoomVersionRules,
 };
-use tuwunel_core::{Err, Result, implement};
+use tuwunel_core::{Err, Result, implement, utils::IterStream};
 
 use super::{PubKeyMap, PubKeys, extract_key};
 
@@ -139,6 +140,11 @@ pub async fn get_verify_key(
 	)))
 }
 
+/// Asks each trusted notary in turn for one of the origin's keys.
+///
+/// A notary may answer with documents for other servers; only those naming the
+/// origin are cached or searched, as `server_request` requires of the origin's
+/// own answer.
 #[implement(super::Service)]
 async fn get_verify_key_from_notaries(
 	&self,
@@ -152,16 +158,23 @@ async fn get_verify_key_from_notaries(
 		.keys
 		.trusted_servers
 	{
-		if let Ok(server_keys) = self.notary_request(notary, origin).await {
-			for server_key in server_keys.clone() {
-				self.add_signing_keys(server_key).await;
-			}
+		let Ok(server_keys) = self.notary_request(notary, origin).await else {
+			continue;
+		};
 
-			for server_key in server_keys {
-				if let Some(result) = extract_key(server_key, key_id) {
-					return Ok(result);
-				}
-			}
+		let found = server_keys
+			.filter(|server_key| server_key.server_name.eq(origin))
+			.stream()
+			.fold(None, async |found, server_key| {
+				let found = found.or_else(|| extract_key(&server_key, key_id));
+
+				self.add_signing_keys(server_key).await;
+				found
+			})
+			.await;
+
+		if let Some(result) = found {
+			return Ok(result);
 		}
 	}
 
@@ -175,8 +188,11 @@ async fn get_verify_key_from_origin(
 	key_id: &ServerSigningKeyId,
 ) -> Result<VerifyKey> {
 	if let Ok(server_key) = self.server_request(origin).await {
-		self.add_signing_keys(server_key.clone()).await;
-		if let Some(result) = extract_key(server_key, key_id) {
+		let found = extract_key(&server_key, key_id);
+
+		self.add_signing_keys(server_key).await;
+
+		if let Some(result) = found {
 			return Ok(result);
 		}
 	}
