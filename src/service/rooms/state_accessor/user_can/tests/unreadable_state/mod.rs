@@ -28,6 +28,8 @@ use crate::test_utils::{fixture, pdu_json, save_room_state, with_field};
 /// `user_can_see_event` denies the former member's message and the late
 /// joiner's sticky event, and takes the unreadable history visibility for
 /// `shared`, which lets the owner see the message.
+/// A user not joined is denied the sticky event outright, since membership
+/// settles what the failed index read left open.
 #[tokio::test]
 async fn damaged_event_position_is_a_failed_read() -> Result {
 	let Some(fixture) = fixture(Figment::new()).await? else {
@@ -39,6 +41,7 @@ async fn damaged_event_position_is_a_failed_read() -> Result {
 	let owner = user_id!("@owner:localhost");
 	let member = user_id!("@member:localhost");
 	let late = user_id!("@late:localhost");
+	let stranger = user_id!("@stranger:localhost");
 	let create = event_id!("$create:localhost");
 	let join = event_id!("$join:localhost");
 	let leave = event_id!("$leave:localhost");
@@ -125,6 +128,12 @@ async fn damaged_event_position_is_a_failed_read() -> Result {
 		!accessor.user_can_see_event(late, &sticky).await,
 		"a damaged position granted a sticky event"
 	);
+
+	let stranger_seen = accessor
+		.try_user_can_see_event(stranger, &sticky)
+		.await?;
+
+	assert!(!stranger_seen, "a failed index read outweighed membership's denial");
 
 	assert!(
 		accessor.user_can_see_event(owner, &quiet).await,

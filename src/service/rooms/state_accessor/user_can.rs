@@ -343,7 +343,7 @@ where
 ///
 /// The event must be unexpired by its own sticky object, which a redaction
 /// removes, and by its index row, which only an accepted event has. A failed
-/// read is an error.
+/// read is the error only when the other read does not deny the event.
 #[implement(super::Service)]
 #[tracing::instrument(level = "trace", skip_all)]
 async fn user_sees_sticky<Pdu>(&self, user_id: &UserId, pdu: &Pdu) -> Result<bool>
@@ -352,21 +352,31 @@ where
 {
 	let now = now_millis();
 
-	if pdu.sticky_until(now).is_none()
-		|| self
-			.services
-			.sticky
-			.try_indexed_unexpired(pdu.event_id(), now)
-			.await?
-			.is_false()
-	{
+	if pdu.sticky_until(now).is_none() {
 		return Ok(false);
 	}
 
-	self.services
+	let indexed = self
+		.services
+		.sticky
+		.try_indexed_unexpired(pdu.event_id(), now)
+		.await;
+
+	if matches!(indexed, Ok(false)) {
+		return Ok(false);
+	}
+
+	let joined = self
+		.services
 		.state_cache
 		.try_is_joined(user_id, pdu.room_id())
-		.await
+		.await;
+
+	if matches!(joined, Ok(false)) {
+		return Ok(false);
+	}
+
+	indexed.and(joined)
 }
 
 /// Whether a user may see an event under `shared` history visibility.
