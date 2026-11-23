@@ -145,7 +145,8 @@ async fn refused_destination_does_not_advance_boot_pacing() -> Result {
 	for (name, next, armed) in [
 		("refused.example", 0, 1),
 		("refused.example", 0, 1),
-		("permitted.example", 1, 2),
+		("10.0.0.1:8448", 0, 2),
+		("permitted.example", 1, 3),
 	] {
 		let index = sending
 			.arm_startup_wake(destination(name), 0, &mut wakes)

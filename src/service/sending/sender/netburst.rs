@@ -4,13 +4,13 @@ use std::{
 	time::Duration,
 };
 
-use futures::StreamExt;
+use futures::{StreamExt, future::ready};
 use tuwunel_core::{
 	implement,
 	itertools::Itertools,
 	utils::{
-		BoolExt, IterStream, ReadyExt, rand::secs as rand_secs, stream::TryIgnore,
-		time::now_millis,
+		BoolExt, IterStream, ReadyExt, future::OptionFutureExt, option::OptionExt,
+		rand::secs as rand_secs, stream::TryIgnore, time::now_millis,
 	},
 	warn,
 };
@@ -193,14 +193,12 @@ pub(super) async fn arm_startup_wake(
 		return index;
 	};
 
-	let verdict = match self.refused_recheck(server) {
-		| Some(earliest_retry) => ShouldAttempt::No { earliest_retry },
-		| None =>
-			self.services
-				.federation
-				.should_attempt(server)
-				.await,
-	};
+	let verdict = self
+		.refused_recheck(server)
+		.await
+		.map_async(|earliest_retry| ready(ShouldAttempt::No { earliest_retry }))
+		.unwrap_or_else_async(|| self.services.federation.should_attempt(server))
+		.await;
 
 	match verdict {
 		| ShouldAttempt::No { earliest_retry } => {

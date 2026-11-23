@@ -164,7 +164,7 @@ async fn select_events_current(
 	}
 
 	if let Destination::Federation(server) = dest
-		&& let Some(earliest_retry) = self.refused_recheck(server)
+		&& let Some(earliest_retry) = self.refused_recheck(server).await
 	{
 		return Current::Refused { earliest_retry };
 	}
@@ -196,20 +196,22 @@ async fn select_events_current(
 
 /// When to recheck a server that local policy refuses, or `None` if permitted.
 ///
-/// No peer status paces a refusal, so this timer takes the place of backoff and
-/// notices the configuration reload that lifts it.
+/// Federation may be disabled, the server forbidden, or its address denied by
+/// the IP range denylist. No peer status paces a refusal, so this timer takes
+/// the place of backoff and notices the configuration reload or new route that
+/// lifts it.
 #[implement(Service)]
-pub(super) fn refused_recheck(&self, server: &ServerName) -> Option<SystemTime> {
+pub(super) async fn refused_recheck(&self, server: &ServerName) -> Option<SystemTime> {
 	let config = &self.server.config;
+	let federation = &self.services.federation;
+	let refused =
+		config.is_remote_permitted(server).is_false() || federation.denies_route(server).await;
 
-	config
-		.is_remote_permitted(server)
-		.is_false()
-		.then(|| {
-			let recheck = Duration::from_secs(config.sending.timeout);
+	refused.then(|| {
+		let recheck = Duration::from_secs(config.sending.timeout);
 
-			timepoint_from_now(recheck).unwrap_or_else(|_| SystemTime::now())
-		})
+		timepoint_from_now(recheck).unwrap_or_else(|_| SystemTime::now())
+	})
 }
 
 /// Advance a destination's status for a new selection.

@@ -4,7 +4,9 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tuwunel_core::{arrayvec::ArrayString, smallstr::SmallString, utils::math::Expected};
+use tuwunel_core::{
+	arrayvec::ArrayString, format_small_string, smallstr::SmallString, utils::math::Expected,
+};
 
 use super::DestString;
 
@@ -56,8 +58,8 @@ pub(crate) fn add_port_to_hostname(dest: &str) -> FedDest {
 impl FedDest {
 	pub(crate) fn https_string(&self) -> DestString {
 		match self {
-			| Self::Literal(addr) => format!("https://{addr}").into(),
-			| Self::Named(host, port) => format!("https://{host}{port}").into(),
+			| Self::Literal(addr) => format_small_string!("https://{addr}"),
+			| Self::Named(host, port) => format_small_string!("https://{host}{port}"),
 		}
 	}
 

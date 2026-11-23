@@ -16,6 +16,7 @@ use super::{
 };
 use crate::{
 	federation::{Classification, ShouldAttempt},
+	resolver::{cache::CachedDest, fed::FedDest},
 	sending::{Destination, Msg, SendingEvent, Service},
 	test_utils::Fixture,
 };
@@ -25,17 +26,42 @@ async fn forbidden_server_stays_queued_without_a_send() -> Result {
 	let forbidden = [r"^refused\.example$"];
 	let config = Figment::new().merge(("federation.forbidden_remote_server_names", forbidden));
 
-	refused_destination_stays_queued(config).await
+	refused_destination_stays_queued(config, "refused.example", None).await
 }
 
 #[tokio::test]
 async fn disabled_federation_stays_queued_without_a_send() -> Result {
 	let config = Figment::new().merge(("federation.enable", false));
 
-	refused_destination_stays_queued(config).await
+	refused_destination_stays_queued(config, "refused.example", None).await
 }
 
-async fn refused_destination_stays_queued(config: Figment) -> Result {
+#[tokio::test]
+async fn denied_literal_stays_queued_without_a_send() -> Result {
+	refused_destination_stays_queued(Figment::new(), "10.0.0.1:8448", None).await
+}
+
+#[tokio::test]
+async fn denied_cached_route_stays_queued_without_a_send() -> Result {
+	let socket = "10.0.0.1:8448"
+		.parse()
+		.expect("test socket parses");
+
+	let route = CachedDest {
+		dest: FedDest::Literal(socket),
+		host: "refused.example".into(),
+		expire: CachedDest::default_expire(),
+		srv: false,
+	};
+
+	refused_destination_stays_queued(Figment::new(), "refused.example", Some(route)).await
+}
+
+async fn refused_destination_stays_queued(
+	config: Figment,
+	server: &str,
+	route: Option<CachedDest>,
+) -> Result {
 	let config = config.merge(("sending.workers", 1));
 	let Some(fixture) = service_fixture(config).await? else {
 		return Ok(());
@@ -43,8 +69,17 @@ async fn refused_destination_stays_queued(config: Figment) -> Result {
 
 	let sending = &fixture.services.sending;
 	let federation = &fixture.services.federation;
-	let server: OwnedServerName = "refused.example".try_into()?;
+	let server: OwnedServerName = server.try_into()?;
 	let dest = Destination::Federation(server.clone());
+
+	if let Some(route) = route {
+		fixture
+			.services
+			.resolver
+			.cache
+			.set_destination(&server, &route);
+	}
+
 	let mut futures = SendingFutures::new(); // request state out-param
 	let mut statuses = TransactionStatuses::new(); // request state out-param
 	let mut wakes = WakeQueue::new(); // request state out-param

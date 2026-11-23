@@ -413,8 +413,12 @@ fn handle_resolve_error(e: &NetError, host: &'_ str) -> Result {
 	}
 }
 
+/// Refuses a destination this server's own policy forbids, before any lookup.
+///
+/// `allow_self` lifts only the self-destination check; an IP-literal name on
+/// the IP range denylist is refused either way.
 #[implement(super::Service)]
-fn validate_dest(&self, dest: &ServerName, allow_self: bool) -> Result {
+pub(crate) fn validate_dest(&self, dest: &ServerName, allow_self: bool) -> Result {
 	self.validate_self_destination(dest, allow_self)?;
 	self.validate_dest_address(dest)
 }
@@ -444,7 +448,7 @@ fn validate_dest_address(&self, dest: &ServerName) -> Result {
 fn validate_dest_ip_literal(&self, dest: &ServerName) -> Result {
 	trace!("Destination is an IP literal, checking against IP range denylist.",);
 	let ip = unbracket(dest.host()).parse().map_err(|e| {
-		err!(BadServerResponse(debug_error!("Failed to parse IP literal from string: {e}")))
+		err!(BadServerResponse(debug_error!(error = %e, "Failed to parse IP literal")))
 	})?;
 
 	if !self.services.client.valid_cidr_range_ip(ip) {
@@ -452,4 +456,17 @@ fn validate_dest_ip_literal(&self, dest: &ServerName) -> Result {
 	}
 
 	Ok(())
+}
+
+/// Determines whether `validate_dest_address` refuses a server name.
+///
+/// A recognized IP literal that fails to parse is refused. Call this where
+/// refusals are frequent, to avoid building an error each time.
+#[implement(super::Service)]
+#[must_use]
+pub(crate) fn denies_dest_address(&self, dest: &ServerName) -> bool {
+	match unbracket(dest.host()).parse::<IpAddr>() {
+		| Ok(ip) => !self.services.client.valid_cidr_range_ip(ip),
+		| Err(_) => dest.is_ip_literal(),
+	}
 }

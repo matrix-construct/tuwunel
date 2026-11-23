@@ -31,7 +31,7 @@ use super::{
 };
 use crate::{
 	client::{Federation, read_response_capped},
-	resolver::actual::ActualDest,
+	resolver::{actual::ActualDest, fed::FedDest},
 };
 
 type RawRequest = HttpRequest<Vec<u8>>;
@@ -39,8 +39,10 @@ type RawRequest = HttpRequest<Vec<u8>>;
 /// Sends a federation request with the standard federation client.
 ///
 /// The destination is validated and resolved before the request is signed and
-/// sent. Success clears peer failures and classifiable errors record a failure,
-/// except a local refusal; this entry point does not itself consult peer
+/// sent. Success clears peer failures; a failed resolution or send records a
+/// classified failure, and a request this server refuses before contacting the
+/// peer records nothing. Interrupted errors and errors observed during shutdown
+/// record nothing either. This entry point does not itself consult peer
 /// backoff.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, name = "request", level = "debug")]
@@ -137,9 +139,11 @@ where
 ///
 /// The destination's resolved route picks the direct or SRV half of the client.
 /// A successful response clears every stored failure row for the destination.
-/// A request refused because federation is disabled or the server is forbidden
-/// records nothing; other errors are recorded only when classified as peer
-/// failures, and no backoff gate is consulted before sending.
+/// Only a failed resolution or send is recorded, and only when classified as a
+/// peer failure; a request this server refuses before contacting the peer
+/// records nothing, and no backoff gate is consulted before sending.
+/// Interrupted errors and errors observed during shutdown record nothing
+/// either.
 #[implement(super::Service)]
 pub async fn execute_on<T>(
 	&self,
@@ -152,45 +156,15 @@ where
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
-	let result = self
-		.execute_uncounted(client, dest, request)
-		.await;
-
-	self.record_outcome(dest, result.as_ref().err())
-		.await;
-
-	result
-}
-
-#[implement(super::Service)]
-async fn record_outcome(&self, dest: &ServerName, error: Option<&Error>) {
-	if error.is_some_and(is_local_refusal) {
-		return;
-	}
-
-	match error.map(classify_error) {
-		| None => self.record_success(dest).await,
-		| Some(Some(class)) => self.record_failure(dest, class),
-		| Some(None) => {},
-	}
-}
-
-/// Whether a request failed because this server's configuration refused it.
-///
-/// Only `require_remote_permitted` raises this on the send path, when
-/// federation is disabled or the destination is forbidden; a peer's 403 arrives
-/// as `Federation`.
-#[must_use]
-pub fn is_local_refusal(error: &Error) -> bool {
-	matches!(error, Error::Request(ErrorKind::Forbidden, ..))
+	self.execute_counted(client, dest, request, false)
+		.await
 }
 
 /// Executes one Feds or policy-server request while permitting only this
 /// server as a self-destination and preserving ordinary peer-status recording.
 ///
 /// Other federation entry points retain the configured loopback gate. A request
-/// refused because federation is disabled or the server is forbidden records
-/// nothing.
+/// this server refuses before contacting the peer records nothing.
 #[implement(super::Service)]
 pub(super) async fn execute_on_allow_self<T>(
 	&self,
@@ -203,14 +177,88 @@ where
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
+	self.execute_counted(client, dest, request, true)
+		.await
+}
+
+/// Sends one request, recording only the failures the peer can explain.
+///
+/// The destination checks run before resolution so that they, like request
+/// preparation, refuse with no record. A failed resolution or send records a
+/// failure only when classified as a peer failure, and a successful send
+/// records success. Interrupted errors and errors observed during shutdown
+/// record nothing.
+#[implement(super::Service)]
+#[tracing::instrument(
+	name = "fed",
+	level = "debug",
+	skip(self, client, request, allow_self)
+)]
+async fn execute_counted<T>(
+	&self,
+	client: &Federation,
+	dest: &ServerName,
+	request: T,
+	allow_self: bool,
+) -> Result<T::IncomingResponse>
+where
+	T: OutgoingRequest + Send,
+	T::Authentication: FedAuth,
+	T::PathBuilder: FedPath,
+{
+	self.validate_request_destination(dest)?;
+	self.services
+		.resolver
+		.validate_dest(dest, allow_self)?;
+
+	// The checks above decide self-destination once, so a loopback reload
+	// cannot turn the resolver's own check into a recorded refusal.
+	let actual = self
+		.services
+		.resolver
+		.get_actual_dest_allow_self(dest)
+		.await
+		.inspect_err(|error| self.record_error(dest, error))?;
+
+	let request = self.prepare(&actual, dest, request)?;
 	let result = self
-		.execute_uncounted_allow_self(client, dest, request)
+		.perform::<T>(&actual, dest, request, client)
 		.await;
 
 	self.record_outcome(dest, result.as_ref().err())
 		.await;
 
 	result
+}
+
+#[implement(super::Service)]
+async fn record_outcome(&self, dest: &ServerName, error: Option<&Error>) {
+	match error {
+		| None => self.record_success(dest).await,
+		| Some(error) => self.record_error(dest, error),
+	}
+}
+
+#[implement(super::Service)]
+pub(super) fn record_error(&self, dest: &ServerName, error: &Error) {
+	// A shutdown interrupts requests on this side; the peer did nothing.
+	if error.is_interrupted() || self.services.server.is_stopping() {
+		return;
+	}
+
+	if let Some(class) = classify_error(error) {
+		self.record_failure(dest, class);
+	}
+}
+
+/// Whether a request failed because this server's configuration refused it.
+///
+/// Only `require_remote_permitted` raises this on the send path, when
+/// federation is disabled or the destination is forbidden; a peer's 403 arrives
+/// as `Federation`.
+#[must_use]
+pub fn is_local_refusal(error: &Error) -> bool {
+	matches!(error, Error::Request(ErrorKind::Forbidden, ..))
 }
 
 /// Sends through a supplied client without changing peer status.
@@ -240,6 +288,7 @@ where
 		.resolver
 		.get_actual_dest(dest)
 		.await?;
+
 	let request = self.prepare(&actual, dest, request)?;
 
 	self.perform::<T>(&actual, dest, request, client)
@@ -269,6 +318,7 @@ where
 		.resolver
 		.get_actual_dest_allow_self(dest)
 		.await?;
+
 	let request = self.prepare(&actual, dest, request)?;
 
 	self.perform::<T>(&actual, dest, request, client)
@@ -436,6 +486,34 @@ pub(super) fn validate_url(&self, url: &Url) -> Result {
 	}
 
 	Ok(())
+}
+
+/// Determines whether the IP range denylist refuses a destination before any
+/// request reaches it.
+///
+/// Covers the server name when it is an IP literal and the cached route, the
+/// two refusals a send raises without contacting the peer; a route not yet
+/// cached passes until resolution caches it. A named route's host is read as
+/// the request URL reads it, so a numeric form such as `127.1` is an address.
+#[implement(super::Service)]
+pub async fn denies_route(&self, dest: &ServerName) -> bool {
+	let resolver = &self.services.resolver;
+
+	if resolver.denies_dest_address(dest) {
+		return true;
+	}
+
+	let Ok(cached) = resolver.cache.get_destination(dest).await else {
+		return false;
+	};
+
+	let client = &self.services.client;
+
+	if let FedDest::Literal(addr) = &cached.dest {
+		return !client.valid_cidr_range_ip(addr.ip());
+	}
+
+	Url::parse(&cached.dest.https_string()).is_ok_and(|url| !client.valid_cidr_range_url(&url))
 }
 
 async fn handle_response<T>(

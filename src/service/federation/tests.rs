@@ -6,7 +6,8 @@
 //! delay curves, deadlines, and saturation.
 
 use std::{
-	sync::Arc,
+	io::{Error as IoError, ErrorKind::Interrupted},
+	sync::{Arc, atomic::Ordering},
 	time::{Duration, UNIX_EPOCH},
 };
 
@@ -364,16 +365,22 @@ async fn disabled_federation_records_no_peer_status() -> Result {
 		return Ok(());
 	};
 
-	assert_refused_without_a_record(&fixture, "remote.example".try_into()?).await;
+	assert_refused_without_a_record(&fixture, "remote.example".try_into()?, forbidden).await;
 
 	Ok(())
 }
 
-async fn assert_refused_without_a_record(fixture: &Fixture, dest: &ServerName) {
+async fn assert_refused_without_a_record(
+	fixture: &Fixture,
+	dest: &ServerName,
+	refusal: fn(&Error) -> bool,
+) {
 	let federation = &fixture.services.federation;
 	let client = &fixture.services.client.federation;
 	let refused = async |entry: &str, result: Result<_>| {
-		assert_eq!(result.expect_err(entry).status_code(), StatusCode::FORBIDDEN, "{entry}");
+		let error = result.expect_err(entry);
+
+		assert!(refusal(&error), "{entry}: {error}");
 		assert!(!federation.peer_has_failures(dest).await, "{entry}");
 	};
 
@@ -388,6 +395,8 @@ async fn assert_refused_without_a_record(fixture: &Fixture, dest: &ServerName) {
 	refused("execute_on_allow_self", result).await;
 }
 
+fn forbidden(error: &Error) -> bool { error.status_code().eq(&StatusCode::FORBIDDEN) }
+
 #[tokio::test]
 async fn forbidden_server_records_no_peer_status() -> Result {
 	let config = Figment::new()
@@ -397,7 +406,121 @@ async fn forbidden_server_records_no_peer_status() -> Result {
 		return Ok(());
 	};
 
-	assert_refused_without_a_record(&fixture, "forbidden.example".try_into()?).await;
+	assert_refused_without_a_record(&fixture, "forbidden.example".try_into()?, forbidden).await;
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn denied_literal_records_no_peer_status() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let federation = &fixture.services.federation;
+	let denied: OwnedServerName = "10.0.0.1:8448".try_into()?;
+
+	assert_refused_without_a_record(&fixture, &denied, denied_address).await;
+	assert!(federation.denies_route(&denied).await);
+
+	Ok(())
+}
+
+fn denied_address(error: &Error) -> bool {
+	error
+		.to_string()
+		.contains("Not allowed to send requests to this IP")
+}
+
+#[tokio::test]
+async fn denied_cached_route_records_no_peer_status() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let federation = &fixture.services.federation;
+	let logical: OwnedServerName = "logical.example".try_into()?;
+	let route = |socket: &str| CachedDest {
+		dest: FedDest::Literal(socket.parse().expect("test socket parses")),
+		host: logical.as_str().into(),
+		expire: CachedDest::default_expire(),
+		srv: false,
+	};
+
+	assert!(!federation.denies_route(&logical).await, "nothing is cached yet");
+
+	let cache = &fixture.services.resolver.cache;
+
+	cache.set_destination(&logical, &route("10.0.0.1:8448"));
+	assert_refused_without_a_record(&fixture, &logical, denied_address).await;
+	assert!(federation.denies_route(&logical).await);
+
+	cache.set_destination(&logical, &route("8.8.8.8:8448"));
+	assert!(!federation.denies_route(&logical).await);
+
+	let shorthand = CachedDest {
+		dest: FedDest::Named("127.1".into(), FedDest::default_port()),
+		..route("8.8.8.8:8448")
+	};
+
+	cache.set_destination(&logical, &shorthand);
+	assert_refused_without_a_record(&fixture, &logical, denied_address).await;
+	assert!(federation.denies_route(&logical).await, "a numeric host is an address");
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn self_destination_records_no_peer_status() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let federation = &fixture.services.federation;
+	let own = fixture.services.globals.server_name();
+	let refusal = "Won't send federation request to ourselves";
+	let refused = federation
+		.execute(own, VersionRequest {})
+		.await
+		.expect_err("federation loopback is off");
+
+	assert!(refused.to_string().contains(refusal), "{refused}");
+	assert!(!federation.peer_has_failures(own).await);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn shutdown_records_no_peer_status() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let federation = &fixture.services.federation;
+	let stopping = &fixture.services.server.stopping;
+	let interrupted = Error::from(IoError::from(Interrupted));
+	let failed = err!("transport failed");
+	let remote: OwnedServerName = "remote.example".try_into()?;
+
+	federation.record_error(&remote, &interrupted);
+	assert!(!federation.peer_has_failures(&remote).await, "an interrupted request");
+
+	stopping.store(true, Ordering::Relaxed);
+	federation.record_error(&remote, &failed);
+
+	let resolved = federation
+		.execute(&remote, VersionRequest {})
+		.await;
+
+	stopping.store(false, Ordering::Relaxed);
+
+	let error = resolved.expect_err("resolution stops at shutdown");
+
+	assert!(error.is_interrupted(), "{error}");
+	assert!(!federation.peer_has_failures(&remote).await, "a failure while stopping");
+
+	federation.record_error(&remote, &failed);
+	assert!(federation.peer_has_failures(&remote).await, "a failure while running");
 
 	Ok(())
 }
