@@ -145,6 +145,11 @@ where
 /// Interrupted errors and errors observed during shutdown record nothing
 /// either.
 #[implement(super::Service)]
+#[tracing::instrument(
+	name = "fed",
+	level = INFO_SPAN_LEVEL,
+	skip(self, client, request),
+)]
 pub async fn execute_on<T>(
 	&self,
 	client: &Federation,
@@ -166,6 +171,7 @@ where
 /// Other federation entry points retain the configured loopback gate. A request
 /// this server refuses before contacting the peer records nothing.
 #[implement(super::Service)]
+#[tracing::instrument(name = "fed", level = "debug", skip(self, client, request))]
 pub(super) async fn execute_on_allow_self<T>(
 	&self,
 	client: &Federation,
@@ -189,11 +195,6 @@ where
 /// records success. Interrupted errors and errors observed during shutdown
 /// record nothing.
 #[implement(super::Service)]
-#[tracing::instrument(
-	name = "fed",
-	level = "debug",
-	skip(self, client, request, allow_self)
-)]
 async fn execute_counted<T>(
 	&self,
 	client: &Federation,
