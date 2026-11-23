@@ -2,23 +2,22 @@
 //!
 //! Power levels and joined-member distribution produce prospective routing
 //! servers, while inbound invite hints are kept in a compact aggregate row.
-//! The aggregate reader exposes only the final stored server from each row.
+//! The aggregate reader exposes only the final server stored for the room.
 
 use std::cmp::Reverse;
 
-use futures::{Stream, StreamExt, stream::iter};
+use futures::{FutureExt, Stream, StreamExt, stream::iter};
 use ruma::{
 	OwnedServerName, RoomId, ServerName,
 	events::{StateEventType, room::power_levels::RoomPowerLevelsEventContent},
 	int,
 };
 use tuwunel_core::{
-	Result, implement,
-	itertools::Itertools,
-	utils::{StreamTools, stream::TryIgnore},
-	warn,
+	Result, err, implement, itertools::Itertools, result::NotFound, utils::StreamTools, warn,
 };
-use tuwunel_database::{Ignore, Txn};
+use tuwunel_database::{Handle, Txn, deserialize_from_slice};
+
+type Hints<'a> = Vec<&'a ServerName>;
 
 /// Merges invitation routing hints into the caller's membership transaction.
 ///
@@ -35,7 +34,6 @@ pub(crate) async fn add_servers_invite_via(
 ) {
 	let servers = self
 		.servers_invite_via(room_id)
-		.map(ToOwned::to_owned)
 		.chain(iter(servers.into_iter()))
 		.collect::<Vec<_>>()
 		.await
@@ -111,24 +109,39 @@ pub async fn popular_servers(&self, room_id: &RoomId) -> Vec<OwnedServerName> {
 		.collect()
 }
 
-/// Streams the final routing hint from each matching aggregate row.
+/// Streams the final routing hint stored under exactly this room's key.
 ///
-/// The current room-keyed representation stores several servers in one value,
-/// but this accessor exposes only the last decoded server and therefore at most
-/// one item per room. Storage and decoding failures are skipped. Yielded names
-/// borrow the cursor and are invalid after the next poll; consume or own each
-/// item before advancing.
+/// The row stores several servers in one value, but this accessor exposes only
+/// the last decoded server and therefore at most one item. A missing row yields
+/// nothing, and a storage or decoding failure is logged and yields nothing.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn servers_invite_via<'a>(
 	&'a self,
 	room_id: &'a RoomId,
-) -> impl Stream<Item = &ServerName> + Send + 'a {
-	type KeyVal<'a> = (Ignore, Vec<&'a ServerName>);
+) -> impl Stream<Item = OwnedServerName> + Send + 'a {
+	let last_hint = move |servers: Result<Handle<'_>>| {
+		servers
+			.and_then(|servers| last_server(&servers))
+			.present()
+			.inspect_err(|error| warn!(%room_id, %error, "Unreadable invite routing hints."))
+			.ok()
+			.flatten()
+	};
 
 	self.db
 		.roomid_inviteviaservers
-		.stream_raw_prefix(room_id)
-		.ignore_err()
-		.map(|(_, servers): KeyVal<'_>| *servers.last().expect("at least one server"))
+		.get(room_id)
+		.map(last_hint)
+		.map(iter)
+		.flatten_stream()
+}
+
+fn last_server(servers: &[u8]) -> Result<OwnedServerName> {
+	let servers: Hints<'_> = deserialize_from_slice(servers)?;
+
+	servers
+		.last()
+		.map(|&server| server.to_owned())
+		.ok_or_else(|| err!(Database("Invite routing hints hold no server.")))
 }

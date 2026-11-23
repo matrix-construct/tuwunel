@@ -1472,7 +1472,6 @@ pub(super) async fn get_servers_for_room(
 	let additional_servers = services
 		.state_cache
 		.servers_invite_via(room_id)
-		.map(ToOwned::to_owned)
 		.collect::<Vec<_>>();
 
 	let invite_state = services

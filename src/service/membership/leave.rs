@@ -275,8 +275,7 @@ async fn remote_leave(
 	let invite_servers = self
 		.services
 		.state_cache
-		.servers_invite_via(room_id)
-		.map(ToOwned::to_owned);
+		.servers_invite_via(room_id);
 
 	let room_servers = self
 		.services

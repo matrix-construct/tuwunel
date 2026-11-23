@@ -144,7 +144,6 @@ pub async fn get_client_hierarchy(
 			services
 				.state_cache
 				.servers_invite_via(room_id)
-				.map(ToOwned::to_owned)
 				.collect()
 				.await,
 	};

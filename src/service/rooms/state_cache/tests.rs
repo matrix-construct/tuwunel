@@ -1,7 +1,8 @@
 use futures::StreamExt;
 use minicbor_serde::tag::Required;
 use ruma::{
-	OwnedRoomId, event_id, events::room::member::MembershipState, room_id, serde::Raw, user_id,
+	OwnedRoomId, event_id, events::room::member::MembershipState, room_id, serde::Raw,
+	server_name, user_id,
 };
 use serde_json::{Value as JsonValue, json};
 use tuwunel_core::{Result, config::Figment};
@@ -101,6 +102,48 @@ async fn room_lists_stop_at_the_user_id_boundary() -> Result {
 
 		assert_eq!(rooms, [own.to_owned()]);
 	}
+
+	Ok(())
+}
+
+/// A room's invite routing hints come from the row keyed by that exact room ID,
+/// not from a room whose server name extends it.
+///
+/// An empty row yields no hint rather than a panic.
+#[tokio::test]
+async fn invite_routing_hints_stop_at_the_room_id_boundary() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let cache = &services.state_cache;
+	let alice = user_id!("@alice:localhost");
+	let own = room_id!("!own:example.test");
+	let bare = room_id!("!bare:example.test");
+	let invites = [
+		(room_id!("!own:example.test.extra"), server_name!("z.example")),
+		(own, server_name!("a.example")),
+		(room_id!("!bare:example.test.extra"), server_name!("y.example")),
+	];
+
+	for (count, (room, via)) in (1..).zip(invites) {
+		cache
+			.update_membership(MembershipUpdate {
+				invite_via: Some([via.to_owned()].into()),
+				update_joined_count: false,
+				..membership_update(room, alice, MembershipState::Invite, count)
+			})
+			.await?;
+	}
+
+	let servers: Vec<_> = cache.servers_invite_via(own).collect().await;
+
+	assert_eq!(servers, [server_name!("a.example").to_owned()]);
+	assert_eq!(cache.servers_invite_via(bare).count().await, 0, "read a longer room's hints");
+
+	services.db["roomid_inviteviaservers"].insert(bare.as_bytes(), b"");
+	assert_eq!(cache.servers_invite_via(bare).count().await, 0, "an empty row yielded a server");
 
 	Ok(())
 }
