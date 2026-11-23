@@ -194,7 +194,7 @@ fn compute_topology(
 
 /// Determine an ideal max worker count based on true capacity. The true value
 /// is rarely attainable in a thread-worker model so the result is clamped by
-/// both the rlimit-derived budget and the static `WORKER_LIMIT` range.
+/// both the thread-limit budget and the static `WORKER_LIMIT` range.
 fn compute_max_workers(
 	devices: &MultiDevice,
 	default_worker_count: Option<usize>,

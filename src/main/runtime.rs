@@ -61,7 +61,7 @@ pub fn new(args: Option<&crate::Args>) -> Result<Self> {
 	let args = args.unwrap_or_else(|| args_default.as_ref().expect("default arguments"));
 
 	let max_blocking_threads = max_threads()
-		.expect("obtained RLIMIT_NPROC or default")
+		.expect("obtained the thread limit or default")
 		.0
 		.saturating_div(3)
 		.clamp(WORKER_THREAD_MIN, BLOCKING_THREAD_MAX);
