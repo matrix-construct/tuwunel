@@ -31,6 +31,8 @@ use crate::{
 	},
 };
 
+mod unreadable_state;
+
 type StateEvent<'a> = (u64, &'a EventId, &'a str, &'a str, Value);
 
 type Message<'a> = (ShortRoomId, &'a RoomId, u64, &'a EventId);

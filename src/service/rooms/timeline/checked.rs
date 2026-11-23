@@ -1,19 +1,22 @@
-//! Check-only reads of timeline events.
+//! Reads of timeline events that do not trust the event's timeline mapping.
 //!
 //! The live readers panic on an `eventid_pduid` mapping of the wrong length, so
-//! integrity checks read through here, where that mapping is `Mapped::Damaged`.
-//! `get_checked` reads as `get` does, racing the accepted branch (the mapping,
-//! then the row) against the outlier copy, so a check reports a damaged mapping
-//! only where `get` would panic and misses it when an outlier copy is found
-//! first. `get_checked_keeping` reads the accepted branch before the outlier as
-//! `get_room_version` does, so it always reports one. A copy is decoded as a
-//! release build of the live readers decodes it, without a debug build's
-//! assertion that no further record follows the event's.
+//! integrity checks and visibility decisions read through here, where that
+//! mapping is `Mapped::Damaged`. `get_checked` reads as `get` does, racing the
+//! accepted branch (the mapping, then the row) against the outlier copy, so an
+//! outlier copy that wins the race masks a damaged mapping, as `get` returns
+//! that copy too. `get_checked_keeping` reads the accepted branch first, as
+//! `get_room_version` does, so it returns `Mapped::Damaged` for every mapping
+//! that does not decode. Like the live readers in a release build, these reads
+//! decode an event without checking for a record trailing it.
+//!
+//! The reads on the visibility path carry no span, as the live readers carry
+//! none: span frames there overflow the debug-build worker stack.
 
 use futures::{FutureExt, TryFutureExt, future::try_join};
 use ruma::EventId;
 use serde::Deserialize;
-use tuwunel_core::{Error, Result, implement, result::NotFound};
+use tuwunel_core::{Err, Error, Result, implement, result::NotFound};
 
 use super::{RawPduId, Service};
 use crate::integrity::leading_json;
@@ -57,7 +60,6 @@ pub(crate) enum Mapped<T> {
 /// damage goes unreported, as `get` returns that copy. When both fail, the
 /// accepted error is returned unless its row is missing.
 #[implement(Service)]
-#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn get_checked<T>(&self, event_id: &EventId) -> Result<Mapped<T>>
 where
 	T: for<'de> Deserialize<'de>,
@@ -138,7 +140,6 @@ where
 /// A failed or absent read keeps its error, as there, and a mapping that does not
 /// decode is `Mapped::Damaged` where that function panics.
 #[implement(Service)]
-#[tracing::instrument(level = "debug", skip_all)]
 async fn pdu_id_checked(&self, event_id: &EventId) -> Mapped<Result<RawPduId>> {
 	match self.db.eventid_pduid.get(event_id).await {
 		| Err(error) => Mapped::Event(Err(error)),
@@ -154,7 +155,6 @@ async fn pdu_id_checked(&self, event_id: &EventId) -> Mapped<Result<RawPduId>> {
 /// the event's, beyond one trailing separator, while this reads such a row as a
 /// release build reads it.
 #[implement(Service)]
-#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn get_from_id_checked<T>(&self, pdu_id: &RawPduId) -> Result<T>
 where
 	T: for<'de> Deserialize<'de>,
@@ -170,7 +170,6 @@ where
 /// Like `get_from_id_checked`, it reads a row holding a further record after the
 /// event's as a release build reads it, where a debug build panics.
 #[implement(Service)]
-#[tracing::instrument(level = "debug", skip_all)]
 async fn get_outlier_checked<T>(&self, event_id: &EventId) -> Result<T>
 where
 	T: for<'de> Deserialize<'de>,
@@ -185,7 +184,6 @@ where
 /// `get_pdu_id` panics on a mapping that is not a PDU id, which this reports.
 /// Only a missing record is `Absent`; any other read error propagates.
 #[implement(Service)]
-#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn pdu_position(&self, event_id: &EventId) -> Result<Position> {
 	let position = self
 		.db
@@ -198,6 +196,19 @@ pub(crate) async fn pdu_position(&self, event_id: &EventId) -> Result<Position> 
 		});
 
 	Ok(position)
+}
+
+/// Returns the event's PDU id, or `None` when it has no timeline position.
+///
+/// A mapping that does not decode is an error, for a reader that must neither
+/// panic on it as `get_pdu_id` does nor take it for an absent one.
+#[implement(Position)]
+pub(crate) fn pdu_id(self, event_id: &EventId) -> Result<Option<RawPduId>> {
+	match self {
+		| Self::Absent => Ok(None),
+		| Self::Damaged => Err!(Database("The timeline position of {event_id} is damaged.")),
+		| Self::At(pdu_id) => Ok(Some(pdu_id)),
+	}
 }
 
 /// Transforms the event a read found, keeping a damaged mapping as it is.

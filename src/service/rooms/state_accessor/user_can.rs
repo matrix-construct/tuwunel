@@ -24,7 +24,7 @@ use tuwunel_core::{
 };
 use tuwunel_matrix::{Event, PduCount, StateKey, pdu::PduBuilder};
 
-use crate::rooms::{short::ShortStateHash, state::RoomMutexGuard, timeline::Position};
+use crate::rooms::{short::ShortStateHash, state::RoomMutexGuard};
 
 /// The state an event's visibility is judged against.
 ///
@@ -254,19 +254,18 @@ where
 	Pdu: Event + 'a,
 {
 	let event_id = pdu.event_id();
-
-	match self
+	let position = self
 		.services
 		.timeline
 		.pdu_position(event_id)
-		.await?
-	{
-		| Position::Absent => Ok(false),
-		| Position::Damaged => Err!(Database("The timeline position of {event_id} is damaged.")),
-		| Position::At(_) =>
-			self.visible_at(user_id, pdu, shortstatehash, Ok(after))
-				.await,
+		.await?;
+
+	if position.pdu_id(event_id)?.is_none() {
+		return Ok(false);
 	}
+
+	self.visible_at(user_id, pdu, shortstatehash, Ok(after))
+		.await
 }
 
 /// Judges an event under the history visibility of its snapshot.
@@ -417,7 +416,8 @@ where
 /// Whether a former member's latest leave falls no earlier than the event.
 ///
 /// A user who never joined, or whose leave or the event's position is
-/// missing, is denied; a failed read is an error.
+/// missing, is denied; a failed read or a position that does not decode is an
+/// error.
 #[implement(super::Service)]
 async fn departed_after<Pdu>(&self, pdu: &Pdu, user_id: &UserId) -> Result<bool>
 where
@@ -425,6 +425,7 @@ where
 {
 	let state_cache = &self.services.state_cache;
 	let room_id = pdu.room_id();
+	let event_id = pdu.event_id();
 
 	if state_cache
 		.try_once_joined(user_id, room_id)
@@ -442,14 +443,15 @@ where
 		return Ok(false);
 	};
 
-	let event_count = self
+	let pdu_id = self
 		.services
 		.timeline
-		.get_pdu_count(pdu.event_id())
-		.await
-		.present()?;
+		.pdu_position(event_id)
+		.await?
+		.pdu_id(event_id)?;
 
-	let visible = event_count.is_some_and(|count| count <= PduCount::from_unsigned(left_count));
+	let visible =
+		pdu_id.is_some_and(|pdu_id| pdu_id.pdu_count() <= PduCount::from_unsigned(left_count));
 
 	Ok(visible)
 }

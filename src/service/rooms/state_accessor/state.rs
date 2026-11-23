@@ -23,7 +23,7 @@ use ruma::{
 };
 use serde::Deserialize;
 use tuwunel_core::{
-	Error, Result, at, err, implement, pair_of,
+	Err, Error, Result, at, err, implement, pair_of,
 	utils::{
 		result::{FlatOk, NotFound},
 		stream::{
@@ -36,6 +36,7 @@ use tuwunel_matrix::{Event, Pdu, StateKey};
 use crate::rooms::{
 	short::{ShortEventId, ShortStateHash, ShortStateKey},
 	state_compressor::{CompressedState, compress_state_event, parse_compressed_state_event},
+	timeline::Mapped,
 };
 
 type Listing = ((Vec<StateKey>, Vec<ShortEventId>), Vec<Error>);
@@ -131,11 +132,9 @@ pub async fn user_membership_at_pdu(&self, user_id: &UserId, pdu: &Pdu) -> Membe
 /// [`HistoryVisibility::Shared`], as the spec directs.
 #[implement(super::Service)]
 pub async fn history_visibility(&self, shortstatehash: ShortStateHash) -> HistoryVisibility {
-	self.state_get_content(shortstatehash, &StateEventType::RoomHistoryVisibility, "")
+	self.try_history_visibility(shortstatehash)
+		.unwrap_or_else(|_| HistoryVisibility::Shared)
 		.await
-		.map_or(HistoryVisibility::Shared, |c: RoomHistoryVisibilityEventContent| {
-			c.history_visibility
-		})
 }
 
 /// Returns the room's history visibility in a selected state snapshot.
@@ -205,8 +204,12 @@ where
 
 	self.services
 		.timeline
-		.get_pdu(&event_id)
-		.map_ok(|event| event.get_content().ok())
+		.get_checked(&event_id)
+		.map(|event: Result<Mapped<Pdu>>| match event? {
+			| Mapped::Damaged =>
+				Err!(Database("The timeline position of {event_id} is damaged.")),
+			| Mapped::Event(event) => Ok(event.get_content().ok()),
+		})
 		.await
 }
 

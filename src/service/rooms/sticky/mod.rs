@@ -195,19 +195,20 @@ pub async fn indexed_unexpired(&self, event_id: &EventId, now: u64) -> bool {
 		.is_ok_and(|until| u64_from_bytes(&until).is_ok_and(|until| until > now))
 }
 
-/// Whether an accepted event has an index row still unexpired at `now`,
-/// returning a failed read as an error.
+/// Checks whether an accepted event has an index row that expires after `now`.
 ///
-/// A missing event or index row is `false`, as in `indexed_unexpired`.
+/// An event without a timeline position or an index row is `false`, as in
+/// `indexed_unexpired`. A timeline mapping that does not decode, or any other
+/// failed read, is an error.
 #[implement(Service)]
 #[tracing::instrument(level = "trace", skip_all)]
 pub async fn try_indexed_unexpired(&self, event_id: &EventId, now: u64) -> Result<bool> {
 	let Some(pdu_id) = self
 		.services
 		.timeline
-		.get_pdu_id(event_id)
-		.await
-		.present()?
+		.pdu_position(event_id)
+		.await?
+		.pdu_id(event_id)?
 	else {
 		return Ok(false);
 	};
