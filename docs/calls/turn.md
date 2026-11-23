@@ -167,7 +167,9 @@ token_file = "/etc/tuwunel/.turn_endpoint_token"
 
 When `token` or `token_file` is set, Tuwunel sends the token in the
 `Authorization` header as a bearer token. Query parameters already in `url`
-are kept, so an API key in the query is preserved.
+are kept, so an API key in the query is preserved. If `url` already has a
+`service` or `ttl` parameter, Tuwunel drops it and sends its own value, so
+the provider sees each of those once.
 
 #### Shared credentials and failures
 
