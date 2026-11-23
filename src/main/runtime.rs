@@ -1,5 +1,7 @@
 #![cfg_attr(not(tokio_unstable), expect(unused))]
 
+#[cfg(debug_assertions)]
+use std::env::var_os;
 use std::{
 	cell::OnceCell,
 	io,
@@ -53,6 +55,8 @@ const BLOCKING_THREAD_NAME: &str = "tuwunel:spawned";
 const BLOCKING_THREAD_MAX: usize = 1024;
 const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 const DISABLE_MUZZY_THRESHOLD: usize = 8;
+#[cfg(debug_assertions)]
+const DEBUG_STACK_SIZE: usize = 4 * 1024 * 1024;
 
 #[implement(Runtime)]
 pub fn new(args: Option<&crate::Args>) -> Result<Self> {
@@ -101,6 +105,9 @@ fn build_tokio(
 		.max_io_events_per_tick(args.kernel_events_per_tick)
 		.max_io_events_per_busy_tick(args.kernel_events_per_busy_tick);
 
+	#[cfg(debug_assertions)]
+	enable_debug_stack(&mut builder);
+
 	state.enable_hooks(&mut builder);
 
 	#[cfg(tokio_unstable)]
@@ -110,6 +117,19 @@ fn build_tokio(
 	enable_sched_histogram(&mut builder, args);
 
 	builder.build()
+}
+
+/// Sets a 4 MiB runtime thread stack when debug assertions are on and
+/// `RUST_MIN_STACK` is unset.
+///
+/// Unoptimized poll frames carry deep request paths past the 2 MiB default. An
+/// explicit `RUST_MIN_STACK` keeps sizing the threads, so a stack-margin probe
+/// still works.
+#[cfg(debug_assertions)]
+fn enable_debug_stack(builder: &mut Builder) {
+	if var_os("RUST_MIN_STACK").is_none() {
+		builder.thread_stack_size(DEBUG_STACK_SIZE);
+	}
 }
 
 impl Drop for Runtime {
