@@ -42,7 +42,7 @@ use tuwunel_core::{
 		content_disposition::make_content_disposition,
 		deadline_has_passed, deserialize_lenient_bool,
 		hash::sha256,
-		html::escape as html_escape,
+		html::escape_template_value,
 		result::{FlatOk, LogErr},
 		stream::ReadyExt,
 		string::EMPTY,
@@ -712,16 +712,11 @@ fn confirm_login_redirect(
 	cookie: &str,
 	provider_id: &str,
 ) -> Result<Response> {
-	let escape = |value: &str| {
-		html_escape(value)
-			.replace('{', "&#123;")
-			.replace('}', "&#125;")
-	};
-
-	let user = escape(user_id.as_str());
-	let target = escape(&display_login_target(redirect_url.clone()));
+	let user = escape_template_value(user_id.as_str());
+	let login_target = display_login_target(redirect_url.clone());
+	let target = escape_template_value(&login_target);
 	let location = finalize_login_redirect(services, redirect_url, user_id, Some(provider_id));
-	let location = html_escape(&location);
+	let location = escape_template_value(&location);
 	let html = CONFIRM_HTML
 		.replace("{user}", &user)
 		.replace("{target}", &target)

@@ -17,7 +17,11 @@ use tuwunel_core::{
 	config::IdentityProvider,
 	err,
 	smallstr::SmallString,
-	utils::{BoolExt, hash::verify_password, html::escape as html_escape},
+	utils::{
+		BoolExt,
+		hash::verify_password,
+		html::{escape as html_escape, escape_template_value},
+	},
 	warn,
 };
 use tuwunel_service::{Services, users::Register};
@@ -780,9 +784,7 @@ where
 	let options = providers
 		.into_iter()
 		.map(|(id, name)| {
-			let name = html_escape(name)
-				.replace('{', "&#123;")
-				.replace('}', "&#125;");
+			let name = escape_template_value(name);
 
 			(url_encode(id), name)
 		})

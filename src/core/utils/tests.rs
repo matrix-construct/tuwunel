@@ -1,4 +1,5 @@
 use std::{
+	borrow::Cow,
 	future::Ready,
 	panic::{AssertUnwindSafe, catch_unwind},
 	pin::Pin,
@@ -25,6 +26,7 @@ use crate::{
 		IterStream, MutexMap, budget,
 		debug::str_truncated,
 		future::OptionFutureExt,
+		html::{escape, escape_template_value},
 		increment,
 		json::is_empty_object,
 		math::usize_from_f64,
@@ -614,4 +616,11 @@ fn is_empty_object_holds_only_for_an_object_without_members() {
 
 	assert!(empty.iter().all(|json| is_empty_object(json)));
 	assert!(filled.iter().all(|json| !is_empty_object(json)));
+}
+
+#[test]
+fn template_values_cannot_carry_a_placeholder() {
+	assert_eq!(escape_template_value("<b>{tok}</b>"), "&lt;b&gt;&#123;tok&#125;&lt;/b&gt;");
+	assert_eq!(escape(r#"&amp;<>"'`{}"#), "&amp;amp;&lt;&gt;&quot;&#x27;&#x60;{}");
+	assert!(matches!(escape_template_value("plain"), Cow::Borrowed("plain")));
 }
