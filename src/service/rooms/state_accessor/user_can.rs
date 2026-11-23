@@ -119,29 +119,37 @@ pub async fn user_can_redact(
 /// is visible under `joined` and `invited` when the membership it sets
 /// qualifies, and a change of history visibility is visible when either the
 /// value before it or the value it sets allows the user.
+///
+/// An accepted, unexpired sticky event (MSC4354) is visible to a user joined to
+/// the room whatever its history visibility, and even when the event's state
+/// fails to read, though not when the room has no state at all.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "trace")]
 pub async fn user_can_see_event<Pdu>(&self, user_id: &UserId, pdu: &Pdu) -> bool
 where
 	Pdu: Event,
 {
-	let Ok(Some(snapshot)) = self.event_snapshot(pdu).await else {
-		return false;
+	let visible = match self.event_snapshot(pdu).await {
+		| Ok(None) => return false,
+		| Err(error) => Err(error),
+		| Ok(Some(snapshot)) => {
+			let history_visibility = self
+				.history_visibility(snapshot.shortstatehash)
+				.await;
+
+			let before = self
+				.visible_at(user_id, pdu, snapshot.shortstatehash, Ok(history_visibility))
+				.await;
+
+			let after = self
+				.after_side(user_id, pdu, snapshot, &before)
+				.await;
+
+			either_side(before, after)
+		},
 	};
 
-	let history_visibility = self
-		.history_visibility(snapshot.shortstatehash)
-		.await;
-
-	let before = self
-		.visible_at(user_id, pdu, snapshot.shortstatehash, Ok(history_visibility))
-		.await;
-
-	let after = self
-		.after_side(user_id, pdu, snapshot, &before)
-		.await;
-
-	self.or_sticky(user_id, pdu, either_side(before, after))
+	self.or_sticky(user_id, pdu, visible)
 		.unwrap_or_else(|_| false)
 		.await
 }
@@ -150,11 +158,13 @@ where
 /// denial.
 ///
 /// Grants and denials follow [`Self::user_can_see_event`]. A failed read of the
-/// snapshot, its history-visibility event or a membership record is an error
-/// here, where that function denies it or, for history visibility, assumes
-/// `shared`. Absent history visibility is still `shared`, an absent member
-/// event still `leave`, and an event recorded without state in a room without
-/// any is still denied.
+/// snapshot, its history-visibility event or a membership record is returned as
+/// an error unless another check grants the event regardless, such as the
+/// sticky grant. On a failed history-visibility read `user_can_see_event`
+/// assumes `shared` instead, and on any other it denies the event unless such a
+/// check grants it. Absent history visibility is still `shared`, an absent
+/// member event still `leave`, and an event recorded without state in a room
+/// without any is still denied.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "trace")]
 pub async fn try_user_can_see_event<Pdu>(&self, user_id: &UserId, pdu: &Pdu) -> Result<bool>
@@ -269,6 +279,9 @@ where
 }
 
 /// Judges an event under the history visibility of its snapshot.
+///
+/// Read errors are returned to the caller, which can still grant a sticky
+/// event.
 #[implement(super::Service)]
 async fn visible_at<Pdu>(
 	&self,

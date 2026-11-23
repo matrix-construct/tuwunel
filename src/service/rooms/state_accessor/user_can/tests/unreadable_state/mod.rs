@@ -143,6 +143,85 @@ async fn damaged_event_position_is_a_failed_read() -> Result {
 	Ok(())
 }
 
+/// A joined user's sticky event is visible even when its recorded state cannot
+/// be read.
+///
+/// The event is unexpired and indexed, and its snapshot pointer is corrupt. Both
+/// entry points grant it to the owner. A stranger is still denied, and to
+/// `try_user_can_see_event` the failed read stays an error.
+#[tokio::test]
+async fn sticky_grant_outlasts_an_unreadable_snapshot() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room = room_id!("!pinned:localhost");
+	let owner = user_id!("@owner:localhost");
+	let stranger = user_id!("@stranger:localhost");
+	let create = event_id!("$create:localhost");
+	let join = event_id!("$join:localhost");
+	let pinned = event_id!("$pinned:localhost");
+	let shortroomid = services
+		.short
+		.get_or_create_shortroomid(room)
+		.await;
+
+	let create_content = json!({ "creator": owner, "room_version": "10" });
+	let state_events = [
+		(1, create, "m.room.create", "", create_content),
+		(2, join, "m.room.member", owner.as_str(), json!({ "membership": "join" })),
+	];
+
+	store_state(services, shortroomid, room, owner, &state_events);
+	store(services, shortroomid, 3, pinned, &sticky_message(pinned, room, owner));
+
+	let state = compress_states(services, &state_events).await;
+
+	save_room_state(services, room, Arc::new(state)).await?;
+	set_memberships(services, owner, [(room, owner, MembershipState::Join, 2)]).await?;
+
+	let pdu_id = services.timeline.get_pdu_id(pinned).await?;
+	let shorteventid = services
+		.short
+		.get_or_create_shorteventid(pinned)
+		.await;
+
+	let pinned = services.timeline.get_pdu(pinned).await?;
+	let until = pinned
+		.sticky_until(now_millis())
+		.expect("the event is sticky");
+
+	services.db["pduid_stickyuntil"].insert(pdu_id.as_bytes(), until.to_be_bytes());
+	services.db["shorteventid_shortstatehash"].insert(&shorteventid.to_be_bytes(), [0xFF_u8]);
+
+	let accessor = &services.state_accessor;
+	let owner_seen = accessor
+		.try_user_can_see_event(owner, &pinned)
+		.await?;
+
+	assert!(owner_seen, "an unreadable snapshot outweighed the sticky grant");
+
+	assert!(
+		accessor.user_can_see_event(owner, &pinned).await,
+		"an unreadable snapshot outweighed the sticky grant"
+	);
+
+	let stranger_seen = accessor
+		.try_user_can_see_event(stranger, &pinned)
+		.await;
+
+	assert!(stranger_seen.is_err(), "a failed snapshot read became a decision");
+
+	let stranger_granted = accessor
+		.user_can_see_event(stranger, &pinned)
+		.await;
+
+	assert!(!stranger_granted, "a sticky event reached a user not joined");
+
+	Ok(())
+}
+
 fn sticky_message(id: &EventId, room_id: &RoomId, sender: &UserId) -> Value {
 	let content = json!({ "msgtype": "m.text", "body": "sticky" });
 	let pdu = pdu_json(id, room_id, sender, "m.room.message", &content);
