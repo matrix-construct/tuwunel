@@ -153,8 +153,8 @@ pub struct Registration {
 	/// Failed joins are logged without failing registration.
 	///
 	/// reloadable: yes
-	/// example: ["#tuwunel:grin.hu",
-	/// "!l2xV0sd51lraysuRcsWVECge4NULaH3g-ou95vgDgiM"]
+	/// example: ["#tuwunel:tuwunel.love",
+	/// "!N8unjEIwmEJYneu9sq0dHB5ZvxckhwF6xPZQ8nEkQgg"]
 	///
 	/// default: []
 	/// legacy: auto_join_rooms
