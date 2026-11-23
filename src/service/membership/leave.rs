@@ -15,7 +15,7 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Err, Error, Result, async_noinline, debug_info, debug_warn, implement,
+	Err, Error, Result, async_noinline, debug_info, debug_warn, err, implement,
 	utils::{FutureBoolExt, future::ReadyBoolExt, millis_since_unix_epoch},
 	warn,
 };
@@ -377,7 +377,11 @@ async fn remote_leave(
 
 	let room_version_rules = room_version::rules(&room_version_id)?;
 
-	let template = template_event("make_leave", &make_leave_response.event)?;
+	let template = template_event("make_leave", &make_leave_response.event).map_err(|e| {
+		err!(BadServerResponse(
+			"Bad make_leave template from {remote_server} for {room_id}: {e}"
+		))
+	})?;
 
 	let content = self
 		.services
