@@ -696,7 +696,7 @@ async fn absent(services: &Services, room_id: &RoomId, user_id: &str) -> bool {
 		.state_accessor
 		.room_state_get(room_id, &StateEventType::RoomMember, user_id)
 		.await
-		.is_not_found()
+		.is_missing()
 }
 
 /// Takes the latest invite the stub was sent.

@@ -520,17 +520,17 @@ async fn serverless_refusal(&self, room_id: &RoomId) -> Error {
 		.get_room_shortstatehash(room_id)
 		.await
 	{
+		| Err(error) if !error.is_missing() => error,
+		| Err(_) => err!(Request(NotFound(
+			"Room is unknown to this server and no servers were provided to join it over \
+			 federation."
+		))),
 		| Ok(_) => {
 			let message = "no forward extremities to join on; join through a server in the room";
 			let room_id = room_id.to_owned();
 
 			err!(InconsistentRoomState(message, room_id))
 		},
-		| Err(error) if !error.is_not_found() => error,
-		| Err(_) => err!(Request(NotFound(
-			"Room is unknown to this server and no servers were provided to join it over \
-			 federation."
-		))),
 	}
 }
 
