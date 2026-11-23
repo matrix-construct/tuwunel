@@ -68,9 +68,11 @@ pub struct Profile {
 	pub max_fields_per_request: usize,
 
 	/// Allows standard users to set or clear display names through the client
-	/// profile API.
+	/// profile API and the account management page.
 	///
-	/// Server admins and appservices can always change display names.
+	/// Server admins and appservices can always change display names. With
+	/// this off, the account management page shows a standard user's display
+	/// name read-only.
 	///
 	/// reloadable: yes
 	/// default: true

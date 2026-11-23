@@ -357,6 +357,32 @@ fn overlay_holds(member: &RoomMemberEventContent, writes: &[&ProfileValue]) -> b
 			.all(|write| member_holds(member, write))
 }
 
+/// Whether a user may change a profile field under
+/// `profile.enable_set_displayname` and `profile.enable_set_avatar_url`.
+///
+/// Fields without an option are always allowed. Appservices and server admins
+/// are exempt. `is_admin` is awaited only when the field's option is off and
+/// the caller is not an appservice.
+#[implement(Service)]
+pub async fn may_set_field<IsAdmin>(
+	&self,
+	field: &ProfileFieldName,
+	appservice: bool,
+	is_admin: IsAdmin,
+) -> bool
+where
+	IsAdmin: AsyncFnOnce() -> bool,
+{
+	let profile = &self.services.config.profile;
+	let enabled = match field {
+		| ProfileFieldName::DisplayName => profile.enable_set_displayname,
+		| ProfileFieldName::AvatarUrl => profile.enable_set_avatar_url,
+		| _ => true,
+	};
+
+	enabled || appservice || is_admin().await
+}
+
 /// Sets a new displayname or removes it if displayname is None. You still
 /// need to notify all rooms of this change.
 #[implement(Service)]

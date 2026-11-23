@@ -22,7 +22,7 @@ use http::{
 	header::{CACHE_CONTROL, CONTENT_TYPE, REFERRER_POLICY},
 };
 use itertools::Itertools;
-use ruma::{DeviceId, OwnedDeviceId, UserId};
+use ruma::{DeviceId, OwnedDeviceId, UserId, profile::ProfileFieldName};
 use serde_html_form::{from_bytes, from_str};
 use tuwunel_api::router::ACCOUNT_HEAD;
 use tuwunel_core::{
@@ -286,6 +286,10 @@ async fn handle_account_callback(
 			profile_html(services, &user_id, login_token).await,
 
 		| "org.matrix.profile" if method == Method::POST => {
+			if !may_set_displayname(services, &user_id).await {
+				return Err!(Request(Forbidden("Setting the display name has been disabled.")));
+			}
+
 			// Sanitize: strip control chars, limit to 255 Unicode code points.
 			let cleaned_dn: String = params
 				.displayname
@@ -342,6 +346,20 @@ async fn handle_account_callback(
 
 		| _ => Err!(Request(InvalidParam("Unsupported account management action"))),
 	}
+}
+
+/// Whether the user may change their display name on the profile page.
+///
+/// A login-token session is never an appservice's, so only the admin exemption
+/// can lift `profile.enable_set_displayname`. The page shows its form and
+/// accepts a save on the same answer.
+async fn may_set_displayname(services: &Services, user_id: &UserId) -> bool {
+	let is_admin = || services.admin.user_is_admin(user_id);
+
+	services
+		.profile
+		.may_set_field(&ProfileFieldName::DisplayName, false, is_admin)
+		.await
 }
 
 pub(super) fn account_redirect_response(redirect: Redirect) -> Response {

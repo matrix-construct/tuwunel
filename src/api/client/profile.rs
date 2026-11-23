@@ -12,7 +12,7 @@ use ruma::{
 use tuwunel_core::{Err, Result, err, utils::BoolExt};
 use tuwunel_service::{Services, presence::Ping, profile::Propagation};
 
-use crate::{ClientIp, Ruma, utils::may_set_profile_field};
+use crate::{ClientIp, Ruma};
 
 /// Resolve a `PropagateTo` request value against the server default.
 ///
@@ -249,14 +249,20 @@ where
 /// Refuses a profile field change withheld by `profile.enable_set_displayname`
 /// or `profile.enable_set_avatar_url`.
 ///
-/// `may_set_profile_field` decides which fields are gated and who is exempt.
+/// The profile service's `may_set_field` decides which fields are gated and who
+/// is exempt.
 async fn field_check<T>(services: &Services, body: &Ruma<T>, field: &ProfileFieldName) -> Result
 where
 	T: Sync,
 {
+	let appservice = body.appservice_info.is_some();
 	let is_admin = || services.admin.user_is_admin(body.sender_user());
 
-	if may_set_profile_field(services, body, field, is_admin).await {
+	if services
+		.profile
+		.may_set_field(field, appservice, is_admin)
+		.await
+	{
 		return Ok(());
 	}
 

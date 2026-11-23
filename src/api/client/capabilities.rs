@@ -19,7 +19,7 @@ use serde_json::json;
 use tuwunel_core::{Result, utils::BoolExt};
 use tuwunel_service::{Services, delayed_events::Limits};
 
-use crate::{Ruma, utils::may_set_profile_field};
+use crate::Ruma;
 
 /// # `GET /_matrix/client/v3/capabilities`
 ///
@@ -36,8 +36,12 @@ pub(crate) async fn get_capabilities_route(
 		.user_is_admin(body.sender_user())
 		.await;
 
+	let appservice = body.appservice_info.is_some();
 	let may_set = async |field| {
-		may_set_profile_field(&services, &body, &field, || ready(account_moderation)).await
+		services
+			.profile
+			.may_set_field(&field, appservice, || ready(account_moderation))
+			.await
 	};
 
 	let set_displayname = may_set(ProfileFieldName::DisplayName).await;

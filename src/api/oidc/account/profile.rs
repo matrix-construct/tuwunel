@@ -1,9 +1,15 @@
+use std::borrow::Cow;
+
 use const_str::format as const_format;
 use ruma::UserId;
-use tuwunel_core::{Result, utils::html::escape as html_escape};
+use tuwunel_core::{
+	Result,
+	utils::{html::escape_template_value as escape, result::NotFound},
+	warn,
+};
 use tuwunel_service::Services;
 
-use super::ACCOUNT_HEAD;
+use super::{ACCOUNT_HEAD, may_set_displayname};
 
 pub(super) async fn profile_html(
 	services: &Services,
@@ -22,14 +28,14 @@ pub(super) async fn profile_html(
 		.profile
 		.avatar_url(user_id)
 		.await
+		.optional()
+		.inspect_err(|error| warn!(%user_id, %error, "Unreadable avatar omitted."))
 		.ok()
-		.as_ref()
-		.map(ToString::to_string)
-		.as_deref()
-		.map(html_escape);
+		.flatten();
 
 	let avatar_field = avatar_url
-		.as_deref()
+		.as_ref()
+		.map(|avatar_url| escape(avatar_url.as_str()))
 		.map(|avatar_url| {
 			format!(
 				r#"<p class="meta">
@@ -39,15 +45,28 @@ pub(super) async fn profile_html(
 		})
 		.unwrap_or_default();
 
-	Ok(PAGE_HTML
-		.replace("{server}", &html_escape(server))
-		.replace("{uid}", &html_escape(user_id.as_str()))
-		.replace("{tok}", &html_escape(login_token))
-		.replace("{dn}", &html_escape(&displayname))
-		.replace("{avatar_field}", &avatar_field))
+	let page: Cow<'_, str> = if may_set_displayname(services, user_id).await {
+		FORM_PAGE_HTML
+			.replace("{tok}", &escape(login_token))
+			.into()
+	} else {
+		READ_ONLY_PAGE_HTML.into()
+	};
+
+	let html = page
+		.replace("{server}", &escape(server))
+		.replace("{uid}", &escape(user_id.as_str()))
+		.replace("{dn}", &escape(&displayname))
+		.replace("{avatar_field}", &avatar_field);
+
+	Ok(html)
 }
 
-static PAGE_HTML: &str = const_format!(
+static FORM_PAGE_HTML: &str = const_format!("{PAGE_TOP}{FORM}{PAGE_BOTTOM}");
+
+static READ_ONLY_PAGE_HTML: &str = const_format!("{PAGE_TOP}{READ_ONLY}{PAGE_BOTTOM}");
+
+static PAGE_TOP: &str = const_format!(
 	r#"
 <!DOCTYPE html>
 <html lang="en">
@@ -59,24 +78,35 @@ static PAGE_HTML: &str = const_format!(
 		<h1>Profile</h1>
 		<p>
 			Signed in as <strong>{{uid}}</strong> on <strong>{{server}}</strong>.
-		</p>
+		</p>"#
+);
+
+static FORM: &str = r#"
 		<form method="POST" action="/_tuwunel/oidc/account_callback">
 			<input type="hidden" name="action" value="org.matrix.profile" />
-			<input type="hidden" name="loginToken" value="{{tok}}" />
+			<input type="hidden" name="loginToken" value="{tok}" />
 			<label for="dn">Display name</label>
 			<input
 				type="text"
 				id="dn"
 				name="displayname"
-				value="{{dn}}"
+				value="{dn}"
 				maxlength="255"
 				autocomplete="name"
 			/>
-				{{avatar_field}}
+				{avatar_field}
 			<p class="submit-row">
 				<button type="submit">Save</button>
 			</p>
-		</form>
+		</form>"#;
+
+static READ_ONLY: &str = r#"
+		<p class="meta">
+			Display name: <strong>{dn}</strong> (changing it is disabled on this server)
+		</p>
+		{avatar_field}"#;
+
+static PAGE_BOTTOM: &str = r#"
 		<div class="nav">
 			<a href="/_tuwunel/oidc/account?action=org.matrix.sessions_list">
 				Back to sessions
@@ -84,5 +114,4 @@ static PAGE_HTML: &str = const_format!(
 		</div>
 	</body>
 </html>
-"#
-);
+"#;
