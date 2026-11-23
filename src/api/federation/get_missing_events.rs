@@ -2,20 +2,23 @@ use std::collections::{BTreeSet, VecDeque};
 
 use axum::extract::State;
 use futures::{
-	StreamExt, TryFutureExt, TryStreamExt,
+	FutureExt, StreamExt,
 	future::try_join,
 	stream::{FuturesOrdered, unfold},
 };
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId,
-	api::federation::event::get_missing_events, canonical_json::redact_in_place,
+	api::federation::event::get_missing_events, canonical_json::redact,
+	room_version_rules::RedactionRules,
 };
 use tuwunel_core::{
-	Error, Result, debug, err,
+	Result, debug,
+	result::NotFound,
 	utils::{
 		math::usize_from_ruma_bounded,
-		stream::{TryWidebandExt, automatic_width},
+		stream::{WidebandExt, automatic_width},
 	},
+	warn,
 };
 use tuwunel_matrix::room_version::rules as room_version_rules;
 
@@ -85,9 +88,9 @@ pub(crate) async fn get_missing_events_route(
 
 			Some((event, (seen, pending, fetches)))
 		})
+		// Before the filter: limit caps per-event work, and an omitted event spends a slot.
 		.take(limit)
-		.map(Ok::<_, Error>)
-		.wide_and_then(async |(event_id, mut event)| {
+		.wide_filter_map(async |(event_id, event)| {
 			let visible = services
 				.state_accessor
 				.server_can_see_event(body.origin(), &body.room_id, &event_id)
@@ -99,10 +102,7 @@ pub(crate) async fn get_missing_events_route(
 					.erased_for_server(body.origin(), event)
 					.await
 			} else {
-				redact_in_place(&mut event, &rules.redaction, None)
-					.map_err(|error| err!(Database("Failed to redact event: {error}")))?;
-
-				event
+				redacted(&event_id, event, &rules.redaction)?
 			};
 
 			let event = services
@@ -110,14 +110,14 @@ pub(crate) async fn get_missing_events_route(
 				.format_pdu_into(event, Some(&room_version))
 				.await;
 
-			Ok(event)
+			Some(event)
 		})
-		.try_collect::<Vec<_>>()
-		.map_ok(|mut vec| {
-			vec.reverse();
-			vec
+		.collect()
+		.map(|mut events: Vec<_>| {
+			events.reverse();
+			events
 		})
-		.await?;
+		.await;
 
 	Ok(get_missing_events::v1::Response { events })
 }
@@ -169,14 +169,22 @@ where
 		}
 
 		let (event_id, is_latest, event) = fetches.next().await?;
-		let Ok(event) = event else {
-			debug!(
-				?body.origin,
-				%event_id,
-				"Event does not exist locally, skipping"
-			);
+		let event = match event.present() {
+			| Ok(Some(event)) => event,
+			| Ok(None) => {
+				debug!(
+					?body.origin,
+					%event_id,
+					"Event does not exist locally, skipping"
+				);
 
-			continue;
+				continue;
+			},
+			| Err(error) => {
+				warn!(%event_id, %error, "Skipping an unreadable event.");
+
+				continue;
+			},
 		};
 
 		if event
@@ -203,6 +211,21 @@ where
 	}
 }
 
+/// Redacts an event the origin cannot see.
+///
+/// An event that cannot be redacted is logged and omitted, never served whole.
+fn redacted(
+	event_id: &EventId,
+	event: CanonicalJsonObject,
+	rules: &RedactionRules,
+) -> Option<CanonicalJsonObject> {
+	redact(event, rules, None)
+		.inspect_err(
+			|error| warn!(%event_id, %error, "Omitting an event that cannot be redacted."),
+		)
+		.ok()
+}
+
 #[cfg(test)]
 mod tests {
 	use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
@@ -214,9 +237,10 @@ mod tests {
 		api::federation::event::get_missing_events::v1::Request, room_id, server_name,
 	};
 	use serde_json::json;
+	use tuwunel_core::err;
 	use tuwunel_matrix::pdu::MAX_PREV_EVENTS;
 
-	use super::{EARLIEST_MAX, Ruma, WALK_MAX, err, next_missing_event, walk_seed};
+	use super::{EARLIEST_MAX, Ruma, WALK_MAX, next_missing_event, walk_seed};
 
 	fn event_ids(prefix: &str, len: usize) -> Vec<OwnedEventId> {
 		(0..len)

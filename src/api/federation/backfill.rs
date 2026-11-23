@@ -12,12 +12,14 @@ use ruma::{
 	api::federation::backfill::get_backfill,
 };
 use tuwunel_core::{
-	Result, at,
+	Error, Result, at, err,
+	result::NotFound,
 	utils::{
-		BoolExt, IterStream, ReadyExt, TryReadyExt,
+		BoolExt, IterStream, ReadyExt,
 		math::usize_from_ruma_bounded,
 		stream::{BroadbandExt, WidebandExt},
 	},
+	warn,
 };
 use tuwunel_matrix::{PduCount, PduEvent};
 use tuwunel_service::Services;
@@ -116,29 +118,29 @@ pub(crate) async fn get_backfill_route(
 			Some((event, (walk, pending, found)))
 		});
 
+	let origin_server_ts = MilliSecondsSinceUnixEpoch::now();
+	let pdus: Vec<_> = served_events(events, &body.room_id, limit)
+		.wide_then(async |pdu| {
+			let pdu = services
+				.state_accessor
+				.erased_for_server(body.origin(), pdu)
+				.await;
+
+			services
+				.federation
+				.format_pdu_into(pdu, room_version.as_ref())
+				.await
+		})
+		.collect()
+		.boxed() // size firewall
+		.await;
+
 	Ok(get_backfill::v1::Response {
-		origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
+		origin_server_ts,
 
 		origin: services.globals.server_name().to_owned(),
 
-		pdus: events
-			.ready_try_filter_map(Ok)
-			.take(limit)
-			.and_then(|pdu| {
-				services
-					.state_accessor
-					.erased_for_server(body.origin(), pdu)
-					.map(Ok)
-			})
-			.and_then(|pdu| {
-				services
-					.federation
-					.format_pdu_into(pdu, room_version.as_ref())
-					.map(Ok)
-			})
-			.try_collect()
-			.boxed() // size firewall
-			.await?,
+		pdus,
 	})
 }
 
@@ -193,10 +195,11 @@ async fn preceding_count(
 /// Takes the next candidate, a found soft-failed event before the walk's next,
 /// and yields its JSON when it is served.
 ///
-/// A candidate the origin cannot see yields `None`. One served or named in `v`
-/// queues its predecessors, and those that are soft-failed outliers of the room
-/// are the next candidates; the request and the events served are the only
-/// references that may expose a soft-failed event.
+/// A candidate the origin cannot see yields `Ok(None)`, and an unreadable one
+/// its error. One served or named in `v` queues its predecessors, and those
+/// that are soft-failed outliers of the room are the next candidates; the
+/// request and the events served are the only references that may expose a
+/// soft-failed event.
 async fn next_event<Walk>(
 	services: &Services,
 	body: &Ruma<get_backfill::v1::Request>,
@@ -217,11 +220,34 @@ where
 
 	let served = served_json(services, body.origin(), &event).await;
 
-	if served.is_some() || body.v.contains(&event.event_id) {
+	if served.as_ref().is_ok_and(Option::is_some) || body.v.contains(&event.event_id) {
 		pending.extend(event.prev_events.iter().cloned());
 	}
 
-	Some(Ok(served))
+	Some(served)
+}
+
+/// Takes up to `limit` candidates that are served or unreadable, omitting each
+/// unreadable one.
+///
+/// An unreadable row spends a slot like a served event, so a walk whose error
+/// repeats on every poll still ends; an event the origin cannot see spends
+/// none.
+fn served_events<Events>(
+	events: Events,
+	room_id: &RoomId,
+	limit: usize,
+) -> impl Stream<Item = CanonicalJsonObject> + Send
+where
+	Events: Stream<Item = Candidate> + Send,
+{
+	let warn_unreadable =
+		move |error: &Error| warn!(%room_id, %error, "Omitting an unreadable backfill event.");
+
+	events
+		.ready_filter_map(Result::transpose)
+		.take(limit)
+		.ready_filter_map(move |event| event.inspect_err(warn_unreadable).ok())
 }
 
 async fn next_soft_failed(
@@ -235,11 +261,18 @@ async fn next_soft_failed(
 			continue;
 		}
 
-		if let Ok(event) = services
+		let soft_failed = services
 			.pdu_metadata
 			.get_soft_failed_outlier(room_id, &event_id)
 			.await
-		{
+			.present()
+			.inspect_err(|error| {
+				warn!(%event_id, %error, "Skipping an unreadable soft-failed event.");
+			})
+			.ok()
+			.flatten();
+
+		if let Some(event) = soft_failed {
 			found.insert(event_id);
 
 			return Some(event);
@@ -250,16 +283,65 @@ async fn next_soft_failed(
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn served_json(
-	services: &Services,
-	origin: &ServerName,
-	event: &PduEvent,
-) -> Option<CanonicalJsonObject> {
+async fn served_json(services: &Services, origin: &ServerName, event: &PduEvent) -> Candidate {
+	let event_id = &event.event_id;
+
 	services
 		.state_accessor
-		.server_can_see_event(origin, &event.room_id, &event.event_id)
+		.server_can_see_event(origin, &event.room_id, event_id)
 		.await
-		.then_async(|| services.timeline.get_pdu_json(&event.event_id))
+		.then_async(|| services.timeline.get_pdu_json(event_id))
 		.await
-		.and_then(Result::ok)
+		.transpose()
+		.map_err(|error| err!(Database("Unreadable event {event_id}: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+	use std::iter::{once, repeat_with};
+
+	use futures::StreamExt;
+	use ruma::{CanonicalJsonObject, CanonicalJsonValue, room_id};
+	use tuwunel_core::{Err, utils::IterStream};
+
+	use super::{Candidate, served_events};
+
+	const LIMIT: usize = 3;
+
+	#[tokio::test]
+	async fn endless_unreadable_rows_end_at_the_limit() {
+		let candidates = repeat_with(unreadable)
+			.take(2 * LIMIT)
+			.chain(once(Ok(Some(event("late")))));
+
+		let events = served(candidates, LIMIT).await;
+
+		assert!(events.is_empty(), "served past the limit: {events:?}");
+	}
+
+	#[tokio::test]
+	async fn only_hidden_events_spend_no_slot() {
+		let candidates = || [Ok(Some(event("a"))), Ok(None), unreadable(), Ok(Some(event("b")))];
+
+		assert_eq!(served(candidates(), 2).await, [event("a")]);
+		assert_eq!(served(candidates(), LIMIT).await, [event("a"), event("b")]);
+	}
+
+	fn unreadable() -> Candidate { Err!(Database("Unreadable row.")) }
+
+	fn event(name: &str) -> CanonicalJsonObject {
+		let name = CanonicalJsonValue::String(name.to_owned());
+
+		[("name".into(), name)].into()
+	}
+
+	async fn served<Candidates>(candidates: Candidates, limit: usize) -> Vec<CanonicalJsonObject>
+	where
+		Candidates: IntoIterator<Item = Candidate> + Send,
+		Candidates::IntoIter: Send,
+	{
+		served_events(candidates.stream(), room_id!("!room:example.com"), limit)
+			.collect()
+			.await
+	}
 }

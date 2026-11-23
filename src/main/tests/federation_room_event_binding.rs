@@ -11,7 +11,9 @@ use tuwunel_core::{
 		UserId,
 		api::federation::{
 			authorization::get_event_authorization::v1::Request as EventAuthRequest,
+			backfill::get_backfill::v1::Request as BackfillRequest,
 			event::{
+				get_missing_events::v1::Request as MissingEventsRequest,
 				get_room_state::v1::Request as StateRequest,
 				get_room_state_ids::v1::Request as StateIdsRequest,
 			},
@@ -25,6 +27,7 @@ use tuwunel_core::{
 			},
 		},
 		exports::serde::Deserialize,
+		uint,
 	},
 	utils::stream::{IterStream, TryBroadbandExt},
 };
@@ -101,6 +104,17 @@ struct JoinState {
 	auth_chain: Vec<CanonicalJsonObject>,
 }
 
+/// The events a `/backfill` or `/get_missing_events` response serves.
+///
+/// A backfill response also carries its origin and a timestamp, which the
+/// omission checks do not read.
+#[derive(Deserialize)]
+#[serde(crate = "tuwunel_core::ruma::exports::serde")]
+struct Pdus {
+	#[serde(alias = "events")]
+	pdus: Vec<CanonicalJsonObject>,
+}
+
 /// The federation `/state`, `/state_ids` and `/event_auth` routes answer for
 /// the requested room alone.
 ///
@@ -109,9 +123,11 @@ struct JoinState {
 /// and on `/state` and `/state_ids` every one the requested event names, so a
 /// peer holding nothing else can authorise each of them.
 ///
-/// An event that storage cannot read drops out of a `/state` or `send_join`
-/// response rather than failing it. An auth chain that cannot be walked drops
-/// out of each route's response the same way.
+/// An event that storage cannot read drops out of a `/state`, `/event_auth`,
+/// `/backfill` or `send_join` response rather than failing it, and one that
+/// `/get_missing_events` cannot redact drops out of its response. An auth chain
+/// that cannot be walked drops out of a `/state`, `/state_ids` or `/event_auth`
+/// response the same way.
 #[test]
 fn federation_routes_bind_events_to_rooms() -> Result { boot("room-event-binding", [], exercise) }
 
@@ -165,6 +181,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let joiner_id = register(services, "bindingjoiner", JOINER_TOKEN).await?;
 
 	unreadable_events_are_omitted(&owner, &member, &member_id, &joiner_id).await?;
+	unreadable_backfill_row_is_omitted(&owner).await?;
+	unredactable_missing_event_is_omitted(&owner, &member, &member_id).await?;
 	failed_walk_omits_the_auth_chain(&owner).await
 }
 
@@ -429,8 +447,8 @@ async fn member_at(
 ///
 /// The topic is served only as state, and the member's first join only in the
 /// auth chain once a rename replaces it. With both unreadable, `/state` and
-/// `send_join` serve every other event, and `/state_ids`, which reads none,
-/// still names both.
+/// `send_join` serve every other event, `/event_auth` serves the rename's chain
+/// without the join, and `/state_ids`, which reads none, still names both.
 async fn unreadable_events_are_omitted(
 	owner: &Client<'_>,
 	member: &Client<'_>,
@@ -497,6 +515,142 @@ async fn unreadable_events_are_omitted(
 		assert!(!served.contains_key(&topic), "{route} serves the unreadable topic");
 		assert_eq!(missing, [&joined], "{route} omits more than the unreadable join");
 	}
+
+	let body = Route::EventAuth
+		.get_ok(services, owner.base, &room_id, &renamed)
+		.await?;
+
+	let auth_served = Route::EventAuth
+		.served(services, &room_version, &body)
+		.await?;
+
+	assert!(!auth_served.is_empty(), "/event_auth serves no auth event");
+	assert!(!auth_served.contains_key(&joined), "/event_auth serves the unreadable join");
+
+	Ok(())
+}
+
+/// A timeline row that storage cannot read drops out of `/backfill`.
+///
+/// The walk goes on past the row, so the event sent before it is still served.
+async fn unreadable_backfill_row_is_omitted(owner: &Client<'_>) -> Result {
+	let services = owner.services;
+	let room_id = owner.create_room(&json!({})).await?;
+	let first = owner
+		.send_text(&room_id, "backfill-first", "First")
+		.await?;
+
+	let second = owner
+		.send_text(&room_id, "backfill-second", "Second")
+		.await?;
+
+	let third = owner
+		.send_text(&room_id, "backfill-third", "Third")
+		.await?;
+
+	let room_version = services.state.get_room_version(&room_id).await?;
+
+	corrupt(services, &second).await?;
+
+	let request = BackfillRequest::new(room_id.clone(), vec![third.clone()], uint!(100));
+	let (status, body) = send(services, owner.base, request).await?;
+
+	assert_eq!(status, 200, "/backfill: {body}");
+
+	let served = pdus_served(&room_version, &body)?;
+
+	assert!(served.contains_key(&third), "/backfill omits the requested event");
+	assert!(served.contains_key(&first), "/backfill stops at the unreadable row");
+	assert!(!served.contains_key(&second), "/backfill serves the unreadable row");
+
+	Ok(())
+}
+
+/// An event `/get_missing_events` must redact drops out when it cannot be
+/// redacted, and the walk goes on past it.
+///
+/// The room's history is visible to joined members alone, so once the owner
+/// leaves, the server's one member never saw the owner's message, which is then
+/// served only redacted. Its stored JSON loses its type, which every redaction
+/// requires.
+async fn unredactable_missing_event_is_omitted(
+	owner: &Client<'_>,
+	member: &Client<'_>,
+	member_id: &UserId,
+) -> Result {
+	let services = owner.services;
+	let joined_only = json!({
+		"type": "m.room.history_visibility",
+		"state_key": "",
+		"content": { "history_visibility": "joined" },
+	});
+
+	let room_id = owner
+		.create_room(&json!({ "preset": "public_chat", "initial_state": [joined_only] }))
+		.await?;
+
+	let hidden = owner
+		.send_text(&room_id, "hidden", "Before the member joins")
+		.await?;
+
+	member
+		.post(&format!("rooms/{room_id}/join"), &json!({}))
+		.await?;
+
+	let joined =
+		state_id(services, &room_id, &StateEventType::RoomMember, member_id.as_str()).await?;
+
+	let latest = member
+		.send_text(&room_id, "latest", "After the member joins")
+		.await?;
+
+	owner
+		.post(&format!("rooms/{room_id}/leave"), &json!({}))
+		.await?;
+
+	let visible = services
+		.state_accessor
+		.server_can_see_event(services.globals.server_name(), &room_id, &hidden)
+		.await;
+
+	assert!(!visible, "the server still sees the owner's message");
+
+	let hidden_prevs = services
+		.timeline
+		.get_pdu(&hidden)
+		.await?
+		.prev_events;
+
+	let pdu_id = services.timeline.get_pdu_id(&hidden).await?;
+	let untyped = services
+		.timeline
+		.get_pdu_json(&hidden)
+		.await
+		.map(without_type)?;
+
+	services
+		.timeline
+		.replace_pdu(&pdu_id, &untyped)
+		.await?;
+
+	let request = MissingEventsRequest::new(room_id.clone(), Vec::new(), vec![latest]);
+	let (status, body) = send(services, owner.base, request).await?;
+
+	assert_eq!(status, 200, "/get_missing_events: {body}");
+
+	let room_version = services.state.get_room_version(&room_id).await?;
+	let served = pdus_served(&room_version, &body)?;
+	let past_hidden = hidden_prevs
+		.iter()
+		.all(|prev| served.contains_key(prev));
+
+	assert!(served.contains_key(&joined), "/get_missing_events omits the join");
+	assert!(
+		!served.contains_key(&hidden),
+		"/get_missing_events serves the unredactable event"
+	);
+
+	assert!(past_hidden, "/get_missing_events stops at the unredactable event");
 
 	Ok(())
 }
@@ -569,6 +723,18 @@ fn join_served(room_version: &RoomVersionId, body: &str) -> Result<Served> {
 		.collect()
 }
 
+/// The events a response's one list of PDUs serves, each with the auth events
+/// it names.
+///
+/// A served PDU whose ID cannot be derived fails the test.
+fn pdus_served(room_version: &RoomVersionId, body: &str) -> Result<Served> {
+	let Pdus { pdus } = serde_json::from_str(body)?;
+
+	pdus.into_iter()
+		.map(|pdu| served_pdu(pdu, room_version))
+		.collect()
+}
+
 /// A create event's JSON, changed to name an unsupported room version.
 ///
 /// A create event without a content object fails the test instead.
@@ -580,6 +746,14 @@ fn unsupported_version(mut create: CanonicalJsonObject) -> Result<CanonicalJsonO
 		.insert("room_version".into(), CanonicalJsonValue::String(UNSUPPORTED_VERSION.into()));
 
 	Ok(create)
+}
+
+/// An event's JSON with its type removed.
+///
+/// No redaction accepts an event without a type.
+fn without_type(mut pdu: CanonicalJsonObject) -> CanonicalJsonObject {
+	pdu.remove("type");
+	pdu
 }
 
 /// The events a response body serves, each with the auth events it names.

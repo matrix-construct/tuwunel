@@ -3,12 +3,12 @@ use std::{borrow::Borrow, iter::once};
 use axum::extract::State;
 use futures::StreamExt;
 use ruma::api::federation::authorization::get_event_authorization;
-use tuwunel_core::{
-	Result,
-	utils::stream::{BroadbandExt, ReadyExt},
-};
+use tuwunel_core::{Result, utils::stream::BroadbandExt};
 
-use super::{AccessCheck, utils::require_event_in_room};
+use super::{
+	AccessCheck,
+	utils::{auth_chain_pdu, require_event_in_room, walk_auth_chain},
+};
 use crate::Ruma;
 
 /// # `GET /_matrix/federation/v1/event_auth/{roomId}/{eventId}`
@@ -36,17 +36,9 @@ pub(crate) async fn get_event_authorization_route(
 		.get_room_version(&body.room_id)
 		.await?;
 
-	let auth_chain = services
-		.auth_chain
-		.event_ids_iter(&body.room_id, &room_version, once(body.event_id.borrow()))
-		.ready_filter_map(Result::ok)
-		.broad_filter_map(async |id| {
-			services
-				.federation
-				.get_pdu_into(&id, Some(&room_version))
-				.await
-				.ok()
-		})
+	let heads = once(body.event_id.borrow());
+	let auth_chain = walk_auth_chain(&services, &body.room_id, &room_version, heads)
+		.broad_filter_map(async |id| auth_chain_pdu(&services, &id, &room_version).await)
 		.collect()
 		.await;
 
