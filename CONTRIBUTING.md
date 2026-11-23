@@ -1,7 +1,7 @@
 # Contributing guide
 
 If you would like to work on an [issue][issues] that is not assigned, preferably
-ask in the Matrix room first at [#tuwunel:grin.hu][tuwunel-chat],
+ask in the Matrix room first at [#tuwunel:tuwunel.love][tuwunel-chat],
 and comment on it.
 
 
@@ -129,7 +129,7 @@ Stale branches may be deleted in some cases; personal repositories are advised
 for avoiding any such complications.
 
 [issues]: https://github.com/matrix-construct/tuwunel/issues
-[tuwunel-chat]: https://matrix.to/#/#tuwunel:grin.hu
+[tuwunel-chat]: https://matrix.to/#/#tuwunel:tuwunel.love
 [complement]: https://github.com/matrix-org/complement/
 [complement-testing]: https://github.com/matrix-construct/tuwunel/blob/main/docs/development/testing/complement.md
 [sytest]: https://github.com/matrix-org/sytest/

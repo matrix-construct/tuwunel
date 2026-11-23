@@ -151,4 +151,4 @@ These options go in the top-level `[global]` section:
 
 ## Getting help
 
-For setup questions, join [#tuwunel:matrix.org](https://matrix.to/#/#tuwunel:matrix.org) or [open an issue](https://github.com/matrix-construct/tuwunel/issues/new).
+For setup questions, join [#tuwunel:tuwunel.love](https://matrix.to/#/#tuwunel:tuwunel.love) or [open an issue](https://github.com/matrix-construct/tuwunel/issues/new).

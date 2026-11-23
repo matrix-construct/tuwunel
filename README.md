@@ -18,7 +18,7 @@
 
 [![Documentation](https://img.shields.io/badge/documentation%2D_?color=%238A2BE2&style=for-the-badge&logo=mdBook&logoColor=FFFFFF)](https://matrix-construct.github.io/tuwunel/)
 [![Demo Server](https://img.shields.io/badge/demo%20server%2D_?color=%238A2BE2&style=for-the-badge&logo=Element&logoColor=FFFFFF)](https://try.tuwunel.chat)
-[![Support Chat](https://img.shields.io/matrix/tuwunel%3Amatrix.org.svg?color=098A09&style=for-the-badge&label=Support%20Chat&labelColor=8A2BE2&logo=Matrix)](https://matrix.to/#/#tuwunel:grin.hu)
+[![Support Chat](https://img.shields.io/matrix/tuwunel%3Atuwunel.love.svg?server_fqdn=matrix.org&color=098A09&style=for-the-badge&label=Support%20Chat&labelColor=8A2BE2&logo=Matrix)](https://matrix.to/#/#tuwunel:tuwunel.love)
 
 Tuwunel is a featureful [Matrix](https://matrix.org/) homeserver you can use instead of Synapse
 with your favorite [client](https://matrix.org/ecosystem/clients/),
@@ -97,7 +97,7 @@ jasonzemos@gmail.com.
 ##### 💜 Tuwunel Support Chat 💜
 
 Our official chat is publicly accessible at
-[#tuwunel:matrix.org](https://matrix.to/#/#tuwunel:matrix.org). Project staff are present there to
+[#tuwunel:tuwunel.love](https://matrix.to/#/#tuwunel:tuwunel.love). Project staff are present there to
 offer assistance, and everyone is welcome to ask questions or share their experience running
 Tuwunel.
 
