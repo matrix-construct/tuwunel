@@ -4,9 +4,9 @@ use std::{
 };
 
 use tuwunel_core::{
-	Config, Server, at, debug,
+	Server, at, debug,
 	debug::INFO_SPAN_LEVEL,
-	debug_info, debug_warn, expected, info, is_equal_to,
+	debug_info, debug_warn, expected, info, is_equal_to, is_nonzero,
 	utils::{
 		BoolExt,
 		math::usize_from_f64,
@@ -37,12 +37,14 @@ use super::{QUEUE_LIMIT, WORKER_LIMIT};
 ///   ID's to queue ID's. Systems with sparse core assignments will see 0 for
 ///   core ID positions not available to the process. Systems where detection
 ///   failed will see a default of 1:1 core identity as a best-guess maintaining
-///   core locality.
+///   core locality. An available core whose queue has no workers is routed to
+///   the first populated worker group instead.
 /// - `workers` Vector mapping hardware queues to the number of threads to spawn
 ///   in service of that queue. Systems with fewer queues than cores will set an
 ///   affinity mask for each thread to multiple cores based on the topology.
 ///   Systems with equal or more hardware queues than cores will set a single
-///   affinity for each thread.
+///   affinity for each thread. The vector reaches the highest queue ID in the
+///   topology, so it may be longer than the topology.
 /// - `queues` Vector of software mpmc queues to create and the size of each
 ///   queue. Each indice is associated with a thread-pool of workers which it
 ///   feeds requests from various tokio tasks. When this queue reaches capacity
@@ -85,10 +87,16 @@ pub(super) fn configure(server: &Arc<Server>) -> (Vec<usize>, Vec<usize>, Vec<us
 		.saturating_add(1)
 		.next_multiple_of(8);
 
-	let workers =
-		compute_workers(&devices, config, default_worker_count, topology.len(), chan_limit);
+	let workers = compute_workers(
+		&devices,
+		config.database.pool.workers_limit,
+		default_worker_count,
+		count_groups(&topology),
+		chan_limit,
+	);
 
 	let workers = constrain_workers(workers, max_workers);
+	let topology = route_populated(topology, &workers);
 
 	let queues: Vec<usize> = workers
 		.iter()
@@ -217,15 +225,31 @@ fn compute_max_workers(
 		.clamp(WORKER_LIMIT.0, WORKER_LIMIT.1)
 }
 
-/// Determine the worker groupings. Each indice represents a hardware queue and
-/// contains the number of workers which will service it. The vector is
-/// truncated to the number of cores on systems with multiple hardware queues
-/// per core, and the per-pool count is capped well below NVMe capacity.
+/// Count the worker groups the topology addresses.
+///
+/// A queue ID may exceed the highest core ID available to the process, so the
+/// count reaches the highest queue any core maps to and is never fewer than one
+/// group per core.
+fn count_groups(topology: &[usize]) -> usize {
+	topology
+		.iter()
+		.copied()
+		.max()
+		.map_or(0, |queue_id| queue_id.saturating_add(1))
+		.max(topology.len())
+}
+
+/// Determine the worker groupings.
+///
+/// Each index represents a hardware queue and contains the number of workers
+/// which will service it. The vector is truncated to the number of groups the
+/// topology addresses, and the per-pool count is capped well below NVMe
+/// capacity.
 fn compute_workers(
 	devices: &MultiDevice,
-	config: &Config,
+	workers_limit: usize,
 	default_worker_count: Option<usize>,
-	topology_len: usize,
+	num_groups: usize,
 	chan_limit: usize,
 ) -> Vec<usize> {
 	let default_workers = default_worker_count
@@ -251,11 +275,7 @@ fn compute_workers(
 				.filter(|&&id| is_core_available(id))
 				.count();
 
-			let conf_limit = config
-				.database
-				.pool
-				.workers_limit
-				.saturating_mul(shares);
+			let conf_limit = workers_limit.saturating_mul(shares);
 
 			let hard_limit = devices
 				.md
@@ -280,7 +300,7 @@ fn compute_workers(
 			tags
 		})
 		.chain(default_workers)
-		.take(topology_len)
+		.take(num_groups)
 		.collect()
 }
 
@@ -315,6 +335,39 @@ fn constrain_workers(mut workers: Vec<usize>, max_workers: usize) -> Vec<usize> 
 		});
 
 	workers
+}
+
+/// Route every available core to a populated worker group.
+///
+/// Requests submitted to a group without workers are never received, so a core
+/// whose queue has none shares the first populated group instead.
+fn route_populated(topology: Vec<usize>, workers: &[usize]) -> Vec<usize> {
+	let is_populated = |queue_id: usize| {
+		workers
+			.get(queue_id)
+			.copied()
+			.is_some_and(is_nonzero!())
+	};
+
+	let Some(fallback) = workers.iter().copied().position(is_nonzero!()) else {
+		return topology;
+	};
+
+	let route = |(core_id, queue_id): (usize, usize)| {
+		if is_populated(queue_id) || !is_core_available(core_id) {
+			return queue_id;
+		}
+
+		debug_warn!(?core_id, ?queue_id, ?fallback, "Storage queue has no workers; rerouting.");
+
+		fallback
+	};
+
+	topology
+		.into_iter()
+		.enumerate()
+		.map(route)
+		.collect()
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -443,7 +496,78 @@ fn update_stream_width(
 mod tests {
 	use std::env::current_dir;
 
-	use super::{CORE_IDS_FROM_OS, constrain_workers, discover_devices};
+	use tuwunel_core::utils::sys::{
+		compute::cores_available,
+		storage::{MultiDevice, MultiQueue, Queue},
+	};
+
+	use super::{
+		CORE_IDS_FROM_OS, compute_topology, compute_workers, constrain_workers, count_groups,
+		discover_devices, route_populated,
+	};
+
+	#[test]
+	fn queue_ids_above_core_ids_keep_workers() {
+		let cores_max = cores_available()
+			.last()
+			.expect("an available core")
+			.saturating_add(1);
+
+		// Queue `cores_max + n` holds core `n`; the queues below hold none.
+		let mq = (0..cores_max.saturating_mul(2))
+			.map(|id| Queue {
+				id,
+				nr_tags: Some(8),
+				cpu_list: id.checked_sub(cores_max).into_iter().collect(),
+			})
+			.collect();
+
+		let devices = MultiDevice {
+			md: [MultiQueue { nr_requests: None, mq }].into(),
+			..Default::default()
+		};
+
+		let topology_detected = true;
+		let topology = compute_topology(&devices, topology_detected, cores_max);
+		let workers = compute_workers(&devices, 64, None, count_groups(&topology), 8);
+
+		assert!(cores_available().all(|core_id| topology[core_id] >= cores_max));
+		assert!(cores_available().all(|core_id| workers[topology[core_id]] > 0));
+		assert_eq!(route_populated(topology.clone(), &workers), topology);
+	}
+
+	#[test]
+	fn group_count_covers_cores_and_queues() {
+		assert_eq!(count_groups(&[0, 0, 0, 0]), 4);
+		assert_eq!(count_groups(&[0, 14]), 15);
+		assert_eq!(count_groups(&[]), 0);
+	}
+
+	#[test]
+	fn unpopulated_groups_reroute_available_cores() {
+		let core_id = cores_available()
+			.next()
+			.expect("an available core");
+
+		let absent = vec![7; core_id.saturating_add(1)];
+		let empty = vec![0; core_id.saturating_add(1)];
+
+		assert_eq!(route_populated(absent.clone(), &[0, 3])[core_id], 1);
+		assert_eq!(route_populated(empty, &[0, 3])[core_id], 1);
+		assert_eq!(route_populated(absent.clone(), &[0, 0]), absent);
+	}
+
+	#[test]
+	fn unavailable_cores_keep_their_route() {
+		let unavailable = cores_available()
+			.last()
+			.expect("an available core")
+			.saturating_add(1);
+
+		let topology = vec![7; unavailable.saturating_add(1)];
+
+		assert_eq!(route_populated(topology, &[0, 3])[unavailable], 7);
+	}
 
 	#[test]
 	fn constrain_respects_the_maximum() {
