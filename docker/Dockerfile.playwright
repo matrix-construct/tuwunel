@@ -80,8 +80,8 @@ ADD https://github.com/element-hq/element-web.git#${element_web_ref} element-web
 # process group and then waits for the command's stdio to close, so the
 # orphaned `serve` kept every acceptance shard alive after its last test.
 # `serve` is pre-installed so playwright.config.ts's webServer (which runs
-# `pnpm exec serve -p 8080 -L ./webapp` in CI mode) starts instantly instead
-# of spending most of its 30s startup window fetching the package.
+# `pnpm exec serve` on ./webapp in CI mode) starts instantly instead of
+# spending most of its 30s startup window fetching the package.
 RUN npm install -g "pnpm@$(node -p "require('/usr/src/element-web/package.json').devEngines.packageManager.version")" serve
 
 WORKDIR /usr/src/element-web
@@ -148,9 +148,10 @@ fi
 # 4. playwright.config.ts: drive the CI webServer port from $SERVE_PORT so
 #    concurrent shards on the shared host network each own a private static
 #    server instead of contending for one :8080. $BASE_URL (set alongside)
-#    already steers baseURL and the health check.
+#    already steers baseURL and the health check. Anchored on the port
+#    alone, as element-web changes the flags that follow it.
 if ! grep -q 'SERVE_PORT' "$CONFIG"; then
-    sed -i 's#serve -p 8080 -L ./webapp#serve -p ${SERVE_PORT:-8080} -L ./webapp#' "$CONFIG"
+    sed -i 's#serve -p 8080 #serve -p ${SERVE_PORT:-8080} #' "$CONFIG"
 fi
 
 # 5. config_json.ts: the per-test config route hardcodes :8080, but each shard
