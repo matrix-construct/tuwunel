@@ -100,6 +100,53 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	rejoiner_view(&rejoiner, &visible).await
 }
 
+/// Check the replacement chosen by the in-process bundler for both the root
+/// and its latest reply, without depending on a client's endpoint projection.
+#[test]
+fn bundled_edits_respect_history_visibility() -> Result {
+	let options = ["logging.global_default=false", "rooms.relations.bundle_edits=true"];
+
+	boot("edit-bundle-visibility", options, exercise_edits)
+}
+
+async fn exercise_edits(services: &Services, base: &str) -> Result {
+	let owner_id = register(services, "editowner", VISIBLE_TOKEN).await?;
+	let reader_id = register(services, "editreader", LEAVER_TOKEN).await?;
+	let owner = Client { services, base, token: VISIBLE_TOKEN };
+	let reader = Client { services, base, token: LEAVER_TOKEN };
+	let room = owner
+		.create_room(&json!({ "preset": "public_chat" }))
+		.await?;
+
+	reader.act(&room, "join").await?;
+	let root = owner.send_text(&room, "root", "original").await?;
+	let reply = owner.reply(&room, "reply", &root).await?;
+	reader.act(&room, "leave").await?;
+
+	let root_edit = owner.replace(&room, "edit-root", &root).await?;
+	let reply_edit = owner.replace(&room, "edit-reply", &reply).await?;
+	let pdu = services.timeline.get_pdu(&root).await?;
+
+	for (requester, sees_edits) in [(&owner_id, true), (&reader_id, false)] {
+		let bundled = services
+			.pdu_metadata
+			.bundle_aggregations(requester, pdu.clone())
+			.await;
+		let bundled = serde_json::to_value(bundled)?;
+		let latest = &bundled["unsigned"]["m.relations"]["m.thread"]["latest_event"];
+		assert_eq!(latest["event_id"], reply.as_str());
+
+		for (event, edit) in [(&bundled, &root_edit), (latest, &reply_edit)] {
+			let id = event
+				.pointer("/unsigned/m.relations/m.replace/event_id")
+				.and_then(Value::as_str);
+			assert_eq!(id, sees_edits.then_some(edit.as_str()));
+		}
+	}
+
+	Ok(())
+}
+
 /// MSC2675: `/relations` hides children from an ignored sender, and redacted
 /// children from every requester.
 ///

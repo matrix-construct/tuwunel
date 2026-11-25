@@ -59,17 +59,11 @@ pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> P
 		.rooms
 		.relations
 		.bundle_edits
-		.then_async(|| self.newest_replacement(&pdu))
+		.then_async(|| self.newest_replacement(sender_user, &pdu))
 		.await
 		.flatten();
 
-	if let Some(replacement) = replacement
-		&& !self
-			.services
-			.state_accessor
-			.erased_for(sender_user, &replacement)
-			.await
-	{
+	if let Some(replacement) = replacement {
 		let replacement = replacement.without_private_unless_sender(Some(sender_user));
 
 		pdu.set_replacement_bundle(&replacement.into_format())
@@ -480,18 +474,12 @@ async fn bundle_thread_latest_edit(&self, sender_user: &UserId, pdu: &mut Pdu) {
 		return;
 	}
 
-	let Some(mut replacement_event) = self.newest_replacement(&latest_event).await else {
+	let Some(mut replacement_event) = self
+		.newest_replacement(sender_user, &latest_event)
+		.await
+	else {
 		return;
 	};
-
-	if self
-		.services
-		.state_accessor
-		.erased_for(sender_user, &replacement_event)
-		.await
-	{
-		return;
-	}
 
 	replacement_event.remove_private_unless_sender(Some(sender_user));
 
@@ -507,12 +495,13 @@ async fn bundle_thread_latest_edit(&self, sender_user: &UserId, pdu: &mut Pdu) {
 }
 
 /// MSC3925: the newest `m.replace` edit of `parent` as a full event, or `None`
-/// when `parent` is redacted or has no valid edit. An edit counts only when it
+/// when `parent` is redacted, has no valid edit, or the newest valid edit
+/// is hidden from this requester. An edit counts only when it
 /// shares the parent's sender and type and is not itself redacted; newest is by
 /// `origin_server_ts`, which the typed index sorts on.
 #[implement(Service)]
 #[tracing::instrument(skip_all, level = "trace")]
-async fn newest_replacement(&self, parent: &Pdu) -> Option<Pdu> {
+async fn newest_replacement(&self, sender_user: &UserId, parent: &Pdu) -> Option<Pdu> {
 	if parent.is_redacted() {
 		return None;
 	}
@@ -528,7 +517,18 @@ async fn newest_replacement(&self, parent: &Pdu) -> Option<Pdu> {
 	let replacements = self.replacement_children(parent, parent_id);
 
 	pin_mut!(replacements);
-	replacements.next().await
+	let edit = replacements.next().await?;
+	let access = &self.services.state_accessor;
+
+	if access.erased_for(sender_user, &edit).await
+		|| !access
+			.user_can_see_event(sender_user, &edit)
+			.await
+	{
+		return None;
+	}
+
+	Some(edit)
 }
 
 /// Stream `parent`'s valid `m.replace` children, newest `origin_server_ts`
