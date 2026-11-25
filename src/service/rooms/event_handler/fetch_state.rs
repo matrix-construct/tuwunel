@@ -76,7 +76,7 @@ async fn assemble_state(
 	let state_vec = self
 		.fetch_auth(eval, state_ids)
 		.boxed() // cold arm: federation fallback
-		.await;
+		.await?;
 
 	let mut state: HashMap<ShortStateKey, OwnedEventId> = HashMap::with_capacity(state_vec.len());
 	for (pdu, _) in state_vec {
