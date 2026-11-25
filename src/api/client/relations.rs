@@ -214,26 +214,25 @@ async fn paginate_relations_with_filter(
 		Right(relations)
 	};
 
-	let events = relations
+	let mut events = relations
 		.wide_filter_map(async |(count, pdu)| {
 			visible_to(services, sender_user, access, &pdu)
 				.await
 				.then_some((count, pdu))
 		})
-		.take(limit)
-		.wide_then(async |(count, pdu)| {
-			let pdu = served(services, sender_user, access, pdu).await;
-
-			(count, pdu)
-		})
+		.take(limit.saturating_add(1))
 		.collect::<Vec<_>>()
 		.await;
+
+	let more = events.len() > limit;
+	events.truncate(limit);
 
 	Ok(Response {
 		recursion_depth,
 
 		next_batch: events
 			.last()
+			.filter(|_| more)
 			.map(at!(0))
 			.as_ref()
 			.map(ToString::to_string),
@@ -247,9 +246,12 @@ async fn paginate_relations_with_filter(
 
 		chunk: events
 			.into_iter()
-			.filter_map(at!(1))
+			.map(at!(1))
+			.stream()
+			.wide_filter_map(|pdu| served(services, sender_user, access, pdu))
 			.map(Event::into_format)
-			.collect(),
+			.collect()
+			.await,
 	})
 }
 
