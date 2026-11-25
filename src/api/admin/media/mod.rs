@@ -1,10 +1,11 @@
-//! Synapse admin API: media endpoints.
+//! Administrator media endpoints, including Synapse compatibility routes.
 
 mod delete_media;
 mod delete_media_by_date_size;
 mod delete_user_media;
 mod list_room_media;
 mod list_user_media;
+mod object_locations;
 mod purge_media_cache;
 mod query_media;
 mod user_media_statistics;
@@ -21,6 +22,7 @@ pub(crate) use self::{
 	delete_media_by_date_size::admin_delete_media_by_date_size_route,
 	delete_user_media::admin_delete_user_media_route,
 	list_room_media::admin_list_room_media_route, list_user_media::admin_list_user_media_route,
+	object_locations::admin_object_locations_route,
 	purge_media_cache::admin_purge_media_cache_route, query_media::admin_query_media_route,
 	user_media_statistics::admin_user_media_statistics_route,
 };
