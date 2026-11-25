@@ -20,6 +20,10 @@ use tuwunel_core::{
 	utils::stream::{IterStream, ReadyExt, TryBroadbandExt, TryReadyExt},
 };
 
+/// Largest signing-key answer read for one server, from the server itself or
+/// from a notary.
+const MAX_KEY_RESPONSE_BYTES: usize = 1024 * 1024;
+
 /// Requests a batch of signing-key documents from one trusted notary.
 ///
 /// The request is split by configured batch size and concurrency. Malformed
@@ -160,6 +164,7 @@ pub async fn notary_request(
 ) -> Result<impl Iterator<Item = ServerSigningKeys> + Clone + Debug + Send + use<>> {
 	use get_remote_server_keys::v2::Request;
 
+	let client = &self.services.client.federation;
 	let request = Request {
 		server_name: target.into(),
 		minimum_valid_until_ts: self.minimum_valid_ts(),
@@ -168,7 +173,7 @@ pub async fn notary_request(
 	let response = self
 		.services
 		.federation
-		.execute(notary, request)
+		.execute_on(client, notary, request, Some(MAX_KEY_RESPONSE_BYTES))
 		.await?
 		.server_keys
 		.into_iter()
@@ -186,10 +191,11 @@ pub async fn notary_request(
 pub async fn server_request(&self, target: &ServerName) -> Result<ServerSigningKeys> {
 	use get_server_keys::v2::Request;
 
+	let client = &self.services.client.federation;
 	let server_signing_key = self
 		.services
 		.federation
-		.execute(target, Request::new())
+		.execute_on(client, target, Request::new(), Some(MAX_KEY_RESPONSE_BYTES))
 		.await
 		.map(|response| response.server_key)
 		.and_then(|key| key.deserialize().map_err(Into::into))?;

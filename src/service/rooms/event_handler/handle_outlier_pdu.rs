@@ -120,7 +120,7 @@ pub(super) async fn handle_outlier_pdu(
 		cfg_select! {
 			debug_assertions => Box::pin(fetch).await, // size firewall
 			_ => fetch.await,
-		};
+		}?;
 	}
 
 	// 6. Reject "due to auth events" if the event doesn't pass auth based on the

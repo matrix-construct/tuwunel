@@ -12,7 +12,6 @@ use futures::{
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, MxcUri, OwnedMxcUri, OwnedRoomId, OwnedUserId,
 	RoomId, UserId,
-	api::federation::query::get_profile_information,
 	events::{
 		StateEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
@@ -984,15 +983,7 @@ pub async fn fetch_remote_profile(&self, user_id: &UserId) -> Result {
 		"fetch remote profile called with a local user"
 	);
 
-	if let Ok(response) = self
-		.services
-		.federation
-		.execute(user_id.server_name(), get_profile_information::v1::Request {
-			user_id: user_id.to_owned(),
-			field: None,
-		})
-		.await
-	{
+	if let Ok(response) = self.request_remote_profile(user_id).await {
 		self.merge_profile(user_id, response).await?;
 	}
 
