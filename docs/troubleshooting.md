@@ -44,6 +44,37 @@ Upgrading the room is not a workaround either: the replacement room inherits
 `m.federate` from its predecessor, as it does on Synapse. Moving the
 conversation to a newly created room is the only remedy.
 
+#### Sliding sync returns `M_INVALID_PARAM` for a list or extension selection
+
+Tuwunel refuses the whole request with HTTP 400 instead of dropping selectors,
+ranges or filters. Refusal does not cache a cold connection, ping presence,
+acknowledge to-device messages or change the previous `pos`.
+Reduce the selection and retry. To replace all sticky lists, start a valid
+request without `pos`.
+
+| Selection | Maximum |
+| --- | --- |
+| Sticky lists on one connection | 64 |
+| List ID, including IDs in extension filters | 64 UTF-8 bytes |
+| Ranges on one list | 16 distinct |
+| `spaces`, `tags`, `not_tags`, `room_types`, `not_room_types` on one list | 16 distinct entries each |
+| `required_state` on one list or one room subscription | 256 entries |
+| Distinct `required_state` selectors across all lists, plus any one room subscription | 256 |
+| `lists` and `rooms` on each account data, receipts, typing, profiles or MSC4480 sticky events extension | 64 list IDs and 256 rooms |
+
+Ranges and filter entries count each distinct entry once, and the connection
+keeps their first-occurrence order. Per-list and per-subscription
+`required_state` and extension scopes count entries as sent. The
+combined `required_state` budget counts a selector only once across all
+lists, even when their windows do not overlap today: a room can enter another
+list on a later sync. Lists whose filters exclude each other still share this
+budget. Two different rooms' subscriptions are not added together.
+
+On resume, an update that omits a list's filters uses its saved filters. An
+empty list `required_state` also keeps the previous selection. A connection
+stored by an older server can hold selections that are now refused; a valid
+request without `pos` replaces them, but the new selection must itself fit.
+
 ## General potential issues
 
 #### Potential DNS issues when using Docker
