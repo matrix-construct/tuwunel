@@ -78,7 +78,37 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	invalid_tokens(services, base).await?;
 	global_bounds(services, base).await?;
 	filtered_bounds(services, base).await?;
-	backfilled_bounds(services, base).await
+	backfilled_bounds(services, base).await?;
+	backfilled_creation_before_older_event(services, base).await?;
+	room_start(services, base).await
+}
+
+/// Backfill inserts decreasing positions in response order, so creation can
+/// be stored before an event that later receives an older pagination count.
+async fn backfilled_creation_before_older_event(services: &Services, base: &str) -> Result {
+	let (client, room) = fixture(services, base).await?;
+	let message = send(&client, &room, MESSAGE, "backfilled-before-create").await?;
+	let create = services.timeline.first_pdu_in_room(&room).await?;
+	move_to_backfilled_position(services, &room, &create.event_id, -30).await?;
+	move_to_backfilled_position(services, &room, &message.0, -50).await?;
+	services.clear_cache().await;
+
+	let first = page(&client, &room, &[("dir", "b"), ("from", "0"), ("limit", "1")]).await?;
+	assert_page(&first, &[create.event_id.as_str()], Some("-30"));
+	let older = page(&client, &room, &[("dir", "b"), ("from", "-30"), ("limit", "1")]).await?;
+	assert_page(&older, &[message.0.as_str()], Some("-50"));
+
+	// When creation really is the oldest stored event, negative backfill
+	// positions must end history too, including a filter that hides creation.
+	move_to_backfilled_position(services, &room, &create.event_id, -70).await?;
+	services.clear_cache().await;
+	let complete = page(&client, &room, &[("dir", "b"), ("from", "0"), ("limit", "2")]).await?;
+	assert_page(&complete, &[message.0.as_str(), create.event_id.as_str()], None);
+	let filtered =
+		page(&client, &room, &[("dir", "b"), ("from", "0"), ("filter", MESSAGE_FILTER)]).await?;
+	assert_page(&filtered, &[message.0.as_str()], None);
+
+	Ok(())
 }
 
 async fn fixture<'a>(services: &'a Services, base: &'a str) -> Result<(Client<'a>, OwnedRoomId)> {
@@ -308,6 +338,57 @@ async fn backfilled_bounds(services: &Services, base: &str) -> Result {
 
 		assert_page(&bounded, &[expected], Some(end));
 	}
+
+	Ok(())
+}
+
+/// A backward page that reaches the room's creation event has no `end`.
+///
+/// Nothing precedes the creation event, so the spec omits `end` there, also
+/// when a filter leaves the creation event out and when the page is full
+/// because it ends exactly at it. A page that stops short of it keeps `end`.
+async fn room_start(services: &Services, base: &str) -> Result {
+	let (client, room) = fixture(services, base).await?;
+	let message = send(&client, &room, MESSAGE, "only").await?;
+
+	let whole = page(&client, &room, &[("dir", "b"), ("limit", "100")]).await?;
+	let chunk = whole["chunk"]
+		.as_array()
+		.expect("messages response chunk");
+
+	let ids: Vec<_> = chunk
+		.iter()
+		.map(|event| event["event_id"].as_str().expect("event id"))
+		.collect();
+
+	assert_eq!(chunk.last().map(|event| &event["type"]), Some(&json!("m.room.create")));
+	assert_page(&whole, &ids, None);
+
+	let exact = chunk.len().to_string();
+	let full = page(&client, &room, &[("dir", "b"), ("limit", &exact)]).await?;
+
+	assert_page(&full, &ids, None);
+
+	let filtered =
+		page(&client, &room, &[("dir", "b"), ("limit", "100"), ("filter", MESSAGE_FILTER)])
+			.await?;
+
+	assert_page(&filtered, &[message.0.as_str()], None);
+
+	let short = chunk.len().saturating_sub(1).to_string();
+	let partial = page(&client, &room, &[("dir", "b"), ("limit", &short)]).await?;
+	let before_create = chunk[chunk.len().saturating_sub(2)]["event_id"]
+		.as_str()
+		.expect("event id");
+
+	let before_create_count = services
+		.timeline
+		.get_pdu_id(&EventId::parse(before_create)?)
+		.await?
+		.pdu_count()
+		.to_string();
+
+	assert_page(&partial, &ids[..ids.len().saturating_sub(1)], Some(&before_create_count));
 
 	Ok(())
 }
