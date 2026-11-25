@@ -21,7 +21,6 @@ use tuwunel_core::{
 	Error, Result, at, debug,
 	error::inspect_debug_log,
 	extract_variant, is_equal_to, ref_at,
-	result::FlatOk,
 	smallvec::SmallVec,
 	utils::{
 		BoolExt, FutureBoolExt, IterStream, ReadyExt, TryFutureExtExt,
@@ -69,18 +68,10 @@ struct LoadParams<'a> {
 	room_id: &'a RoomId,
 	since: u64,
 	horizon: u64,
+	snapshot: Option<ShortStateHash>,
 	full_state: bool,
 	state_after: StateAfter,
 	filter: &'a FilterDefinition,
-	departure: Option<PduEvent>,
-}
-
-struct DepartureParams<'a> {
-	sender_user: &'a UserId,
-	room_id: &'a RoomId,
-	since: u64,
-	horizon: u64,
-	after_requested: bool,
 	departure: Option<PduEvent>,
 }
 
@@ -199,15 +190,40 @@ async fn handle_left_room(
 		.map(Option::flatten)
 		.await;
 
-	if refused || {
+	let notice_only = refused || {
 		let membership = departure
 			.as_ref()
 			.and_then(|event| event.membership_for(sender_user));
 
 		departed_out_of_band(services, room_id, membership, since).await
-	} {
+	};
+
+	let retained = async {
+		if notice_only {
+			return Ok(None);
+		}
+
+		let Some(count) = services
+			.state_accessor
+			.departure_count(sender_user, room_id)
+			.await?
+		else {
+			return Ok(None);
+		};
+
+		services
+			.state_accessor
+			.departure_shortstatehash(room_id, count)
+			.map_ok(|hash| Some((count, hash)))
+			.await
+	}
+	.await
+	.inspect_err(|error| warn!(target: "tuwunel_api_client::sync::v3", %room_id, %sender_user, %error, "Unreadable departure snapshot"));
+
+	// The notification position isn't a safe history bound on a failed read.
+	if notice_only || retained.is_err() {
 		let departure = departure
-			.filter(|_| forgotten)
+			.filter(|_| forgotten || retained.is_err())
 			.map(Event::into_format);
 
 		let event =
@@ -228,21 +244,15 @@ async fn handle_left_room(
 		}));
 	}
 
-	let horizon = services
-		.state_accessor
-		.departure_count(sender_user, room_id)
-		.await
-		.inspect_err(|error| warn!(target: "tuwunel_api_client::sync::v3", %room_id, %sender_user, %error, "Unreadable departure count"))
-		.ok()
-		.flatten()
-		.map(PduCount::into_unsigned)
-		.unwrap_or(left_count);
+	let (horizon, snapshot) =
+		retained?.map_or((left_count, None), |(count, hash)| (count.into_unsigned(), Some(hash)));
 
 	load_left_room(services, LoadParams {
 		sender_user,
 		room_id,
 		since,
 		horizon,
+		snapshot,
 		full_state,
 		state_after,
 		filter,
@@ -293,6 +303,7 @@ async fn load_left_room(
 		room_id,
 		since,
 		horizon,
+		snapshot,
 		full_state,
 		state_after,
 		filter,
@@ -326,14 +337,7 @@ async fn load_left_room(
 	let snapshots = window_snapshots(services, room_id, since, horizon, first);
 
 	let after_requested = state_after.requested();
-	let departure = resolve_departure(services, DepartureParams {
-		sender_user,
-		room_id,
-		since,
-		horizon,
-		after_requested,
-		departure,
-	});
+	let departure = resolve_departure(services, room_id, snapshot, departure);
 
 	let ((since_shortstatehash, horizon_shortstatehash), departure) = join(snapshots, departure)
 		.boxed() // erase region
@@ -378,14 +382,28 @@ async fn load_left_room(
 
 	let in_timeline = in_timeline(&timeline_pdus);
 
-	// A never-member's departure applies to `state_after`, and to the legacy field
-	// when the timeline does not send it.
+	// Room history stays capped at the horizon, while the requester's current
+	// membership remains the last membership update the client receives: append it
+	// past a non-empty capped timeline, or deliver it in state otherwise.
+	let trailing_departure = departure
+		.as_ref()
+		.filter(|departure| {
+			once_joined
+				&& timeline_limit > 0
+				&& !timeline_pdus.is_empty()
+				&& !in_timeline(departure)
+				&& filter.room.timeline.matches(departure)
+		})
+		.cloned();
+
+	let has_trailing = trailing_departure.is_some();
 	let rejected_after = !once_joined && after_requested;
 	let departure = departure.filter(|departure| {
-		once_joined
-			|| after_requested
-			|| !in_timeline(departure)
-			|| !filter.room.timeline.matches(departure)
+		after_requested
+			|| (!has_trailing
+				&& (timeline_limit == 0
+					|| !in_timeline(departure)
+					|| !filter.room.timeline.matches(departure)))
 	});
 
 	let has_departure = departure.is_some();
@@ -449,14 +467,15 @@ async fn load_left_room(
 		.as_ref()
 		.map(ToString::to_string);
 
-	let timeline_events = timeline_events(services, timeline_pdus, TimelineParams {
-		sender_user,
-		filter,
-		limit: timeline_limit,
-		encrypted,
-	})
-	.map(|pdu| trim_event_fields(pdu.into_format(), event_fields))
-	.collect();
+	let timeline_events =
+		timeline_events(services, timeline_pdus, trailing_departure, TimelineParams {
+			sender_user,
+			filter,
+			limit: timeline_limit,
+			encrypted,
+		})
+		.map(|pdu| trim_event_fields(pdu.into_format(), event_fields))
+		.collect();
 
 	let account_data_events = services
 		.account_data
@@ -475,7 +494,7 @@ async fn load_left_room(
 		state,
 		timeline: Timeline {
 			prev_batch,
-			limited: limited || timeline_limit == 0,
+			limited: limited || timeline_limit == 0 || has_trailing,
 			events: timeline_events,
 		},
 	}))
@@ -517,93 +536,52 @@ async fn window_snapshots(
 
 /// Resolves the requester's departure and the snapshots tied to it.
 ///
-/// For a former member the departure count selects both snapshots, and the
-/// `state_after` lookup uses the timeline position. For a user who never
-/// joined, the caller supplies the departure it verified in current state, and
-/// both fields use that event's snapshot regardless of any recorded count.
+/// Room history stays capped at the departure horizon, while the requester's
+/// current membership event stays the last membership update the client
+/// receives. For a former member, the caller supplies the authoritative
+/// departure snapshot for both fields and keeps the current membership event
+/// so the response can append it past a capped timeline or deliver it in state.
+/// For a user who never joined, the caller supplies the departure it verified
+/// in current state, and both fields use that event's snapshot regardless of
+/// any recorded count.
 #[tracing::instrument(level = "trace", skip_all)]
 async fn resolve_departure(
 	services: &Services,
-	DepartureParams {
-		sender_user,
-		room_id,
-		since,
-		horizon,
-		after_requested,
-		departure,
-	}: DepartureParams<'_>,
+	room_id: &RoomId,
+	snapshot: Option<ShortStateHash>,
+	departure: Option<PduEvent>,
 ) -> Departure {
-	let once_joined = services
-		.state_cache
-		.once_joined(sender_user, room_id)
-		.await;
-
-	if !once_joined {
-		let recorded = |event_id| {
-			services
-				.state
-				.pdu_shortstatehash(event_id)
-				.map(NotFound::present)
-				.inspect_err(move |error| warn!(target: "tuwunel_api_client::sync::v3", %room_id, %event_id, %error, "Unreadable departure snapshot"))
-				.map(|anchor| anchor.ok().flatten())
-		};
-
-		let anchor = departure
-			.as_ref()
-			.map(Event::event_id)
-			.map_async(recorded)
-			.map(Option::flatten)
-			.await;
-
+	if let Some(snapshot) = snapshot {
 		return Departure {
-			once_joined,
+			once_joined: true,
 			event: departure,
-			after: anchor,
-			left: anchor,
+			after: Some(snapshot),
+			left: Some(snapshot),
 		};
 	}
 
-	// MSC4222 `state_after` describes the state at the leave.
-	let after = after_requested
-		.then_async(|| {
-			services
-				.timeline
-				.shortstatehash_after(room_id, PduCount::Normal(horizon))
-				.inspect_err(inspect_debug_log)
-		})
-		.map(FlatOk::flat_ok);
+	let recorded = |event_id| {
+		services
+			.state
+			.pdu_shortstatehash(event_id)
+			.map(NotFound::present)
+			.inspect_err(move |error| warn!(target: "tuwunel_api_client::sync::v3", %room_id, %event_id, %error, "Unreadable departure snapshot"))
+			.map(|anchor| anchor.ok().flatten())
+	};
 
-	let left = services
-		.timeline
-		.get_shortstatehash(room_id, PduCount::Normal(horizon))
-		.inspect_err(inspect_debug_log)
-		.ok();
-
-	let event = departure_event(services, sender_user, room_id, horizon, since >= horizon);
-
-	let (after, left, event) = join3(after, left, event).await;
-
-	Departure { once_joined, event, after, left }
-}
-
-async fn departure_event(
-	services: &Services,
-	sender_user: &UserId,
-	room_id: &RoomId,
-	horizon: u64,
-	overlaid: bool,
-) -> Option<PduEvent> {
-	overlaid
-		.then_async(|| {
-			services
-				.timeline
-				.get_pdu_at(room_id, PduCount::Normal(horizon))
-				.inspect_err(inspect_debug_log)
-				.ok()
-		})
+	let anchor = departure
+		.as_ref()
+		.map(Event::event_id)
+		.map_async(recorded)
 		.map(Option::flatten)
-		.map(|event| event.filter(|event| is_departure(event, sender_user)))
-		.await
+		.await;
+
+	Departure {
+		once_joined: false,
+		event: departure,
+		after: anchor,
+		left: anchor,
+	}
 }
 
 /// Reports whether the timeline starts no later than the departure.
@@ -777,12 +755,18 @@ fn visible_state(sender_user: &UserId, sees_room_state: bool) -> impl Fn(&PduEve
 fn timeline_events<'a, Pdus>(
 	services: &'a Services,
 	timeline_pdus: Pdus,
+	trailing: Option<PduEvent>,
 	TimelineParams { sender_user, filter, limit, encrypted }: TimelineParams<'a>,
 ) -> impl Stream<Item = PduEvent> + Send + 'a
 where
 	Pdus: IntoIterator<Item = (PduCount, PduEvent)>,
 	Pdus::IntoIter: Send + 'a,
 {
+	let trailing = trailing
+		.into_iter()
+		.stream()
+		.wide_then(move |pdu| with_membership(services, pdu, sender_user, encrypted));
+
 	timeline_pdus
 		.into_iter()
 		.stream()
@@ -796,6 +780,7 @@ where
 				.pdu_metadata
 				.bundle_aggregations(sender_user, pdu)
 		})
+		.chain(trailing)
 }
 
 /// Records a failed horizon read, quietly when the row is simply absent.
