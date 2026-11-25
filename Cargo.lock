@@ -5343,7 +5343,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuwunel"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "axum",
  "axum-server",
@@ -5393,7 +5393,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_admin"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5423,7 +5423,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_api"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "axum",
  "axum-extra",
@@ -5460,7 +5460,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_api_admin"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "axum",
  "const-str",
@@ -5485,7 +5485,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_api_client"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "axum",
  "axum-extra",
@@ -5518,7 +5518,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_api_federation"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "axum",
  "axum-extra",
@@ -5544,7 +5544,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_api_mas"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "axum",
  "axum-extra",
@@ -5564,7 +5564,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_api_oidc"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "axum",
  "axum-extra",
@@ -5588,7 +5588,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_core"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "argon2",
  "arrayvec",
@@ -5659,7 +5659,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_database"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "async-channel",
  "const-str",
@@ -5681,7 +5681,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_macros"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "itertools 0.15.0",
  "proc-macro2",
@@ -5691,7 +5691,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_matrix"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "arrayvec",
  "base64 0.22.1",
@@ -5718,7 +5718,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_router"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "axum",
  "axum-server",
@@ -5756,7 +5756,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_service"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
