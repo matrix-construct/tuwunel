@@ -29,7 +29,9 @@ use ruma::{
 use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
 use tuwunel_core::{
 	Err, Error, Result, async_noinline, at, debug, debug_error, debug_info, debug_warn, err,
-	error, implement, info, trace,
+	error, implement, info,
+	result::NotFound,
+	trace,
 	utils::{
 		BoolExt, IterStream, ReadyExt,
 		future::ExtExt,
@@ -43,7 +45,10 @@ use tuwunel_core::{
 use tuwunel_matrix::{
 	event::gen_event_id_canonical_json,
 	pdu::{Pdu, PduBuilder, check_rules},
-	room::state::resolution::{self as state_res, AuthCheckOutcome, events::RoomCreateEvent},
+	room::state::resolution::{
+		self as state_res, AuthCheckOutcome,
+		events::{RoomCreateEvent, RoomMemberEvent},
+	},
 	room_version,
 };
 
@@ -89,6 +94,15 @@ struct Admission<Incoming> {
 	waiting: HashMap<OwnedEventId, Vec<Candidate>>,
 	woken: Vec<Candidate>,
 	accepted: HashSet<OwnedEventId>,
+}
+
+/// Tracks state events admitted from one send_join response beside other local
+/// users' retained memberships and their verified lineage.
+struct SendJoinState {
+	state: HashMap<u64, OwnedEventId>,
+	seen_local_members: HashMap<u64, OwnedEventId>,
+	retained: HashMap<u64, OwnedEventId>,
+	lineage: HashMap<OwnedEventId, u64>,
 }
 
 #[derive(Debug)]
@@ -458,7 +472,13 @@ async fn join_remote(
 	};
 
 	let state = self
-		.ingest_send_join_events(room_id, &room_version_id, &room_version_rules, events)
+		.ingest_send_join_events(
+			room_id,
+			sender_user,
+			&room_version_id,
+			&room_version_rules,
+			events,
+		)
 		.await?;
 
 	debug!("Running send_join auth check...");
@@ -753,6 +773,7 @@ fn merge_restricted_signature(
 async fn ingest_send_join_events(
 	&self,
 	room_id: &RoomId,
+	joining: &UserId,
 	room_version_id: &RoomVersionId,
 	room_version_rules: &RoomVersionRules,
 	SendJoinEvents { auth_chain, state }: SendJoinEvents<'_>,
@@ -774,6 +795,19 @@ async fn ingest_send_join_events(
 		.event_handler
 		.known_create_id(room_id)
 		.await?;
+
+	let retained = self.local_member_state(room_id, joining).await?;
+	let lineage = retained
+		.iter()
+		.map(|(&key, id)| (id.clone(), key))
+		.collect();
+
+	let send_join_state = SendJoinState {
+		state: HashMap::new(),
+		seen_local_members: HashMap::new(),
+		retained,
+		lineage,
+	};
 
 	let auth_events = self
 		.verified_pdus(room_id, room_version_id, room_version_rules, auth_chain, "auth_chain")
@@ -821,23 +855,37 @@ async fn ingest_send_join_events(
 		Ok(Some((admitted, admission)))
 	})
 	.ready_try_filter_map(|admitted| {
-		let Some((event_id, Pdu { kind, state_key: Some(state_key), .. }, true)) = admitted
-		else {
+		let Some((event_id, pdu, in_state)) = admitted else {
 			return Ok(None);
 		};
 
-		Ok(Some((kind, state_key, event_id)))
+		let Some(state_key) = pdu.state_key.as_deref() else {
+			return Ok(None);
+		};
+
+		let other_local = pdu.kind == TimelineEventType::RoomMember
+			&& self.other_local_member(joining, state_key);
+
+		if !in_state && !other_local {
+			return Ok(None);
+		}
+
+		Ok(Some(((event_id, pdu, in_state), other_local)))
 	})
-	.wide_and_then(async |(kind, state_key, event_id)| {
+	.wide_and_then(async |((event_id, pdu, in_state), other_local)| {
 		let shortstatekey = self
 			.services
 			.short
-			.get_or_create_shortstatekey(&kind.to_cow_str().as_ref().into(), &state_key)
+			.get_or_create_shortstatekey(
+				&pdu.kind.to_cow_str().as_ref().into(),
+				pdu.state_key.as_deref().unwrap_or_default(),
+			)
 			.await;
 
-		Ok((shortstatekey, event_id))
+		Ok((shortstatekey, (event_id, pdu, in_state), other_local))
 	})
-	.ready_try_fold(HashMap::new(), insert_state)
+	.ready_try_fold(send_join_state, SendJoinState::apply)
+	.map_ok(SendJoinState::finish)
 	.await
 }
 
@@ -981,6 +1029,99 @@ fn insert_state(
 	}
 
 	Ok(state)
+}
+
+#[implement(SendJoinState)]
+fn apply(
+	mut self,
+	(shortstatekey, (event_id, pdu, in_state), other_local): (u64, Admitted, bool),
+) -> Result<Self> {
+	if other_local {
+		if in_state {
+			self.seen_local_members =
+				insert_state(self.seen_local_members, (shortstatekey, event_id.clone()))?;
+		}
+
+		if RoomMemberEvent::new(&pdu).membership()? == MembershipState::Join {
+			// Keep the outlier for authorization, not as a new local membership.
+			return Ok(self);
+		}
+
+		if let Some(retained) = self.retained.get(&shortstatekey) {
+			if pdu
+				.auth_events
+				.iter()
+				.any(|id| self.lineage.get(id) == Some(&shortstatekey))
+			{
+				// Intermediate transitions establish ancestry. Only an event in the
+				// state list may replace the retained event in current state.
+				self.lineage
+					.insert(event_id.clone(), shortstatekey);
+			} else if !in_state || *retained != event_id {
+				return Ok(self);
+			}
+		}
+	}
+
+	if in_state {
+		self.state = insert_state(self.state, (shortstatekey, event_id))?;
+	}
+
+	Ok(self)
+}
+
+#[implement(SendJoinState)]
+fn finish(mut self) -> HashMap<u64, OwnedEventId> {
+	for (shortstatekey, event_id) in self.retained {
+		self.state
+			.entry(shortstatekey)
+			.or_insert(event_id);
+	}
+
+	self.state
+}
+
+/// Start the replacement snapshot with other local users' existing memberships.
+/// A first join has no snapshot; a failed read from an existing snapshot must
+/// not be treated as an empty room.
+#[implement(Service)]
+async fn local_member_state(
+	&self,
+	room_id: &RoomId,
+	joining: &UserId,
+) -> Result<HashMap<u64, OwnedEventId>> {
+	let Some(hash) = self
+		.services
+		.state
+		.get_room_shortstatehash(room_id)
+		.await
+		.present()?
+	else {
+		return Ok(HashMap::new());
+	};
+	let members = self
+		.services
+		.state_accessor
+		.state_keys_with_ids(hash, &StateEventType::RoomMember);
+	let mut members = pin!(members);
+	let mut state = HashMap::new();
+	while let Some((key, id)) = members.try_next().await? {
+		if self.other_local_member(joining, &key) {
+			let short = self
+				.services
+				.short
+				.get_shortstatekey(&StateEventType::RoomMember, &key)
+				.await?;
+			state.insert(short, id);
+		}
+	}
+	Ok(state)
+}
+
+#[implement(Service)]
+fn other_local_member(&self, joining: &UserId, key: &str) -> bool {
+	key != joining.as_str()
+		&& <&UserId>::try_from(key).is_ok_and(|user| self.services.globals.user_is_local(user))
 }
 
 /// Verifies the events of one send_join response list, dropping each that fails.
