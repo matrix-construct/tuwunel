@@ -1004,6 +1004,24 @@ pub async fn get_pdu_id_from_shorteventid(&self, shorteventid: ShortEventId) -> 
 	self.get_pdu_id(&event_id).await
 }
 
+/// Returns the timeline position of `event` in `room_id`. Outliers and
+/// timeline positions in other rooms are not room timeline positions.
+#[implement(Service)]
+pub async fn get_room_pdu_id(&self, room_id: &RoomId, event: &EventId) -> Result<PduId> {
+	let (pdu_id, shortroomid) =
+		try_join(self.get_pdu_id(event), self.services.short.get_shortroomid(room_id))
+			.await
+			.map_err(|_| err!(Request(NotFound("Event not found."))))?;
+
+	let pdu_id = PduId::from(pdu_id);
+
+	if pdu_id.shortroomid != shortroomid {
+		return Err!(Request(NotFound("Event not found.")));
+	}
+
+	Ok(pdu_id)
+}
+
 /// Returns the accepted timeline ID associated with an event.
 ///
 /// Outlier storage is not consulted because outliers have no room timeline
