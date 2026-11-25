@@ -7,7 +7,7 @@ use ruma::{
 	events::{
 		AnyRawAccountDataEvent, AnyRoomAccountDataEvent, AnySyncEphemeralRoomEvent,
 		GlobalAccountDataEventType, ignored_user_list::IgnoredUserListEvent,
-		receipt::SyncReceiptEvent,
+		receipt::SyncReceiptEvent, room::member::MembershipState,
 	},
 	serde::Raw,
 };
@@ -17,13 +17,14 @@ use tuwunel_core::{
 	result::NotFound,
 	utils::{BoolExt, IterStream, TryReadyExt, stream::BroadbandExt},
 };
+use tuwunel_matrix::PduCount;
 use tuwunel_service::{
 	rooms::read_receipt::{PrivateReadEvents, pack_receipts_fallible},
 	sync::{Connection, DeliveredConfig, Room, RoomUpdate},
 };
 
 use super::{
-	SyncInfo, Window, WindowRoom,
+	SyncInfo, Window, WindowRoom, departed,
 	rooms::{
 		Delivery, Failure as RoomFailure,
 		Failure::{Payload as PayloadFailure, Timeline as TimelineFailure},
@@ -204,7 +205,7 @@ async fn collect_room(
 		);
 	}
 
-	let public_receipts = public_receipts(sync_info, conn, room_id, room.roomsince, ignored)
+	let public_receipts = public_receipts(sync_info, conn, window_room, room.roomsince, ignored)
 		.map_err(|error| Failure::new(Domain::PublicReceipt, error));
 
 	let private_receipts = private_receipts(sync_info, conn, room_id, room.roomsince)
@@ -243,19 +244,55 @@ fn unzip_delivery(
 	})
 }
 
+/// Live public receipts use the sync window. A former member instead keeps
+/// receipts up to the departure ending their membership; a user without
+/// either type of access has no window at all.
+async fn receipt_horizon<F>(
+	membership: Option<&MembershipState>,
+	next_batch: u64,
+	departure: impl FnOnce() -> F,
+) -> Result<Option<u64>>
+where
+	F: Future<Output = Result<Option<PduCount>>>,
+{
+	if membership_allows_required_state(membership) {
+		return Ok(Some(next_batch));
+	}
+	if !departed(membership) {
+		return Ok(None);
+	}
+
+	Ok(match departure().await? {
+		| Some(PduCount::Normal(count)) => Some(count.min(next_batch)),
+		| _ => None,
+	})
+}
+
 async fn public_receipts(
 	SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
 	conn: &Connection,
-	room_id: &RoomId,
+	WindowRoom { room_id, membership, .. }: &WindowRoom,
 	roomsince: u64,
 	ignored: &OnceCell<Option<IgnoredUserListEvent>>,
 ) -> Result<impl Iterator<Item = Raw<AnySyncEphemeralRoomEvent>>> {
-	let mut receipts: Vec<(OwnedUserId, Raw<AnySyncEphemeralRoomEvent>)> = services
-		.read_receipt
-		.readreceipts_since_fallible(room_id, roomsince, Some(conn.next_batch))
-		.map_ok(|(user_id, _ts, event)| (user_id.to_owned(), event))
-		.try_collect()
-		.await?;
+	let until = receipt_horizon(membership.as_ref(), conn.next_batch, || {
+		services
+			.state_accessor
+			.departure_count(sender_user, room_id)
+			.boxed()
+	})
+	.await?;
+
+	let mut receipts: Vec<(OwnedUserId, Raw<AnySyncEphemeralRoomEvent>)> = match until {
+		| Some(until) =>
+			services
+				.read_receipt
+				.readreceipts_since_fallible(room_id, roomsince, Some(until))
+				.map_ok(|(user_id, _ts, event)| (user_id.to_owned(), event))
+				.try_collect()
+				.await?,
+		| None => Vec::new(),
+	};
 
 	if !receipts.is_empty() {
 		let ignored = ignored
@@ -357,6 +394,30 @@ mod tests {
 	use serde_json::{json, value::to_raw_value};
 
 	use super::*;
+
+	#[tokio::test]
+	async fn receipt_window_follows_membership() -> Result {
+		use std::future::ready;
+
+		use MembershipState::*;
+
+		for (membership, count, expected) in [
+			(None, None, Some(10)),
+			(Some(Join), None, Some(10)),
+			(Some(Leave), Some(PduCount::Normal(7)), Some(7)),
+			(Some(Ban), Some(PduCount::Normal(12)), Some(10)),
+			(Some(Leave), None, None),
+			(Some(Leave), Some(PduCount::Backfilled(-1)), None),
+			(Some(Invite), None, None),
+			(Some(Knock), None, None),
+		] {
+			assert_eq!(
+				receipt_horizon(membership.as_ref(), 10, || ready(Ok(count))).await?,
+				expected
+			);
+		}
+		Ok(())
+	}
 
 	#[test]
 	fn malformed_receipt_withholds_the_complete_range() {

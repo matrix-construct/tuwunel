@@ -60,6 +60,30 @@ fn departed_room_remains_extension_eligible() {
 }
 
 #[test]
+fn only_joined_and_peeking_rooms_carry_live_typing() {
+	use MembershipState::*;
+
+	let id = room_id!("!typing:example.com");
+	let conn = Connection::default();
+	for (membership, expected) in [
+		(None, true),
+		(Some(Join), true),
+		(Some(Leave), false),
+		(Some(Ban), false),
+		(Some(Invite), false),
+		(Some(Knock), false),
+	] {
+		let window = window_of(WindowRoom { membership, ..room(id, 1) });
+		assert_eq!(
+			typing::selected_rooms(&conn, &window)
+				.next()
+				.is_some(),
+			expected
+		);
+	}
+}
+
+#[test]
 fn forgotten_room_is_not_extension_eligible() {
 	let room_id = room_id!("!forgotten:example.com");
 	let window = window_of(WindowRoom { forgotten: true, ..room(room_id, 1) });
