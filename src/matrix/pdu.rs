@@ -34,7 +34,7 @@ pub use self::{
 	builder::{Builder, Builder as PduBuilder},
 	count::Count,
 	format::{
-		check::{check_room_id, check_rules},
+		check::{check_raw_size, check_room_id, check_rules},
 		from_incoming_federation, into_outgoing_federation, server_signatures,
 		with_only_server_signatures, with_server_signatures, with_unsigned,
 	},
@@ -192,6 +192,13 @@ pub type Unsigned = Raw<CanonicalJsonObject, 112>;
 /// The [maximum size allowed] for a PDU.
 /// [maximum size allowed]: <https://spec.matrix.org/latest/client-server-api/#size-limits>
 pub const MAX_PDU_BYTES: usize = 65_535;
+
+/// Largest PDU accepted from another server before parsing.
+///
+/// A server serves an event with its `unsigned` data, which can hold the
+/// previous state content and a thread's latest reply, so this allows several
+/// times the PDU size limit.
+pub const MAX_SERVED_PDU_BYTES: usize = 4 * MAX_PDU_BYTES;
 
 pub use tuwunel_core::matrix::MAX_PREV_EVENTS;
 

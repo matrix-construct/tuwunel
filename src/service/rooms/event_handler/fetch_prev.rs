@@ -130,10 +130,10 @@ where
 	let mut pdus = HashMap::new();
 	let mut graph: HashMap<OwnedEventId, _> = HashMap::with_capacity(todo_outlier_stack.len());
 
-	while let Some((prev_event_id, mut outlier)) = todo_outlier_stack.next().await {
+	while let Some((prev_event_id, outlier)) = todo_outlier_stack.next().await {
 		self.services.server.check_running()?;
 
-		let Some((pdu, mut json_opt)) = outlier.pop() else {
+		let Some((pdu, mut json_opt)) = outlier?.pop() else {
 			// Fetch and handle failed
 			graph.insert(prev_event_id.clone(), Default::default());
 			continue;
@@ -325,8 +325,7 @@ async fn land_missing_event(
 	eval @ Eval { room_id, room_version, .. }: Eval<'_>,
 	pdu: &RawJsonValue,
 ) -> Result {
-	let value: CanonicalJsonObject = serde_json::from_str(pdu.get())
-		.map_err(|e| err!(BadServerResponse("missing-events pdu is not canonical json: {e}")))?;
+	let value = parse_missing_event(pdu)?;
 
 	value
 		.get("room_id")
@@ -349,3 +348,12 @@ async fn land_missing_event(
 		.await
 		.map(|_| ())
 }
+
+fn parse_missing_event(pdu: &RawJsonValue) -> Result<CanonicalJsonObject> {
+	crate::fetcher::check_served_pdu_size(pdu.get().len())?;
+	serde_json::from_str(pdu.get())
+		.map_err(|e| err!(BadServerResponse("missing-events pdu is not canonical json: {e}")))
+}
+
+#[cfg(test)]
+mod size_tests;

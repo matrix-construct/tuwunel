@@ -53,7 +53,7 @@ where
 	T::PathBuilder: FedPath,
 {
 	let client = &self.services.client.federation;
-	self.execute_on(client, dest, request).await
+	self.execute_on(client, dest, request, None).await
 }
 
 /// Sends a federation request that may name this server as its destination.
@@ -75,7 +75,7 @@ where
 {
 	let client = &self.services.client.federation;
 
-	self.execute_on_allow_self(client, dest, request)
+	self.execute_on_allow_self(client, dest, request, None)
 		.await
 }
 
@@ -109,7 +109,7 @@ where
 
 	let client = &self.services.client.federation;
 
-	match timeout(timeout_dur, self.execute_uncounted(client, dest, request)).await {
+	match timeout(timeout_dur, self.execute_uncounted(client, dest, request, None)).await {
 		| Ok(result) => result,
 		| Err(_elapsed) => Err!("{dest} key lookup exceeded {}s", timeout_dur.as_secs()),
 	}
@@ -132,11 +132,12 @@ where
 	T::PathBuilder: FedPath,
 {
 	let client = &self.services.client.synapse;
-	self.execute_on(client, dest, request).await
+	self.execute_on(client, dest, request, None).await
 }
 
 /// Sends through a supplied client and records the peer outcome.
 ///
+/// `limit` can lower but never raise the configured response body limit.
 /// The destination's resolved route picks the direct or SRV half of the client.
 /// A successful response clears every stored failure row for the destination.
 /// Only a failed resolution or send is recorded, and only when classified as a
@@ -155,13 +156,14 @@ pub async fn execute_on<T>(
 	client: &Federation,
 	dest: &ServerName,
 	request: T,
+	limit: Option<usize>,
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
-	self.execute_counted(client, dest, request, false)
+	self.execute_counted(client, dest, request, false, limit)
 		.await
 }
 
@@ -177,13 +179,14 @@ pub(super) async fn execute_on_allow_self<T>(
 	client: &Federation,
 	dest: &ServerName,
 	request: T,
+	limit: Option<usize>,
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
-	self.execute_counted(client, dest, request, true)
+	self.execute_counted(client, dest, request, true, limit)
 		.await
 }
 
@@ -201,6 +204,7 @@ async fn execute_counted<T>(
 	dest: &ServerName,
 	request: T,
 	allow_self: bool,
+	limit: Option<usize>,
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
@@ -223,7 +227,7 @@ where
 
 	let request = self.prepare(&actual, dest, request)?;
 	let result = self
-		.perform::<T>(&actual, dest, request, client)
+		.perform::<T>(&actual, dest, request, client, limit)
 		.await;
 
 	self.record_outcome(dest, result.as_ref().err())
@@ -277,6 +281,7 @@ pub(super) async fn execute_uncounted<T>(
 	client: &Federation,
 	dest: &ServerName,
 	request: T,
+	limit: Option<usize>,
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
@@ -292,7 +297,7 @@ where
 
 	let request = self.prepare(&actual, dest, request)?;
 
-	self.perform::<T>(&actual, dest, request, client)
+	self.perform::<T>(&actual, dest, request, client, limit)
 		.await
 }
 
@@ -307,6 +312,7 @@ pub(super) async fn execute_uncounted_allow_self<T>(
 	client: &Federation,
 	dest: &ServerName,
 	request: T,
+	limit: Option<usize>,
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
@@ -322,7 +328,7 @@ where
 
 	let request = self.prepare(&actual, dest, request)?;
 
-	self.perform::<T>(&actual, dest, request, client)
+	self.perform::<T>(&actual, dest, request, client, limit)
 		.await
 }
 
@@ -367,13 +373,7 @@ pub async fn execute_raw(
 				.expect_err("always returns error")),
 	};
 
-	let limit = self
-		.services
-		.server
-		.config
-		.network
-		.http
-		.max_response_size;
+	let limit = self.response_limit(None);
 
 	let status = response.status();
 	let body = read_response_capped(response, limit).await?;
@@ -432,6 +432,7 @@ async fn perform<T>(
 	dest: &ServerName,
 	request: Request,
 	client: &Federation,
+	limit: Option<usize>,
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
@@ -442,13 +443,7 @@ where
 	let method = request.method().clone();
 
 	debug!(?method, ?url, "Sending request");
-	let limit = self
-		.services
-		.server
-		.config
-		.network
-		.http
-		.max_response_size;
+	let limit = self.response_limit(limit);
 
 	match client.for_srv(actual.srv).execute(request).await {
 		| Ok(response) => handle_response::<T>(actual, dest, &method, &url, response, limit)
@@ -515,6 +510,19 @@ pub async fn denies_route(&self, dest: &ServerName) -> bool {
 	}
 
 	Url::parse(&cached.dest.https_string()).is_ok_and(|url| !client.valid_cidr_range_url(&url))
+}
+
+/// The per-call cap can only narrow the configured ceiling.
+#[implement(super::Service)]
+pub(super) fn response_limit(&self, cap: Option<usize>) -> usize {
+	let global = self
+		.services
+		.server
+		.config
+		.network
+		.http
+		.max_response_size;
+	cap.map_or(global, |n| n.min(global))
 }
 
 async fn handle_response<T>(
