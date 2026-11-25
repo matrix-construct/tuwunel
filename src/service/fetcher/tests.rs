@@ -18,6 +18,7 @@ use tokio::{
 	task::{spawn, yield_now},
 };
 use tuwunel_core::err;
+use tuwunel_matrix::pdu::MAX_PDU_BYTES;
 
 use super::*;
 use crate::{Service as _, federation::Candidates};
@@ -648,6 +649,26 @@ async fn room_version_threads_into_event_id_check() {
 	assert!(error.to_string().contains("wrong event id"), "unexpected error: {error}");
 }
 
+#[tokio::test]
+async fn oversized_event_response_is_rejected() {
+	// An event is served with its `unsigned` data, so a valid response can be
+	// larger than the PDU size limit; one far larger is rejected unparsed.
+	let svc = Service::test(Arc::new(MockTransport::new([])), Arc::new(MockSelect::new([])), 4);
+	let opts = test_opts(&event_id!("$ev:test.local").to_owned());
+	let event = |pad| format!(r#"{{"pad":"{}"}}"#, "x".repeat(pad));
+
+	svc.validate(&opts, event(2 * MAX_PDU_BYTES).as_bytes())
+		.await
+		.expect("an event with its unsigned data is accepted");
+
+	let error = svc
+		.validate(&opts, event(4 * MAX_PDU_BYTES).as_bytes())
+		.await
+		.expect_err("an event far over the PDU size limit is rejected");
+
+	assert!(error.to_string().contains("larger than"), "unexpected error: {error}");
+}
+
 #[test]
 fn round_width_schedules() {
 	let fixed = FanoutGrowth::Fixed(nz(1));
@@ -1178,4 +1199,33 @@ async fn backfill_fails_over_past_empty_batch() {
 
 	assert_eq!(outcome.origin, b, "the nonempty server answers");
 	assert_eq!(mock.calls(), vec![a, b], "the empty batch is a miss");
+}
+
+#[test]
+fn federation_batch_response_limits() {
+	use super::transport::response_limit;
+
+	let opts = Opts::new(Op::MissingEvents, room());
+	let event = response_limit(Op::Event, &opts).expect("single-event cap");
+	assert_eq!(
+		response_limit(Op::MissingEvents, &opts),
+		Some(event.saturating_mul(10)),
+		"the default asks for ten events"
+	);
+	let opts = opts.backfill_limit(nz(2));
+	assert_eq!(
+		response_limit(Op::MissingEvents, &opts),
+		Some(event.saturating_mul(2)),
+		"use the requested event count"
+	);
+	assert_eq!(
+		response_limit(Op::StateIds, &opts),
+		Some(64 * 1024 * 1024),
+		"independent state ID limit"
+	);
+	assert_eq!(
+		response_limit(Op::Backfill, &opts),
+		None,
+		"unrelated operations use the global limit"
+	);
 }

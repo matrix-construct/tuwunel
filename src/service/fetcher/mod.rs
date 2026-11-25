@@ -31,6 +31,7 @@ use tuwunel_core::{Result, implement};
 /// Callers build an [`Opts`] value for an [`Op`] and receive the winning
 /// [`Outcome`] through [`Service::fetch`].
 pub use self::opts::{EventWindow, FanoutGrowth, Op, Opts, Outcome};
+pub(crate) use self::validate::check_served_pdu_size;
 use self::{
 	error::Failure,
 	inflight::{Key, SharedResult, Subscription},
