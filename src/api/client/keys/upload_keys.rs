@@ -5,6 +5,7 @@ use ruma::{
 use tuwunel_core::{Err, Result, debug, err, utils::result::NotFound};
 use tuwunel_service::Services;
 
+use super::check_key_size;
 use crate::Ruma;
 
 /// # `POST /_matrix/client/r0/keys/upload`
@@ -20,6 +21,10 @@ pub(crate) async fn upload_keys_route(
 ) -> Result<upload_keys::v3::Response> {
 	let sender_user = body.sender_user();
 	let sender_device = body.sender_device()?;
+
+	if let Some(keys) = &body.device_keys {
+		check_key_size(keys)?;
+	}
 
 	services
 		.users

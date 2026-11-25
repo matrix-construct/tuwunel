@@ -197,6 +197,12 @@ pub use self::{
 	sync::calculate_heroes,
 };
 
+/// Largest serialized to-device message content or individual uploaded key.
+///
+/// Device, master and self-signing keys are carried in federation EDUs, as
+/// are to-device messages, whose 64 KiB content limit matches Synapse's.
+const MAX_EDU_CONTENT_BYTES: usize = 65_536;
+
 /// generated user access token length
 const TOKEN_LENGTH: usize = tuwunel_service::users::device::TOKEN_LENGTH;
 

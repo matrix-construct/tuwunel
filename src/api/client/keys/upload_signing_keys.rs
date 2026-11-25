@@ -17,6 +17,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::{Services, uiaa::SESSION_ID_LENGTH, users::parse_master_key};
 
+use super::check_key_size;
 use crate::{Ruma, router::auth_uiaa};
 
 struct Keys<'a> {
@@ -153,6 +154,8 @@ fn validate_key(
 	let Some(key) = key else {
 		return Ok(());
 	};
+
+	check_key_size(key)?;
 
 	let key = key
 		.deserialize()
