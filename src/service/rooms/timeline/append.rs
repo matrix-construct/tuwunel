@@ -358,7 +358,7 @@ async fn read_replaced(
 }
 
 #[implement(super::Service)]
-async fn prev_state(&self, pdu: &PduEvent, state_key: &str) -> Option<PduEvent> {
+pub(super) async fn prev_state(&self, pdu: &PduEvent, state_key: &str) -> Option<PduEvent> {
 	let event_id = pdu.event_id();
 	let shortstatehash = self
 		.services
