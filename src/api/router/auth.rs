@@ -52,6 +52,8 @@ pub(super) enum Token {
 #[derive(Debug, Default)]
 pub(super) struct Auth {
 	pub(super) origin: Option<OwnedServerName>,
+	/// Canonical content used to verify a federation request, also used for dispatch.
+	pub(super) signed_content: Option<CanonicalJsonValue>,
 	pub(super) sender_user: Option<OwnedUserId>,
 	pub(super) sender_device: Option<OwnedDeviceId>,
 	pub(super) appservice_info: Option<RegistrationInfo>,
@@ -62,7 +64,6 @@ pub(super) struct Auth {
 pub(super) async fn auth<A: AuthDispatch>(
 	services: &Services,
 	request: &mut Request,
-	json_body: Option<&CanonicalJsonValue>,
 	route: TypeId,
 ) -> Result<Auth> {
 	let bearer: Option<TypedHeader<Authorization<Bearer>>> =
@@ -86,7 +87,7 @@ pub(super) async fn auth<A: AuthDispatch>(
 		check_auth_still_required(services, &token, route)?;
 	}
 
-	let auth = A::dispatch(services, request, json_body, token, route).await?;
+	let auth = A::dispatch(services, request, token, route).await?;
 
 	try_join(
 		locked_account_check(services, &auth, route),
