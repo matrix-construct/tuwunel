@@ -27,11 +27,20 @@ where
 	self.engine
 		.db
 		.put_cf_opt(&self.cf(), key, val, write_options)
-		.or_else(or_else)
-		.expect("database insert error");
+		.unwrap_or_else(|e| {
+			if e.kind() == rocksdb::ErrorKind::IOError && e.into_string().contains("No space left on device") {
+				panic!("Database storage full: {}", e);
+			}
+			or_else(e)
+		});
 
 	if !self.engine.corked() {
-		self.engine.flush().expect("database flush error");
+		self.engine.flush().unwrap_or_else(|e| {
+			if e.kind() == rocksdb::ErrorKind::IOError && e.into_string().contains("No space left on device") {
+				panic!("Database storage full: {}", e);
+			}
+			panic!("database flush error: {}", e);
+		});
 	}
 
 	self.notify(key.as_ref());
