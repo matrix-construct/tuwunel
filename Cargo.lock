@@ -2563,9 +2563,9 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "loole"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efa93bd989bf1adaf73d3d498651a83df513a19e7b88b91cc5bcc87804bf3426"
+checksum = "45a6f2ee852ef619dac448846d7a80fb56a08e842674202d1ffe509fc319165c"
 dependencies = [
  "futures-core",
  "futures-sink",
