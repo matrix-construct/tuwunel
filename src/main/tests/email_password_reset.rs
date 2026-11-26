@@ -12,6 +12,7 @@ use tuwunel_core::{
 mod fixture;
 #[path = "email_password_reset/http.rs"]
 mod http;
+mod jwt;
 #[path = "email_password_reset/scenarios.rs"]
 mod scenarios;
 mod smtp;

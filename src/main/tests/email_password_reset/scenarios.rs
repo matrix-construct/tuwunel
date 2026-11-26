@@ -2,11 +2,10 @@ use std::{net::TcpListener, sync::Arc, time::Duration};
 
 use futures::{StreamExt, future::join};
 use reqwest::Client;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::time::sleep;
 use tuwunel_core::{
 	Result, err,
-	jwt::{EncodingKey, Header, encode},
 	ruma::{MilliSecondsSinceUnixEpoch, UserId, thirdparty::Medium},
 	utils::hash::verify_password,
 };
@@ -23,6 +22,7 @@ use super::{
 		request_password_token, request_token_failure, reset_password, view_confirmation,
 		wait_until_ready,
 	},
+	jwt::mint,
 };
 
 const A_OLD_PASSWORD: &str = "email-reset-a-old-password";
@@ -800,7 +800,7 @@ async fn verify_authenticated_changes(phase: Phase<'_>) -> Result {
 	assert_eq!(token_user.as_str(), phase.user_b.as_str());
 	assert_eq!(token_device.as_str(), phase.state.b_device);
 
-	let token = jwt_token(phase.user_b)?;
+	let token = mint(JWT_SECRET, phase.user_b)?;
 	let response =
 		jwt_password_change(phase.client, phase.base, None, &token, B_TOKENLESS_JWT_PASSWORD)
 			.await?;
@@ -977,14 +977,6 @@ async fn reject_deactivated_reset(phase: Phase<'_>) -> Result<String> {
 	assert_password(phase.services, phase.user_a, A_DEACTIVATED_REPLAY_PASSWORD, false).await?;
 
 	Ok(pending.sid)
-}
-
-fn jwt_token(user_id: &UserId) -> Result<String> {
-	let claims = json!({"sub": user_id.localpart()});
-
-	EncodingKey::from_secret(JWT_SECRET.as_bytes())
-		.and_then(|key| encode(&Header::default(), &claims, &key))
-		.map_err(|error| err!("failed to mint JWT reauthentication token: {error}"))
 }
 
 async fn create_devices(services: &Services, user_id: &UserId, tokens: &[&str]) -> Result {

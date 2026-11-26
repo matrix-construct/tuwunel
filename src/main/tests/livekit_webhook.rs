@@ -38,7 +38,6 @@ use tuwunel_core::{
 	Result, err,
 	http::header::{AUTHORIZATION, CONTENT_TYPE},
 	implement,
-	jwt::{Algorithm, EncodingKey, Header, encode},
 	ruma::{
 		OwnedUserId, RoomId, UserId,
 		api::client::delayed_events::get_delayed_event::v1::Finalized,
@@ -51,6 +50,7 @@ use self::{
 	client::{Client, accepted, field, register},
 	common::{API_KEY, FOLDED_SLOT, SECRET, SLOT, claims, derive, refusal},
 	fixture::boot,
+	jwt::sign,
 };
 
 mod client;
@@ -62,6 +62,12 @@ mod fixture;
 )]
 #[path = "livekit/common.rs"]
 mod common;
+
+#[expect(
+	dead_code,
+	reason = "Minting by user serves the JWT login tests."
+)]
+mod jwt;
 
 #[path = "client/membership.rs"]
 mod membership;
@@ -663,7 +669,5 @@ fn token(body: &[u8], secret: &str) -> String {
 		"sha256": STANDARD.encode(sha256(body)),
 	});
 
-	EncodingKey::from_secret(secret.as_bytes())
-		.and_then(|key| encode(&Header::new(Algorithm::HS256), &fields, &key))
-		.expect("a webhook token signs")
+	sign(secret, &fields).expect("a webhook token signs")
 }

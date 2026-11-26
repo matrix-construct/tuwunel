@@ -10,16 +10,13 @@ use std::{
 use reqwest::{Client, RequestBuilder, StatusCode};
 use serde_json::{Value, json};
 use tokio::time::sleep;
-use tuwunel_core::{
-	Err, Result, err,
-	jwt::{EncodingKey, Header, encode},
-	ruma::UserId,
-};
+use tuwunel_core::{Err, Result, err, ruma::UserId};
 use tuwunel_service::Services;
 
 use self::{
 	appservice::{Bridge, register_appservice},
 	fixture::boot,
+	jwt::mint,
 };
 
 mod appservice;
@@ -29,6 +26,7 @@ mod appservice;
 )]
 mod client;
 mod fixture;
+mod jwt;
 
 const JWT_SECRET: &str = "jwt-login-deactivated-test-secret";
 const PASSWORD: &str = "test-password";
@@ -589,12 +587,7 @@ async fn jwt_login(
 }
 
 fn jwt_auth(user_id: &UserId) -> Result<Value> {
-	let claims = json!({"sub": user_id.localpart()});
-
-	EncodingKey::from_secret(JWT_SECRET.as_bytes())
-		.and_then(|key| encode(&Header::default(), &claims, &key))
-		.map(|token| json!({"type": "org.matrix.login.jwt", "token": token}))
-		.map_err(|error| err!("failed to mint a JWT: {error}"))
+	mint(JWT_SECRET, user_id).map(|token| json!({"type": "org.matrix.login.jwt", "token": token}))
 }
 
 async fn password_login(
