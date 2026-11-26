@@ -40,7 +40,8 @@ pub fn decoding_key(&self) -> Result<DecodingKey> {
 	let key = self.nonempty_key()?;
 
 	match self.key_format()? {
-		| KeyFormat::Hmac => Ok(DecodingKey::from_secret(key.as_bytes())),
+		| KeyFormat::Hmac =>
+			DecodingKey::from_secret(key.as_bytes()).map_err(invalid_key("HMAC")),
 		| KeyFormat::B64Hmac =>
 			DecodingKey::from_base64_secret(key).map_err(invalid_key("base64")),
 		| KeyFormat::Ecdsa =>
@@ -76,7 +77,8 @@ pub fn encoding_key(&self) -> Result<EncodingKey> {
 	let format = self.format.as_str();
 
 	match self.key_format()? {
-		| KeyFormat::Hmac => Ok(EncodingKey::from_secret(key.as_bytes())),
+		| KeyFormat::Hmac =>
+			EncodingKey::from_secret(key.as_bytes()).map_err(invalid_key("HMAC")),
 		| KeyFormat::B64Hmac =>
 			EncodingKey::from_base64_secret(key).map_err(invalid_key("base64")),
 		| KeyFormat::Ecdsa | KeyFormat::Eddsa => Err!(Config(

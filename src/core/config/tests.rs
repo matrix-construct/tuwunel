@@ -1914,14 +1914,18 @@ fn an_empty_jwt_key_fails_the_config_check() {
 	}
 }
 
-/// The key conversions refuse an empty key in either shared-secret format.
+/// The key conversions refuse an empty key themselves in either shared-secret
+/// format.
 ///
-/// An empty base64 key decodes to an empty secret, so neither format refuses
-/// one on its own. The rows leave JWT login disabled, since the conversions
-/// must not rely on the config check.
+/// jsonwebtoken refuses an empty secret too, but its message does not name the
+/// cause, so each refusal must carry the conversions' own message. The rows
+/// leave JWT login disabled, since the conversions must not rely on the config
+/// check.
 #[cfg(feature = "jwt_login")]
 #[test]
 fn jwt_key_conversions_refuse_an_empty_key() {
+	const EMPTY_KEY_REFUSAL: &str = "JWT key is empty";
+
 	for (format, key, valid) in [
 		("HMAC", "", false),
 		("B64HMAC", "", false),
@@ -1936,9 +1940,18 @@ fn jwt_key_conversions_refuse_an_empty_key() {
 
 		let row = format!("{format} {key:?}");
 
-		assert_verdict(&row, config.decoding_key(), valid, "jwt.key");
-		assert_verdict(&row, config.encoding_key(), valid, "jwt.key");
+		assert_refusal(&row, config.decoding_key(), valid, "jwt.key", EMPTY_KEY_REFUSAL);
+		assert_refusal(&row, config.encoding_key(), valid, "jwt.key", EMPTY_KEY_REFUSAL);
 	}
+}
+
+#[cfg(feature = "jwt_login")]
+fn assert_refusal<T: Debug>(row: &str, result: Result<T>, valid: bool, field: &str, cause: &str) {
+	if let Err(error) = &result {
+		assert!(error.to_string().contains(cause), "{row}: {error}");
+	}
+
+	assert_verdict(row, result, valid, field);
 }
 
 /// A documented default is published to operators through the generated

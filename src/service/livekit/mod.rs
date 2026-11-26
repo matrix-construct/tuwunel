@@ -29,7 +29,7 @@ use loole::{Receiver, Sender, unbounded};
 use ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId};
 use tuwunel_core::{
 	Result, err, implement,
-	jwt::{DecodingKey, EncodingKey},
+	jwt::{DecodingKey, EncodingKey, errors::Error as JwtError},
 	smallstr::SmallString,
 	utils::{MutexMap, rand::string_array},
 };
@@ -268,12 +268,15 @@ fn conf(&self) -> Result<&Conf> {
 impl Conf {
 	fn new((url, api_key, api_secret): (&str, &str, &str)) -> Result<Self> {
 		let secret = api_secret.as_bytes();
+		let invalid = |e: JwtError| {
+			err!(Config("livekit.api_secret", "LiveKit api_secret is not a usable HMAC key: {e}"))
+		};
 
 		Ok(Self {
 			url: url.to_owned(),
 			api_key: api_key.into(),
-			key: EncodingKey::from_secret(secret),
-			webhook_key: DecodingKey::from_secret(secret),
+			key: EncodingKey::from_secret(secret).map_err(invalid)?,
+			webhook_key: DecodingKey::from_secret(secret).map_err(invalid)?,
 			create_room: Method::new(url, "CreateRoom")?,
 			get_participant: Method::new(url, "GetParticipant")?,
 			remove_participant: Method::new(url, "RemoveParticipant")?,

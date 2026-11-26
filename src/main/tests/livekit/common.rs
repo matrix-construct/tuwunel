@@ -23,11 +23,10 @@ pub(crate) const SLOT: &str = "m.call#ROOM";
 pub(crate) const FOLDED_SLOT: &str = "m.call#room";
 
 pub(crate) fn claims(jwt: &str) -> Result<Value> {
-	let key = DecodingKey::from_secret(SECRET.as_bytes());
-	let token = decode(jwt, &key, &Validation::new(Algorithm::HS256))
-		.map_err(|e| err!("the token does not verify with the API secret: {e}"))?;
-
-	Ok(token.claims)
+	DecodingKey::from_secret(SECRET.as_bytes())
+		.and_then(|key| decode(jwt, &key, &Validation::new(Algorithm::HS256)))
+		.map(|token| token.claims)
+		.map_err(|e| err!("the token does not verify with the API secret: {e}"))
 }
 
 // MSC4195's derivation: unpadded base64 of SHA-256 over a two-string JSON array.

@@ -483,9 +483,9 @@ fn webhook_token(secret: &str, iss: &str, exp: u64, digest: &str) -> String {
 }
 
 fn sign(secret: &str, fields: &JsonValue) -> String {
-	let key = EncodingKey::from_secret(secret.as_bytes());
-
-	encode(&Header::new(Algorithm::HS256), fields, &key).expect("a webhook token signs")
+	EncodingKey::from_secret(secret.as_bytes())
+		.and_then(|key| encode(&Header::new(Algorithm::HS256), fields, &key))
+		.expect("a webhook token signs")
 }
 
 fn verify(conf: &Conf, authorization: Option<&str>, body: &[u8]) -> Result {
@@ -535,13 +535,10 @@ fn conf() -> Conf {
 }
 
 fn claims(token: &str) -> JsonValue {
-	decode::<JsonValue>(
-		token,
-		&DecodingKey::from_secret(SECRET.as_bytes()),
-		&Validation::new(Algorithm::HS256),
-	)
-	.expect("the token verifies with the API secret")
-	.claims
+	DecodingKey::from_secret(SECRET.as_bytes())
+		.and_then(|key| decode(token, &key, &Validation::new(Algorithm::HS256)))
+		.expect("the token verifies with the API secret")
+		.claims
 }
 
 fn lifetime(claims: &JsonValue) -> u64 {

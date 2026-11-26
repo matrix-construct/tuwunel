@@ -663,7 +663,7 @@ fn token(body: &[u8], secret: &str) -> String {
 		"sha256": STANDARD.encode(sha256(body)),
 	});
 
-	let key = EncodingKey::from_secret(secret.as_bytes());
-
-	encode(&Header::new(Algorithm::HS256), &fields, &key).expect("a webhook token signs")
+	EncodingKey::from_secret(secret.as_bytes())
+		.and_then(|key| encode(&Header::new(Algorithm::HS256), &fields, &key))
+		.expect("a webhook token signs")
 }

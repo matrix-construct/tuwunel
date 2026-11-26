@@ -241,7 +241,7 @@ git = "https://github.com/matrix-construct/jevmalloc"
 rev = "0f6de6abd9d9731a29c2032f54ee5bd40628d849"
 
 [workspace.dependencies.jsonwebtoken]
-version = "11.0"
+version = "12.0"
 default-features = false
 features = [
 	"aws_lc_rs",

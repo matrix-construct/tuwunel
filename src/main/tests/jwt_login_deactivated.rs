@@ -591,7 +591,8 @@ async fn jwt_login(
 fn jwt_auth(user_id: &UserId) -> Result<Value> {
 	let claims = json!({"sub": user_id.localpart()});
 
-	encode(&Header::default(), &claims, &EncodingKey::from_secret(JWT_SECRET.as_bytes()))
+	EncodingKey::from_secret(JWT_SECRET.as_bytes())
+		.and_then(|key| encode(&Header::default(), &claims, &key))
 		.map(|token| json!({"type": "org.matrix.login.jwt", "token": token}))
 		.map_err(|error| err!("failed to mint a JWT: {error}"))
 }

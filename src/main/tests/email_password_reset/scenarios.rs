@@ -982,7 +982,8 @@ async fn reject_deactivated_reset(phase: Phase<'_>) -> Result<String> {
 fn jwt_token(user_id: &UserId) -> Result<String> {
 	let claims = json!({"sub": user_id.localpart()});
 
-	encode(&Header::default(), &claims, &EncodingKey::from_secret(JWT_SECRET.as_bytes()))
+	EncodingKey::from_secret(JWT_SECRET.as_bytes())
+		.and_then(|key| encode(&Header::default(), &claims, &key))
 		.map_err(|error| err!("failed to mint JWT reauthentication token: {error}"))
 }
 
