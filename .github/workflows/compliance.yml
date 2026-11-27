@@ -134,7 +134,7 @@ jobs:
 
     - if: inputs.runtime_history && (success() || (failure() && steps.execute.outcome == 'failure'))
       name: Restore Runtime History
-      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: _ci_digest/${{github.ref_name}}.json
         key: rt-digest-${{github.ref_name}}-${{inputs.metrics_artifact_prefix}}-${{matrix.feat_set}}-${{matrix.sys_name}}-${{matrix.sys_target}}-${{github.run_id}}-${{github.run_attempt}}
@@ -143,7 +143,7 @@ jobs:
 
     - if: inputs.runtime_history && github.ref_name != (github.event.repository.default_branch || 'main') && (success() || (failure() && steps.execute.outcome == 'failure'))
       name: Restore Main Baseline
-      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: _ci_digest/${{github.event.repository.default_branch || 'main'}}.json
         key: rt-digest-${{github.event.repository.default_branch || 'main'}}-${{inputs.metrics_artifact_prefix}}-${{matrix.feat_set}}-${{matrix.sys_name}}-${{matrix.sys_target}}-readonly
@@ -194,7 +194,7 @@ jobs:
     - if: inputs.runtime_history && steps.execute.outcome == 'success'
       name: Save Runtime History
       continue-on-error: true
-      uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: _ci_digest/${{github.ref_name}}.json
         key: rt-digest-${{github.ref_name}}-${{inputs.metrics_artifact_prefix}}-${{matrix.feat_set}}-${{matrix.sys_name}}-${{matrix.sys_target}}-${{github.run_id}}-${{github.run_attempt}}
