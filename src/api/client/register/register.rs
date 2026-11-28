@@ -16,7 +16,7 @@ use tuwunel_service::{
 	users::{Register, device::generate_refresh_token},
 };
 
-use super::{SESSION_ID_LENGTH, is_matrix_appservice_irc};
+use super::{Closed, SESSION_ID_LENGTH, check_registration_open, is_matrix_appservice_irc};
 use crate::{
 	ClientIp, Ruma,
 	utils::{bind_new_account_email, check_email_domain},
@@ -174,15 +174,28 @@ fn gate_registration_allowed(
 		.as_deref()
 		.unwrap_or("");
 
-	if !services.config.registration.enable && body.appservice_info.is_none() {
-		info!(
-			%is_guest,
-			%user,
-			%device_name,
-			"Rejecting registration attempt as registration is disabled"
-		);
+	match check_registration_open(services, body.appservice_info.as_ref()) {
+		| Ok(()) => {},
+		| Err(Closed::Password) if is_guest => {},
+		| Err(closed @ Closed::Registration) => {
+			info!(
+				%is_guest,
+				%user,
+				%device_name,
+				"Rejecting registration attempt as registration is disabled"
+			);
 
-		return Err!(Request(Forbidden("Registration has been disabled.")));
+			return Err(closed.into());
+		},
+		| Err(closed @ Closed::Password) => {
+			debug_warn!(
+				%user,
+				%device_name,
+				"Rejecting registration attempt as password login is disabled"
+			);
+
+			return Err(closed.into());
+		},
 	}
 
 	if is_guest && !services.config.registration.guests.enable {
@@ -192,19 +205,6 @@ fn gate_registration_allowed(
 		);
 
 		return Err!(Request(GuestAccessForbidden("Guest registration is disabled.")));
-	}
-
-	if !is_guest
-		&& body.appservice_info.is_none()
-		&& !services.config.allows_password_registration()
-	{
-		debug_warn!(
-			%user,
-			%device_name,
-			"Rejecting registration attempt as password login is disabled"
-		);
-
-		return Err!(Request(Forbidden("Password registration has been disabled.")));
 	}
 
 	Ok(())

@@ -2,12 +2,16 @@ use axum::extract::State;
 use ruma::{UserId, api::client::account::get_username_availability};
 use tuwunel_core::{Err, Result};
 
-use super::is_matrix_appservice_irc;
+use super::{check_registration_open, is_matrix_appservice_irc};
 use crate::{ClientIp, Ruma};
 
 /// # `GET /_matrix/client/v3/register/available`
 ///
 /// Checks if a username is valid and available on this server.
+///
+/// A caller who could not register any name, because registration is disabled
+/// or open only to other kinds of login and they hold no appservice token, is
+/// refused before the name is read, with the error `POST /register` gives.
 ///
 /// Conditions for returning true:
 /// - The user id is not historical
@@ -22,7 +26,11 @@ pub(crate) async fn get_register_available_route(
 	ClientIp(client): ClientIp,
 	body: Ruma<get_username_availability::v3::Request>,
 ) -> Result<get_username_availability::v3::Response> {
-	let is_irc = is_matrix_appservice_irc(body.appservice_info.as_ref());
+	let appservice_info = body.appservice_info.as_ref();
+
+	check_registration_open(services, appservice_info)?;
+
+	let is_irc = is_matrix_appservice_irc(appservice_info);
 
 	if services
 		.config
@@ -70,7 +78,7 @@ pub(crate) async fn get_register_available_route(
 		return Err!(Request(UserInUse("User ID is not available.")));
 	}
 
-	if let Some(ref info) = body.appservice_info
+	if let Some(info) = appservice_info
 		&& !info.is_user_match(&user_id)
 	{
 		return Err!(Request(Exclusive("Username is not in an appservice namespace.")));

@@ -33,11 +33,24 @@ pub(crate) struct Bridge<'a> {
 /// Every namespace it claims is exclusive. It claims no rooms and has no URL,
 /// since no test here sends it a transaction.
 pub(crate) async fn register_appservice(services: &Services, bridge: &Bridge<'_>) -> Result {
+	register_appservice_with_exclusivity(services, bridge, true).await
+}
+
+/// Register an appservice as `register_appservice` does, choosing whether the
+/// namespaces it claims are exclusive.
+///
+/// A shared namespace leaves its free names available to the appservice itself,
+/// where an exclusive one answers even its owner that the name is reserved.
+pub(crate) async fn register_appservice_with_exclusivity(
+	services: &Services,
+	bridge: &Bridge<'_>,
+	exclusive: bool,
+) -> Result {
 	let namespaces = Namespaces {
-		users: vec![Namespace::new(true, bridge.users.to_owned())],
+		users: vec![Namespace::new(exclusive, bridge.users.to_owned())],
 		aliases: bridge
 			.aliases
-			.map(|regex| Namespace::new(true, regex.to_owned()))
+			.map(|regex| Namespace::new(exclusive, regex.to_owned()))
 			.into_iter()
 			.collect(),
 		..Default::default()

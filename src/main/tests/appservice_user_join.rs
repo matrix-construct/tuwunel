@@ -14,6 +14,8 @@ use self::{
 };
 
 mod appservice;
+#[path = "appservice_user_join/available.rs"]
+mod available;
 mod client;
 mod fixture;
 
@@ -23,6 +25,9 @@ mod get;
 const OWNER_TOKEN: &str = "appservice-user-join-owner-token";
 const GUEST_TOKEN: &str = "appservice-user-join-guest-token";
 const BRIDGE_TOKEN: &str = "appservice-user-join-bridge-token";
+
+// Both tests boot at once, so each caps its workers under the shared thread limit.
+const POOL_CAP: &str = "database.pool.max_workers=64";
 
 const BRIDGE: Bridge<'static> = Bridge {
 	id: "appservice-user-join",
@@ -42,7 +47,7 @@ const BRIDGE: Bridge<'static> = Bridge {
 fn appservice_users_are_not_guests() -> Result {
 	boot(
 		"appservice-user-join",
-		["registration.grant_admin_to_first_user=false"],
+		["registration.grant_admin_to_first_user=false", POOL_CAP],
 		exercise,
 	)
 }
