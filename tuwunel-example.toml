@@ -4229,9 +4229,11 @@
 # Wrong-password limit
 #
 # Throttles password guessing against one account from one client address.
-# Only wrong passwords, including names that match no account, use up the
-# allowance: `burst_count` at once, then one more every 1/`per_second`
-# seconds. Other addresses keep their own allowance for the same account.
+# Every public sign-in whose password does not verify uses up the allowance,
+# including one for a name that matches no account or for an account with no
+# password to sign in with: `burst_count` at once, then one more every
+# 1/`per_second` seconds. Other addresses keep their own allowance for the
+# same account.
 #
 #[global.rate_limiting.login.failed]
 
@@ -4239,7 +4241,9 @@
 # address.
 #
 # Every attempt reserves a token before verification; a correct password
-# returns it, while a wrong password keeps it.
+# returns it, while a wrong password keeps it. A public sign-in keeps it
+# for any password that does not verify, including one for a name that
+# matches no account or for an account with no password.
 # An empty bucket refuses even a correct password from that address,
 # without blocking the account from other addresses.
 # IPv6 addresses share a bucket within each /64, and authenticated

@@ -337,12 +337,12 @@ async fn authenticate_local(
 	Ok((user_id, Some(hash)))
 }
 
-/// Authenticate a local account by password, mirroring the `/login` password
-/// flow (`password_login`).
+/// Authenticate a local account by password through the `/login` password
+/// check.
 ///
-/// Refused while password login is disabled. Only password-origin accounts
-/// pass, and every credential failure returns one uniform error. Returns the
-/// account and the hash its password verified against.
+/// Password login must be enabled, and once the password verifies the account
+/// must still be able to sign in. Returns the account and the hash its
+/// password verified against.
 async fn verify_credentials(
 	services: &Services,
 	username: &str,
@@ -363,52 +363,10 @@ async fn verify_credentials(
 		return Err(invalid());
 	}
 
-	// Share `/login` buckets so switching routes cannot renew the allowance.
-	let reservation = services
-		.login_ratelimit
-		.reserve_login_attempt(&user_id, client)?;
-
-	// Native registration lowercases the localpart, so resolve to whichever case
-	// carries the password, mirroring `/login`. An unknown account keeps the
-	// reservation as a wrong password does.
-	let (user_id, hash) = match services.users.password_hash(&user_id).await {
-		| Ok(hash) => (user_id, hash),
-		| Err(_) => {
-			let lowercased = UserId::parse_with_server_name(username.to_lowercase(), server_name)
-				.map_err(|_| invalid())?;
-
-			let hash = services
-				.users
-				.password_hash(&lowercased)
-				.await
-				.map_err(|_| invalid())?;
-
-			(lowercased, hash)
-		},
-	};
-
-	// Deactivated accounts, and SSO/LDAP-origin ones that must authenticate
-	// through their provider, have no password here to check.
-	let unchecked = hash.is_empty()
-		|| services
-			.users
-			.origin(&user_id)
-			.await
-			.is_ok_and(|origin| origin != "password");
-
-	if unchecked {
-		services
-			.login_ratelimit
-			.refund_login_attempt(reservation)?;
-
-		return Err(invalid());
-	}
-
-	verify_password(password, &hash).map_err(|_| invalid())?;
-
-	services
-		.login_ratelimit
-		.record_login(reservation)?;
+	let (user_id, hash) = services
+		.users
+		.password_login(&user_id, password, client)
+		.await?;
 
 	require_account_usable(services, &user_id).await?;
 

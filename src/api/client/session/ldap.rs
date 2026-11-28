@@ -34,8 +34,7 @@ pub(super) async fn ldap_login(
 			}
 
 			let Some((user_dn, is_admin)) = dns.first() else {
-				return password_login(services, user_id, lowercased_user_id, password, client)
-					.await;
+				return password_login(services, user_id, password, client).await;
 			};
 
 			(user_dn.clone(), *is_admin)

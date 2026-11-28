@@ -136,11 +136,13 @@ Password sign-in uses three token buckets. A refused attempt gets
 `M_LIMIT_EXCEEDED`, with a `retry_after_ms` unless a limit's table is full.
 
 - **Wrong passwords:** each account and client address pair has its own budget.
-  An attempt reserves a token before checking the password and returns it on
-  success; wrong passwords and unknown accounts keep it. Once exhausted, that
-  pair is refused until a token refills, including attempts with the correct
-  password. Attempts from another address still have their own allowance.
-  Concurrent attempts each reserve a token, so they cannot bypass the limit.
+  An attempt reserves a token before the password is checked. A correct
+  password returns the token. Any attempt whose password does not verify keeps
+  it, including one for an unknown account or an account with no password. Once
+  the budget is exhausted, that pair is refused until a token refills, even with
+  the correct password. Attempts from another address still have their own
+  allowance. Concurrent attempts each reserve a token, so they cannot bypass the
+  limit.
 - **Client addresses:** all password attempts from one address share a broader
   budget across accounts, charged before verification and kept on success too.
   This bounds password spraying and password-verification work.
@@ -161,18 +163,21 @@ Clients sharing a NAT address also share its address budget. By default the
 address comes from the socket peer. A loopback peer, such as a reverse proxy
 connecting over loopback or any client of the Unix socket, stands for every
 client behind it, so its attempts are not limited per address and keep only
-the failed-attempt and successful-sign-in limits. Behind a reverse proxy,
-configure `http.ip_source`, restrict backend access to trusted proxies, and
-have the proxy replace the selected forwarding header with a verified address;
-this also applies the address budget behind a local proxy or the Unix socket.
-Do not accept client-supplied forwarding headers unchanged. A proxy that
-connects from a non-loopback address, including a container on a bridge
-network, gives all its users one address and allowance unless it forwards the
-client address. Password login and password UIAA require the selected source
-even for loopback peers and peers listed in `http.ip_source_trusted_subnets`;
-they do not use those peers' usual extraction bypass. A missing or invalid
-selected source refuses authentication. At startup and on reload, a warning
-says when a Unix socket or loopback listener has no per-address limit.
+the failed-attempt and successful-sign-in limits.
+
+If you run Tuwunel behind a reverse proxy, configure `http.ip_source`, restrict
+backend access to trusted proxies, and have the proxy replace the selected
+forwarding header with a verified address. This also applies the address budget
+behind a local proxy or the Unix socket. Do not accept client-supplied
+forwarding headers unchanged. A proxy that connects from a non-loopback address,
+including a container on a bridge network, gives all its users one address and
+allowance unless it forwards the client address.
+
+Password login and password UIAA require the selected source even for loopback
+peers and peers listed in `http.ip_source_trusted_subnets`. They do not use
+those peers' usual extraction bypass. A missing or invalid selected source
+refuses authentication. At startup and on reload, a warning says when a Unix
+socket or loopback listener has no per-address limit.
 
 Each limit has its own config section, shown here with its defaults:
 

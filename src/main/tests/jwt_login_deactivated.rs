@@ -3,15 +3,17 @@
 
 use std::{
 	fmt::Display,
+	iter::{once, repeat_n},
 	net::{IpAddr, Ipv4Addr},
 	time::Duration,
 };
 
+use futures::{StreamExt, TryStreamExt, future::join_all};
 use reqwest::{Client, RequestBuilder, StatusCode};
 use serde_json::{Value, json};
 use tokio::time::sleep;
-use tuwunel_core::{Err, Result, err, ruma::UserId};
-use tuwunel_service::Services;
+use tuwunel_core::{Err, Result, err, itertools::Itertools, ruma::UserId, utils::IterStream};
+use tuwunel_service::{Services, users::PASSWORD_SENTINEL};
 
 use self::{
 	appservice::{Bridge, register_appservice},
@@ -33,6 +35,7 @@ const PASSWORD: &str = "test-password";
 const WRONG_PASSWORD: &str = "not-the-test-password";
 const DEACTIVATED: &str = "M_USER_DEACTIVATED";
 const LIMITED: &str = "M_LIMIT_EXCEEDED";
+const LIMITED_MESSAGE: &str = "Too many password authentication attempts.";
 const UNKNOWN_TOKEN: &str = "M_UNKNOWN_TOKEN";
 const LOGIN_TOKEN: &str = "jwt-login-deactivated-login-token";
 const BRIDGE_TOKEN: &str = "jwt-login-deactivated-bridge-token";
@@ -49,6 +52,11 @@ const BRIDGE: Bridge<'static> = Bridge {
 
 const LASTING: Grant = Grant { lifetime: None, refreshable: false };
 
+/// A sign-in's status, errcode and message.
+///
+/// A limited answer's retry delay depends on timing, so it is left out.
+type Answer = (StatusCode, Value, Value);
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Grant {
 	/// How long the access token lasts, in milliseconds.
@@ -60,8 +68,12 @@ struct Grant {
 
 /// Login enforces account state, password limits and the JWT expiry option.
 ///
-/// Password, JWT, login-token and JWT UIAA authentication refuse deactivated
-/// accounts, while an appservice can still sign in its passwordless bot.
+/// JWT, login-token and JWT UIAA authentication refuse deactivated accounts,
+/// while an appservice can still sign in its passwordless bot. A refused
+/// password sign-in gets the same error and uses up the same allowance whatever
+/// account, if any, the name belongs to, and an account with no origin recorded
+/// still signs in.
+///
 /// Exhausting one address's failed-password allowance leaves another address
 /// and authenticated password re-entry usable, without trusting forged headers.
 /// A loopback peer has no address budget, while a non-loopback address shares
@@ -131,13 +143,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let limit = &services.config.rate_limiting.login.failed;
 	let burst = limit.burst_count;
 
-	for attempt in 0..=burst {
-		let (status, body) = password_login(services, base, &deactivated, PASSWORD).await?;
-		let context = format_args!("password attempt {attempt}");
-
-		expect_error(context, status, &body, StatusCode::FORBIDDEN, DEACTIVATED)?;
-	}
-
+	password_refusals_read_alike(services, base, &deactivated, burst).await?;
+	legacy_account_signs_in(services, base).await?;
 	correct_password_inside_the_burst(services, base, &owner, burst).await?;
 	wrong_passwords_are_limited(services, base, &guessed, burst).await
 }
@@ -211,6 +218,139 @@ async fn change_password_by_jwt(
 	send(request).await
 }
 
+/// A refused password sign-in gets the same error and uses up the same
+/// allowance whatever account, if any, the name belongs to.
+///
+/// That covers a wrong password, a deactivated account, the server user, an
+/// account a JWT login created, and one holding a real password under a
+/// provider's origin, given that password. The last two are also tried with
+/// a capitalized localpart. Each kind signs in from its own address, since a
+/// name in another case shares its account's bucket.
+async fn password_refusals_read_alike(
+	services: &Services,
+	base: &str,
+	deactivated: &UserId,
+	burst: u32,
+) -> Result {
+	let server_name = services.globals.server_name();
+	let user = |localpart| UserId::parse_with_server_name(localpart, server_name);
+	let (unknown, mistyped) = (user("nobody")?, user("mistyped")?);
+	let (created, provider) = (user("created")?, user("provider")?);
+
+	services
+		.users
+		.create(&mistyped, Some(PASSWORD), None)
+		.await?;
+
+	services
+		.users
+		.create(&created, Some(PASSWORD_SENTINEL), Some("jwt"))
+		.await?;
+
+	services
+		.users
+		.create(&provider, Some(PASSWORD), None)
+		.await?;
+
+	// No writer pairs a real password with a provider's origin now; an older database may.
+	services.db["userid_origin"].insert(&provider, "sso");
+
+	let kinds: [(&UserId, &str); 8] = [
+		(&unknown, WRONG_PASSWORD),
+		(&mistyped, WRONG_PASSWORD),
+		(deactivated, PASSWORD),
+		(&services.globals.server_user, PASSWORD),
+		(&created, PASSWORD),
+		(&user("Created")?, PASSWORD),
+		(&provider, PASSWORD),
+		(&user("Provider")?, PASSWORD),
+	];
+
+	let count = burst.saturating_add(1);
+	let answers = kinds
+		.into_iter()
+		.zip(16..)
+		.map(|((user_id, password), host)| attempts(base, host, user_id, password, count));
+
+	let answers: Vec<_> = join_all(answers)
+		.await
+		.into_iter()
+		.try_collect()?;
+
+	let refused = answer(StatusCode::FORBIDDEN, "M_FORBIDDEN", "Invalid username or password.");
+	let limited = answer(StatusCode::TOO_MANY_REQUESTS, LIMITED, LIMITED_MESSAGE);
+	let expected: Vec<_> = repeat_n(refused, burst.try_into()?)
+		.chain(once(limited))
+		.collect();
+
+	if !answers.iter().all_equal() {
+		return Err!("password refusals differ by account: {answers:#?}");
+	}
+
+	if answers.first() != Some(&expected) {
+		return Err!("expected {expected:#?} for every account, got {answers:#?}");
+	}
+
+	Ok(())
+}
+
+/// Signs in `count` times in turn from one loopback address, keeping each
+/// answer.
+///
+/// Each request finishes before the next starts, so the last one meets the
+/// allowance the earlier ones left.
+async fn attempts(
+	base: &str,
+	host: u8,
+	user_id: &UserId,
+	password: &str,
+	count: u32,
+) -> Result<Vec<Answer>> {
+	let client = loopback(host)?;
+	let body = password_body(user_id, password);
+	let url = format!("{base}/_matrix/client/v3/login");
+
+	(0..count)
+		.stream()
+		.then(async |_| send(client.post(&url).json(&body)).await)
+		.map_ok(|(status, body)| (status, body["errcode"].clone(), body["error"].clone()))
+		.try_collect()
+		.await
+}
+
+fn loopback(host: u8) -> Result<Client> {
+	let address = IpAddr::V4(Ipv4Addr::new(127, 0, 0, host));
+	let client = Client::builder()
+		.no_proxy()
+		.local_address(address)
+		.build()?;
+
+	Ok(client)
+}
+
+// The server prefixes an error's message with its code.
+fn answer(status: StatusCode, errcode: &str, message: &str) -> Answer {
+	(status, json!(errcode), json!(format!("{errcode}: {message}")))
+}
+
+/// An account with no origin recorded still signs in with its password.
+///
+/// Removing the origin row leaves the account as an older database holds it.
+async fn legacy_account_signs_in(services: &Services, base: &str) -> Result {
+	let legacy = UserId::parse_with_server_name("legacy", services.globals.server_name())?;
+
+	services
+		.users
+		.create(&legacy, Some(PASSWORD), None)
+		.await?;
+
+	services.db["userid_origin"].remove(&legacy);
+
+	let (status, body) = password_login(services, base, &legacy, PASSWORD).await?;
+
+	expect_signed_in("an account with no origin", status, &body)
+}
+
 async fn wrong_passwords_are_limited(
 	services: &Services,
 	base: &str,
@@ -251,11 +391,7 @@ async fn address_isolation(services: &Services, base: &str, user_id: &UserId) ->
 
 	expect_error("forged client address", status, &body, StatusCode::TOO_MANY_REQUESTS, LIMITED)?;
 
-	let client = Client::builder()
-		.no_proxy()
-		.local_address(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)))
-		.build()?;
-
+	let client = loopback(2)?;
 	let body = password_body(user_id, PASSWORD);
 	let request = client
 		.post(format!("{base}/_matrix/client/v3/login"))

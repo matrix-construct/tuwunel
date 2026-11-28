@@ -229,7 +229,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2229 | 🟨 ● | 0/20 | Allowing 3PID Owners to Rebind | [→ MSC2290] owner exemption at 3pid/add only; requestToken still rejects the ... |
 | MSC2209 | ✅ ● | 100/100 | Update auth rules to check notifications key in m.room.power_levels | limit_notifications_power_levels enforced for v6+ |
 | MSC2197 | ✅ ● | 100/100 | Search Filtering in Public Room Directory over Federation | POST /_matrix/federation/v1/publicRooms with filter implemented |
-| MSC2181 | ✅ ● | 100/100 | Add an Error Code for Signaling a Deactivated User | M_USER_DEACTIVATED returned by login paths |
+| MSC2181 | ✅ ● | 100/100 | Add an Error Code for Signaling a Deactivated User | M_USER_DEACTIVATED (403) on login paths that authenticate the account |
 | MSC2176 | ✅ ● | 100/100 | Update the redaction rules | redact_in_place uses room_version_rules.redaction |
 | MSC2175 | ✅ ● | 100/100 | Remove the `creator` field from `m.room.create` events | creator() falls back to sender when use_room_create_sender |
 | MSC2174 | ✅ ● | 100/100 | move the `redacts` property to `content` | src/core/matrix/event/redact.rs handles redacts move per room rules |

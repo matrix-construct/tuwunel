@@ -12,10 +12,15 @@ mod browser_session;
 #[path = "oidc_completion/session_selection.rs"]
 mod session_selection;
 
-use std::{iter::once, net::TcpListener, time::Duration};
+use std::{
+	iter::{once, repeat_n},
+	net::TcpListener,
+	time::Duration,
+};
 
 use futures::{
-	future::{join, try_join},
+	StreamExt, TryStreamExt,
+	future::{join, join_all, try_join},
 	pin_mut, poll,
 };
 use reqwest::{
@@ -27,8 +32,12 @@ use serde_json::{Value, from_value, json};
 use serde_urlencoded::from_str;
 use tokio::task::{JoinSet, consume_budget, coop::has_budget_remaining};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
-use tuwunel_core::{Config, Result, ruma::UserId};
-use tuwunel_service::{Services, oauth::server::AuthRequest, users::Register};
+use tuwunel_core::{Config, Result, itertools::Itertools, ruma::UserId, utils::IterStream};
+use tuwunel_service::{
+	Services,
+	oauth::server::AuthRequest,
+	users::{PASSWORD_SENTINEL, Register},
+};
 
 use self::{
 	browser_session::browser_session, client::wait_until_ready,
@@ -41,6 +50,9 @@ struct Case<'a> {
 	waived: bool,
 	automatic: bool,
 }
+
+/// The status and page of each attempt, in order.
+type Attempts = Vec<(StatusCode, String)>;
 
 const USERNAME: &str = "oidccompletion";
 const PASSWORD: &str = "oidc-completion-test-password";
@@ -136,6 +148,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.build()?;
 
 	check_password_limits(services, &client, base).await?;
+	check_refusals_alike(services, &client, base).await?;
+	check_historical_localpart(services, &client, base).await?;
 
 	check_provider_choices(services, &client, base).await?;
 	check_local_resubmission(services, &client, base).await?;
@@ -341,6 +355,124 @@ async fn matrix_password(
 		.send()
 		.await
 		.map_err(Into::into)
+}
+
+/// A refused password gets the same login page and uses up the same allowance
+/// whatever account, if any, the name belongs to.
+///
+/// Each kind posts from its own address, so each has its own allowance.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn check_refusals_alike(services: &Services, client: &Client, base: &str) -> Result {
+	let redirect = "https://trusted.example/refused";
+	let client_id = register_client(services, redirect).await?;
+	let req_id = new_native_request(client, base, &client_id, redirect).await?;
+	let server_name = services.globals.server_name();
+	let deactivated = UserId::parse_with_server_name("refused-deactivated", server_name)?;
+	let provider = UserId::parse_with_server_name("refused-provider", server_name)?;
+
+	services
+		.users
+		.create(&deactivated, Some(PASSWORD), None)
+		.await?;
+
+	services
+		.users
+		.deactivate_account(&deactivated)
+		.await?;
+
+	services
+		.users
+		.create(&provider, Some(PASSWORD_SENTINEL), Some("sso"))
+		.await?;
+
+	let kinds = [
+		("refused-nobody", "wrong-password", "127.0.0.20"),
+		(USERNAME, "wrong-password", "127.0.0.21"),
+		(deactivated.localpart(), PASSWORD, "127.0.0.22"),
+		(provider.localpart(), PASSWORD, "127.0.0.23"),
+	];
+
+	let limit = &services.config.rate_limiting.login.failed;
+	let burst = limit.burst_count;
+	let pages = kinds.map(|(username, password, source)| {
+		let fields =
+			[("oidc_req_id", req_id.as_str()), ("username", username), ("password", password)];
+
+		(0..=burst)
+			.stream()
+			.then(move |_| native_attempt(client, base, source, fields))
+			.try_collect()
+	});
+
+	let pages: Vec<Attempts> = join_all(pages).await.into_iter().try_collect()?;
+	let unknown = pages
+		.first()
+		.map(Vec::as_slice)
+		.unwrap_or_default();
+
+	let statuses = unknown.iter().map(|(status, _)| *status);
+	let expected = repeat_n(StatusCode::FORBIDDEN, burst.try_into()?)
+		.chain(once(StatusCode::TOO_MANY_REQUESTS));
+
+	assert!(pages.iter().all_equal(), "login page refusals differ by account: {pages:#?}");
+	assert!(statuses.eq(expected), "unexpected login page refusals: {unknown:#?}");
+	assert!(
+		unknown
+			.iter()
+			.filter(|(status, _)| *status == StatusCode::FORBIDDEN)
+			.all(|(_, page)| page.contains("Invalid username or password")),
+		"a refusal did not name the credentials"
+	);
+
+	Ok(())
+}
+
+/// A historical localpart starting with `@`, typed in another case, still signs
+/// in on the login page.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn check_historical_localpart(services: &Services, client: &Client, base: &str) -> Result {
+	let redirect = "https://trusted.example/historical";
+	let client_id = register_client(services, redirect).await?;
+	let req_id = new_native_request(client, base, &client_id, redirect).await?;
+	let server_name = services.globals.server_name();
+	let historical = UserId::parse(format!("@@historical:{server_name}"))?;
+
+	services
+		.users
+		.create(&historical, Some(PASSWORD), None)
+		.await?;
+
+	let typed = format!("@@Historical:{server_name}");
+	let fields = [
+		("oidc_req_id", req_id.as_str()),
+		("username", typed.as_str()),
+		("password", PASSWORD),
+	];
+
+	let response = post_form(client, base, "native", &fields).await?;
+
+	assert_eq!(response.status(), StatusCode::SEE_OTHER, "{typed} did not sign in");
+
+	Ok(())
+}
+
+async fn native_attempt(
+	client: &Client,
+	base: &str,
+	source: &str,
+	fields: [(&str, &str); 3],
+) -> Result<(StatusCode, String)> {
+	let response = client
+		.post(format!("{base}/_tuwunel/oidc/native"))
+		.header("x-real-ip", source)
+		.form(&fields)
+		.send()
+		.await?;
+
+	let status = response.status();
+	let page = response.text().await?;
+
+	Ok((status, page))
 }
 
 async fn concurrent_authorization_code_exchange_is_single_use(
