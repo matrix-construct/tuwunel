@@ -48,7 +48,7 @@ please refer to the section on [environment variables](#configuring-via-environm
 | `issuer_url` | brand default | Provider's OIDC issuer URL. Pre-supplied for well-known public providers. Required for self-hosted providers. Must match exactly what the provider expects and **must never change**. |
 | `base_path` | brand default | Extra path after `issuer_url` leading to the `.well-known` directory. GitHub uses `login/oauth/`, for example. Pre-populated for known brands. |
 | `discovery_url` | none | Fully overrides the `.well-known/openid-configuration` location. For developers or non-standard providers. |
-| `discovery` | `true` | Whether to perform OIDC discovery at all. |
+| `discovery` | `true` | Whether to perform OIDC discovery at all. When `false`, each endpoint comes from its URL override, or else from its default, which for most endpoints is a path under `issuer_url`. |
 
 ### Callback
 

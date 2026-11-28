@@ -20,6 +20,9 @@ pub struct Providers {
 /// Identity Provider ID
 pub type ProviderId = String;
 
+/// A provider's discovery document.
+type Discovery = JsonObject<String, JsonValue>;
+
 #[implement(Providers)]
 pub(super) fn build(args: &crate::Args<'_>) -> Self {
 	Self {
@@ -176,18 +179,10 @@ async fn configure(&self, mut provider: Provider) -> Result<Provider> {
 		provider.scope = ["openid".to_owned()].into();
 	}
 
-	let response = self
-		.discover(&provider)
-		.await
-		.and_then(|response| {
-			response.as_object().cloned().ok_or_else(|| {
-				err!(Request(NotJson("Expecting JSON object for discovery response")))
-			})
-		})
-		.and_then(|response| check_issuer(response, &provider))?;
+	let discovery = self.discovered(&provider).await?;
 
 	if provider.authorization_url.is_none() {
-		response
+		discovery
 			.get("authorization_endpoint")
 			.and_then(JsonValue::as_str)
 			.map(Url::parse)
@@ -197,7 +192,7 @@ async fn configure(&self, mut provider: Provider) -> Result<Provider> {
 	}
 
 	if provider.revocation_url.is_none() {
-		response
+		discovery
 			.get("revocation_endpoint")
 			.and_then(JsonValue::as_str)
 			.map(Url::parse)
@@ -207,7 +202,7 @@ async fn configure(&self, mut provider: Provider) -> Result<Provider> {
 	}
 
 	if provider.introspection_url.is_none() {
-		response
+		discovery
 			.get("introspection_endpoint")
 			.and_then(JsonValue::as_str)
 			.map(Url::parse)
@@ -217,7 +212,7 @@ async fn configure(&self, mut provider: Provider) -> Result<Provider> {
 	}
 
 	if provider.userinfo_url.is_none() {
-		response
+		discovery
 			.get("userinfo_endpoint")
 			.and_then(JsonValue::as_str)
 			.map(Url::parse)
@@ -230,7 +225,7 @@ async fn configure(&self, mut provider: Provider) -> Result<Provider> {
 	}
 
 	if provider.token_url.is_none() {
-		response
+		discovery
 			.get("token_endpoint")
 			.and_then(JsonValue::as_str)
 			.map(Url::parse)
@@ -256,6 +251,25 @@ async fn configure(&self, mut provider: Provider) -> Result<Provider> {
 	}
 
 	Ok(provider)
+}
+
+/// The discovery document a provider's endpoints are read from.
+///
+/// With discovery turned off this is empty, so every endpoint comes from its
+/// configured override or its default path under the issuer.
+#[implement(Providers)]
+async fn discovered(&self, provider: &Provider) -> Result<Discovery> {
+	if !provider.discovery {
+		return Ok(Discovery::new());
+	}
+
+	self.discover(provider)
+		.await
+		.and_then(|response| match response {
+			| JsonValue::Object(discovery) => Ok(discovery),
+			| _ => Err!(Request(NotJson("Expecting JSON object for discovery response"))),
+		})
+		.and_then(|discovery| check_issuer(discovery, provider))
 }
 
 /// Send a network request to a provider at the computed location of the
@@ -310,12 +324,9 @@ fn discovery_url(provider: &Provider) -> Result<Url> {
 
 /// Validate that the locally configured `issuer_url` matches the issuer claimed
 /// in any response. todo: cryptographic validation is not yet implemented here.
-fn check_issuer(
-	response: JsonObject<String, JsonValue>,
-	provider: &Provider,
-) -> Result<JsonObject<String, JsonValue>> {
+fn check_issuer(discovery: Discovery, provider: &Provider) -> Result<Discovery> {
 	let expected = configured_issuer(provider);
-	let responded = response
+	let responded = discovery
 		.get("issuer")
 		.and_then(JsonValue::as_str)
 		.map(trim_issuer);
@@ -326,7 +337,7 @@ fn check_issuer(
 		)));
 	}
 
-	Ok(response)
+	Ok(discovery)
 }
 
 /// The issuer a provider is configured with, its trailing slash trimmed for

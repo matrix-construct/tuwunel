@@ -1968,9 +1968,12 @@ pub struct IdentityProvider {
 	pub userinfo_url: Option<Url>,
 
 	/// Whether to perform discovery and adjust this provider's configuration
-	/// accordingly. This defaults to true. When true, it is an error when
-	/// discovery fails and authorizations will not be attempted to the
-	/// provider.
+	/// accordingly.
+	///
+	/// This defaults to true. When true, it is an error when discovery fails
+	/// and authorizations will not be attempted to the provider. When false,
+	/// each endpoint comes from its URL override above, or else from its
+	/// default, which for most endpoints is a path under `issuer_url`.
 	#[serde(default = "true_fn")]
 	pub discovery: bool,
 

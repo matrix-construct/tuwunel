@@ -54,6 +54,7 @@ struct Site<'a> {
 const CHECKED: &str = "checked-idp";
 const UNCHECKED: &str = "unchecked-idp";
 const APPLE: &str = "apple-idp";
+const MANUAL: &str = "manual-idp";
 const CALLBACK: &str = "_tuwunel/sso/callback";
 
 /// A provider's ID token has to answer the sign-in that asked for it.
@@ -63,7 +64,8 @@ const CALLBACK: &str = "_tuwunel/sso/callback";
 /// no JWT, or misses on any of those four claims, is refused and leaves no
 /// account, unless the provider has `check_id_token` turned off. The Apple
 /// brand, whose identity comes from the token itself, is held to the same
-/// checks.
+/// checks. A provider with discovery turned off signs in on its default
+/// endpoints, with no discovery document to fetch.
 #[test]
 fn sso_id_token() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -72,11 +74,13 @@ fn sso_id_token() -> Result {
 		provider(CHECKED, "checked", &issuer),
 		provider(UNCHECKED, "unchecked", &issuer),
 		provider(APPLE, "appleoidc", &format!("{issuer}/apple")),
+		provider(MANUAL, "manual", &format!("{issuer}/manual")),
 	]
 	.into_iter()
 	.flatten()
 	.chain([
 		flag(UNCHECKED, "check_id_token", false),
+		flag(MANUAL, "discovery", false),
 		"logging.enable=false".to_owned(),
 		"authentication.oidc.registration_allowed_redirect_hosts=[\"client.example\"]".to_owned(),
 	])
@@ -107,19 +111,26 @@ fn sso_id_token() -> Result {
 /// A callback's code is `mode.sub.nonce`. The token endpoint returns `sub` as
 /// the access token, which userinfo reports back, and an ID token for `sub`
 /// answering that nonce, in the shape `mode` names. The Apple mount has no
-/// userinfo endpoint. Serving stops only on failure.
+/// userinfo endpoint and the manual mount no discovery document. Serving stops
+/// only on failure.
 async fn serve_provider(listener: TcpListener, issuer: String) -> Result {
 	let apple = Router::new()
 		.route("/.well-known/openid-configuration", get(discover))
 		.route("/token", post(token))
 		.with_state(format!("{issuer}/apple"));
 
+	let manual = Router::new()
+		.route("/token", post(token))
+		.route("/userinfo", get(userinfo))
+		.with_state(format!("{issuer}/manual"));
+
 	let app = Router::new()
 		.route("/.well-known/openid-configuration", get(discover))
 		.route("/token", post(token))
 		.route("/userinfo", get(userinfo))
 		.with_state(issuer)
-		.nest("/apple", apple);
+		.nest("/apple", apple)
+		.nest("/manual", manual);
 
 	from_tcp(listener)?
 		.serve(app.into_make_service())
@@ -198,6 +209,7 @@ async fn exercise(site: Site<'_>) -> Result {
 	accepted(site, CHECKED, "absent", "tokenless").await?;
 	accepted(site, UNCHECKED, "opaque", "unchecked").await?;
 	accepted(site, APPLE, "valid", "apple").await?;
+	accepted(site, MANUAL, "valid", "manual").await?;
 	refused(site, CHECKED, "opaque").await?;
 	refused(site, CHECKED, "iss").await?;
 	refused(site, CHECKED, "aud").await?;
