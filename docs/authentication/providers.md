@@ -151,6 +151,7 @@ them for non-standard or undiscoverable providers.
 |---|---|---|
 | `grant_session_duration` | `300` | Seconds the authorization session stays valid before expiring (default: 5 minutes). |
 | `check_cookie` | `true` | Verify the redirect cookie during the callback for CSRF protection. Disable only if a reverse proxy strips cookies. |
+| `check_id_token` | `true` | Check the subject, issue time, issuer, audience, authorized party, expiry and nonce of the ID token the provider returns at sign-in. Disable only for a provider whose ID token does not conform. |
 
 
 ## Configuring via environment variables

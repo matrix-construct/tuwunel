@@ -1989,6 +1989,18 @@ pub struct IdentityProvider {
 	#[serde(default = "true_fn")]
 	pub check_cookie: bool,
 
+	/// Whether to check the ID token a provider returns at sign-in.
+	///
+	/// It must carry a subject and an issue time; its issuer, audience,
+	/// authorized party and expiry must match this provider; and its nonce must
+	/// match the sign-in that asked for it. Turn it off only for a provider
+	/// whose ID token does not conform, to keep its sign-ins working until the
+	/// provider is fixed.
+	///
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub check_id_token: bool,
+
 	/// Extra query parameters appended to every authorization request sent to
 	/// the identity provider.
 	///

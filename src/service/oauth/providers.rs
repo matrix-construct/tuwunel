@@ -314,16 +314,11 @@ fn check_issuer(
 	response: JsonObject<String, JsonValue>,
 	provider: &Provider,
 ) -> Result<JsonObject<String, JsonValue>> {
-	let expected = provider
-		.issuer_url
-		.as_ref()
-		.map(Url::as_str)
-		.map(|url| url.trim_end_matches('/'));
-
+	let expected = configured_issuer(provider);
 	let responded = response
 		.get("issuer")
 		.and_then(JsonValue::as_str)
-		.map(|url| url.trim_end_matches('/'));
+		.map(trim_issuer);
 
 	if expected != responded {
 		return Err!(Request(Unauthorized(
@@ -333,6 +328,22 @@ fn check_issuer(
 
 	Ok(response)
 }
+
+/// The issuer a provider is configured with, its trailing slash trimmed for
+/// comparison.
+pub(super) fn configured_issuer(provider: &Provider) -> Option<&str> {
+	provider
+		.issuer_url
+		.as_ref()
+		.map(Url::as_str)
+		.map(trim_issuer)
+}
+
+/// An issuer with its trailing slash removed.
+///
+/// `Url` adds one to an empty path and a provider may publish its issuer
+/// either way, so both sides of a comparison drop it.
+pub(super) fn trim_issuer(issuer: &str) -> &str { issuer.trim_end_matches('/') }
 
 /// Generate a full URL for a request to the idp based on the idp's derived
 /// configuration.

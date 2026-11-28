@@ -10,6 +10,14 @@ mod appservice;
 mod client;
 mod fixture;
 
+#[expect(
+	dead_code,
+	reason = "Minting by user serves the JWT login tests."
+)]
+mod jwt;
+
+mod sso;
+
 use std::{collections::HashMap, net::TcpListener, pin::pin, sync::Mutex, time::Duration};
 
 use axum::{
@@ -21,8 +29,8 @@ use axum::{
 use axum_server::from_tcp;
 use futures::{TryFutureExt, future::select};
 use reqwest::{
-	Client, Response, StatusCode, Url,
-	header::{AUTHORIZATION, COOKIE, LOCATION, SET_COOKIE},
+	Client, Response, StatusCode,
+	header::{AUTHORIZATION, LOCATION},
 	redirect::Policy,
 };
 use serde_json::{Value, json};
@@ -33,16 +41,14 @@ use tracing::{
 };
 use tracing_subscriber::fmt::{MakeWriter, fmt, format::FmtSpan};
 use tuwunel_core::{
-	Err, Result, err,
+	Err, Result,
 	result::NotFound,
-	ruma::{
-		OwnedUserId, UserId,
-		api::{
-			appservice::{Namespace, Namespaces, Registration, RegistrationInit},
-			client::uiaa::{AuthType, UiaaInfo},
-			error::ErrorKind,
-		},
+	ruma::api::{
+		appservice::{Namespace, Namespaces, Registration, RegistrationInit},
+		client::uiaa::{AuthType, UiaaInfo},
+		error::ErrorKind,
 	},
+	utils::time::now_secs,
 };
 use tuwunel_service::{
 	Services,
@@ -53,6 +59,8 @@ use self::{
 	admin::{accepted, refused},
 	appservice::{Bridge, register_appservice},
 	fixture::boot,
+	jwt::sign,
+	sso::{CLIENT, authorize, complete, exists, flag, provider, signed_in},
 };
 
 type TokenForm = HashMap<String, String>;
@@ -70,7 +78,6 @@ struct SignIn<'a> {
 const IDP: &str = "test-idp";
 const TRUSTED: &str = "trusted-idp";
 const STRICT: &str = "strict-idp";
-const CLIENT: &str = "https://client.example/callback";
 const LEGACY_CALLBACK: &str = "_matrix/client/unstable/login/sso/callback";
 const CALLBACK: &str = "_tuwunel/sso/callback";
 
@@ -94,34 +101,28 @@ static LOGS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 /// forbids, strict syntax rejects or another server owns.
 #[test]
 fn sso_fallback_account() -> Result {
-	let provider = TcpListener::bind(("127.0.0.1", 0))?;
-	let issuer = format!("http://{}", provider.local_addr()?);
-
-	let option =
-		|idp: &str, key: &str, value: &str| format!("identity_provider.{idp}.{key}=\"{value}\"");
-
-	let options = [
+	let listener = TcpListener::bind(("127.0.0.1", 0))?;
+	let issuer = format!("http://{}", listener.local_addr()?);
+	let options: Vec<_> = [
+		provider(IDP, "test", &issuer),
+		provider(TRUSTED, "trusted", &issuer),
+		provider(STRICT, "strict", &issuer),
+	]
+	.into_iter()
+	.flatten()
+	.chain([
+		flag(TRUSTED, "trusted", true),
+		flag(STRICT, "unique_id_fallbacks", false),
 		// The capture below is the global subscriber, in the server's place.
-		"logging.enable=false",
-		"authentication.oidc.registration_allowed_redirect_hosts=[\"client.example\"]",
-		&option(IDP, "client_id", IDP),
-		&option(IDP, "client_secret", "test-secret"),
-		&option(IDP, "brand", "test"),
-		&option(IDP, "issuer_url", &issuer),
-		&option(TRUSTED, "client_id", TRUSTED),
-		&option(TRUSTED, "client_secret", "test-secret"),
-		&option(TRUSTED, "brand", "trusted"),
-		&option(TRUSTED, "issuer_url", &issuer),
-		&format!("identity_provider.{TRUSTED}.trusted=true"),
-		&option(STRICT, "client_id", STRICT),
-		&option(STRICT, "client_secret", "test-secret"),
-		&option(STRICT, "brand", "strict"),
-		&option(STRICT, "issuer_url", &issuer),
-		&format!("identity_provider.{STRICT}.unique_id_fallbacks=false"),
-		"registration.forbidden_usernames=[\"^forbidden_\"]",
-	];
+		"logging.enable=false".to_owned(),
+		"authentication.oidc.registration_allowed_redirect_hosts=[\"client.example\"]".to_owned(),
+		"registration.forbidden_usernames=[\"^forbidden_\"]".to_owned(),
+	])
+	.collect();
 
-	provider.set_nonblocking(true)?;
+	let options = options.iter().map(String::as_str);
+
+	listener.set_nonblocking(true)?;
 
 	let capture = fmt()
 		.with_max_level(Level::TRACE)
@@ -138,7 +139,7 @@ fn sso_fallback_account() -> Result {
 			.timeout(Duration::from_secs(10))
 			.build()?;
 
-		let serve = serve_provider(provider, issuer);
+		let serve = serve_provider(listener, issuer);
 		let exercise = exercise(services, base, &client)
 			.and_then(|()| reauthenticate(services, base, &client))
 			.and_then(|()| reserved_usernames(services, base, &client))
@@ -153,11 +154,12 @@ fn sso_fallback_account() -> Result {
 
 /// Serve the identity provider endpoints until the test is done.
 ///
-/// A callback's code is `sub.username.mailbox`, which the token endpoint returns
-/// as the access token and userinfo splits into `sub`, `preferred_username` and
-/// the mailbox of an address at the mixed-case domain `Example.ORG`, sent with
-/// `email_verified` as the string `"true"`. So each callback names the identity
-/// it signs in as. Serving stops only on failure.
+/// A callback's code is `sub.username.mailbox.nonce`. The token endpoint returns
+/// it less the nonce as the access token, with an ID token for `sub` answering
+/// that nonce. Userinfo splits the access token into `sub`, `preferred_username`
+/// and the mailbox of an address at the mixed-case domain `Example.ORG`, sent
+/// with `email_verified` as the string `"true"`. So each callback names the
+/// identity it signs in as. Serving stops only on failure.
 async fn serve_provider(listener: TcpListener, issuer: String) -> Result {
 	let app = Router::new()
 		.route("/.well-known/openid-configuration", get(discover))
@@ -181,13 +183,29 @@ async fn discover(State(issuer): State<String>) -> Json<Value> {
 	}))
 }
 
-async fn token(Form(form): Form<TokenForm>) -> Json<Value> {
-	let code = &form["code"];
+async fn token(State(issuer): State<String>, Form(form): Form<TokenForm>) -> Json<Value> {
+	let (identity, nonce) = form["code"]
+		.rsplit_once('.')
+		.expect("identity and nonce");
+
+	let (sub, _) = identity
+		.split_once('.')
+		.expect("subject and claims");
+
+	let now = now_secs();
+	let claims = json!({
+		"iss": issuer,
+		"sub": sub,
+		"aud": form["client_id"],
+		"exp": now.saturating_add(300),
+		"iat": now,
+		"nonce": nonce,
+	});
 
 	Json(json!({
-		"access_token": code,
-		"refresh_token": format!("refresh.{code}"),
-		"id_token": format!("id.{code}"),
+		"access_token": identity,
+		"refresh_token": format!("refresh.{identity}"),
+		"id_token": sign("stand-in", &claims).expect("signed ID token"),
 		"token_type": "Bearer",
 	}))
 }
@@ -695,56 +713,19 @@ async fn sign_in_to(
 		mailbox,
 	}: SignIn<'_>,
 ) -> Result<Response> {
-	let url = format!("{base}/_matrix/client/v3/login/sso/redirect/{idp}");
-	let redirect = client
-		.get(url)
-		.query(&[("redirectUrl", destination)])
-		.send()
-		.await?;
+	let grant = authorize(client, base, idp, destination).await?;
+	let callback = format!("{base}/{callback}/{idp}");
+	let code = format!("{sub}.{username}.{mailbox}.{}", grant.nonce);
 
-	assert_eq!(redirect.status(), StatusCode::FOUND);
-
-	let state = parameter(&location(&redirect)?, "state");
-	let cookie = redirect.headers()[SET_COOKIE]
-		.to_str()
-		.expect("cookie header text")
-		.split(';')
-		.next()
-		.expect("cookie pair");
-
-	let url = format!("{base}/{callback}/{idp}");
-	let code = format!("{sub}.{username}.{mailbox}");
-
-	client
-		.get(url)
-		.query(&[("code", code.as_str()), ("state", &state)])
-		.header(COOKIE, cookie)
-		.send()
-		.await
-		.map_err(Into::into)
-}
-
-/// Resolve the account named by a finished sign-in's login token.
-///
-/// Fails when the callback redirected anywhere but the client.
-async fn signed_in(services: &Services, response: &Response) -> Result<OwnedUserId> {
-	let destination = location(response)?;
-
-	if !destination.as_str().starts_with(CLIENT) {
-		return Err!("sign-in finished at {destination} rather than the client");
-	}
-
-	services
-		.users
-		.find_from_login_token(&parameter(&destination, "loginToken"))
-		.await
+	complete(client, &callback, &grant, &code).await
 }
 
 /// Assert that a finished sign-in's nonces and tokens reached no log output.
 ///
-/// The stand-in's access token is the callback's code, whose encoded and decoded
-/// spellings match, so that entry covers the code in a URL as well. A release
-/// build compiles out the span showing the capture ran.
+/// The callback's code is the stand-in's access token followed by the nonce,
+/// and each of the two reads the same percent-encoded or not, so their entries
+/// also cover the code in a URL. A release build compiles out the span showing
+/// the capture ran.
 fn assert_unlogged(session: &Session) {
 	let logs = String::from_utf8_lossy(&LOGS.lock().expect("log capture")).into_owned();
 	let credentials = [
@@ -769,29 +750,4 @@ fn assert_unlogged(session: &Session) {
 
 		assert_eq!(leak, None, "{name} reached the log output");
 	}
-}
-
-async fn exists(services: &Services, localpart: &str) -> Result<bool> {
-	let user_id = UserId::parse_with_server_name(localpart, services.globals.server_name())?;
-
-	Ok(services.users.exists(&user_id).await)
-}
-
-fn location(response: &Response) -> Result<Url> {
-	response
-		.headers()
-		.get(LOCATION)
-		.ok_or_else(|| err!("{} response has no location", response.status()))?
-		.to_str()
-		.expect("location header text")
-		.parse()
-		.map_err(Into::into)
-}
-
-fn parameter(url: &Url, name: &str) -> String {
-	url.query_pairs()
-		.find(|(key, _)| key == name)
-		.expect("query parameter")
-		.1
-		.into_owned()
 }

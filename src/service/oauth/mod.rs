@@ -1,3 +1,4 @@
+mod id_token;
 pub mod providers;
 pub mod server;
 pub mod sessions;
@@ -32,12 +33,17 @@ use tuwunel_core::{
 		result::{LogErr, NotFound},
 		stream::{ReadyExt, TryReadyExt},
 		string::truncate_deterministic,
+		time::now,
 	},
 	warn,
 };
 use url::Url;
 
-use self::{providers::Providers, sessions::Sessions};
+use self::{
+	id_token::{Expected, check_claims},
+	providers::{Providers, configured_issuer},
+	sessions::Sessions,
+};
 pub use self::{
 	providers::{Provider, ProviderId},
 	server::Server,
@@ -394,7 +400,38 @@ pub async fn request_token(
 	self.request((Some(provider), Some(session)), Method::POST, url, Some(query))
 		.await
 		.and_then(|value| serde_json::from_value(value).map_err(Into::into))
+		.and_then(|response| check_id_token(provider, session, &response).map(|()| response))
 		.log_err()
+}
+
+/// Refuse a token response whose ID token is not this provider's answer to
+/// this sign-in.
+///
+/// A response without an ID token passes, as does any response from a provider
+/// with `check_id_token` turned off.
+fn check_id_token(provider: &Provider, session: &Session, response: &TokenResponse) -> Result {
+	let Some(id_token) = response
+		.id_token
+		.as_deref()
+		.filter(|_| provider.check_id_token)
+	else {
+		return Ok(());
+	};
+
+	let expected = Expected {
+		issuer: configured_issuer(provider),
+		client_id: &provider.client_id,
+		nonce: session.query_nonce.as_deref(),
+		now: now(),
+	};
+
+	check_claims(id_token, &expected).map_err(|claim| {
+		let id = provider.id();
+
+		err!(Request(Unauthorized(
+			"Provider {id:?} returned an ID token with an unacceptable {claim}."
+		)))
+	})
 }
 
 /// Send a request to a provider; this is somewhat abstract since URL's are
